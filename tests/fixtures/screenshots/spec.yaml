@@ -1,0 +1,140 @@
+# Vision golden fixtures — real frames captured from David's actual desktop
+# usage over ~4 minutes on 2026-04-05 while working on Blade & Rose theme
+# debugging, soccer carpool coordination, stock research, and housing
+# research. Baseline Flash-Lite descriptions are saved alongside each PNG
+# in `baseline_descriptions/<slug>.flash-lite.txt` for A/B comparison.
+#
+# Each case asserts substrings that any competent vision model should
+# surface for that frame — specific brands, people, filenames, URLs.
+# `must_not_contain` catches obvious hallucinations.
+#
+# Run objective regression:
+#   pytest tests/test_vision_fixtures.py -m vision -v
+#
+# Run multi-model A/B evaluation:
+#   ./venv/bin/python tools/vision_eval.py --models flash-lite,flash,pro
+
+cases:
+  # ----- Code / development frames -----
+  - file: shopify-chips-css-debug.png
+    description: Theme editor debugging product-chip CSS (br-design-collection file)
+    must_contain:
+      - "chip"
+    must_not_contain:
+      - "gmail"
+      - "zillow"
+    wiki_match: ship-new-blade-rose-theme
+
+  - file: shopify-liquid-editor.png
+    description: VS Code editing br-design-collection.liquid file
+    must_contain:
+      - "liquid"
+      - "blade"
+    must_not_contain:
+      - "python"
+    wiki_match: ship-new-blade-rose-theme
+
+  - file: workagent-debug-enrich-layer.png
+    description: Debugging workagent's QMD enrich layer / vector search
+    must_contain:
+      - "debug"
+    wiki_match: research-legacy-dc-desktop-monitor-application
+
+  - file: terminal-plus-browser-research.png
+    description: Terminal + browser researching "Lighthouse" domain names
+    must_contain:
+      - "domain"
+    must_not_contain:
+      - "gmail"
+
+  # ----- Messaging app frames (tests [SENT] marker + participant naming) -----
+  - file: imessage-carpool-sara-niedzialek.png
+    description: iMessage thread "Molly/Ruby Carpool" — Sara confirming 4:40 pickup
+    must_contain:
+      - "carpool"
+      - "sara"
+    wiki_match: sara-niedzialek
+
+  - file: signal-group-ludovic-ba-meet.png
+    description: Signal group — Ludovic + BA discussing Google Meet sync
+    must_contain:
+      - "signal"
+      - "meet"
+    must_not_contain:
+      - "slack"
+      - "whatsapp"
+
+  - file: slack-dm-amanda-jon-peffer.png
+    description: Slack DM with Amanda + Jon Peffer — Blade & Rose sales discussion
+    must_contain:
+      - "slack"
+      - "amanda"
+      - "blade"
+    must_not_contain:
+      - "signal"
+    wiki_match: amanda-peffer
+
+  - file: whatsapp-chat-list-nia.png
+    description: WhatsApp chat list, most recent from Nia about nail clippers
+    must_contain:
+      - "whatsapp"
+    must_not_contain:
+      - "slack"
+
+  - file: whatsapp-nie-outbound.png
+    description: WhatsApp convo with Nie including David's outbound "You shouldn't have paid"
+    must_contain:
+      - "whatsapp"
+      - "nie"
+    must_not_contain:
+      - "slack"
+
+  - file: superhuman-email-cullen-roche.png
+    description: Superhuman email thread with Cullen Roche, David's reply "give me a few weeks"
+    must_contain:
+      - "superhuman"
+      - "cullen"
+    must_not_contain:
+      - "gmail"
+      - "slack"
+
+  # ----- Browser frames (tests brand + URL recall) -----
+  - file: zillow-palo-alto-hale-st.png
+    description: Zillow listing — 465 Hale St, Palo Alto, $16M
+    must_contain:
+      - "hale st"
+    must_not_contain:
+      - "redfin"
+    wiki_match: palo-alto-relocation
+
+  - file: twitter-mike-alfred-profile.png
+    description: Twitter/X profile of Mike Alfred — value investor posts
+    must_contain:
+      - "twitter"
+    wiki_match: mike-alfred
+
+  - file: blade-rose-collection-page.png
+    description: Blade & Rose website collection page (Neutral Highland Cow)
+    must_contain:
+      - "blade"
+    must_not_contain:
+      - "amazon"
+    # Customer-facing browse — model describes the brand but doesn't
+    # reliably tag the project. The stricter wiki_match fires in the
+    # vision_eval harness (tools/vision_eval.py) with multi-sample voting.
+
+  # ----- Mixed / other app frames -----
+  - file: stock-app-rklb.png
+    description: Stock monitoring app showing Rocket Lab (RKLB)
+    must_contain:
+      - "rklb"
+    must_not_contain:
+      - "tsla"
+      - "aapl"
+
+  - file: granola-meeting-transcript.png
+    description: Granola meeting transcript visible (multi-pane — Zillow also shown)
+    must_contain:
+      - "transcript"
+    must_not_contain:
+      - "zoom"

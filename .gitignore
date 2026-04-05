@@ -1,0 +1,46 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+
+# Secrets & environment
+.env
+.env.*
+*.pem
+*.key
+*.p12
+secrets/
+
+# macOS / Swift build artifacts
+menubar/Lighthouse
+menubar/*.o
+menubar/*.dSYM/
+.DS_Store
+
+# Signed app bundle (rebuildable from source; committing breaks signatures)
+Lighthouse.app/
+
+# Legacy bundle name
+WorkAgent.app/
+
+# Real-usage test fixtures contain captured screenshots of the developer's
+# desktop (messaging DMs, emails, etc). Do NOT commit. Re-generate locally
+# by enabling config.vision_retention and running the monitor for a while,
+# then selecting 15 diverse frames into tests/fixtures/screenshots/.
+tests/fixtures/screenshots/*.png
+tests/fixtures/screenshots/baseline_descriptions/
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Temp / runtime outputs that only make sense on one machine
+logs/
+*.log
