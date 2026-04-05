@@ -211,6 +211,26 @@ def _check_user_profile() -> CheckResult:
 
 
 def _check_gemini_key() -> CheckResult:
+    """Verify the Gemini API key is resolvable from env or keychain."""
+    from lighthouse.secrets import get_api_key, api_key_source
+    key = get_api_key()
+    source = api_key_source()
+    if key:
+        return CheckResult(
+            name="gemini api key",
+            ok=True,
+            detail=f"{key[:8]}… (source: {source})",
+            fix="",
+        )
+    return CheckResult(
+        name="gemini api key",
+        ok=False,
+        detail="not configured (checked env vars and macOS keychain)",
+        fix="Run `lighthouse configure` to store the key in the macOS keychain, or export GEMINI_API_KEY in your shell.",
+    )
+
+
+def _OLD_check_gemini_key() -> CheckResult:
     """Gemini API key must be set as an environment variable."""
     key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
     if key:

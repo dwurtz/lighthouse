@@ -4,15 +4,17 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lighthouse"
-version = "0.1.0"
-description = "A personal agent that observes your world, matches signals to goals, and coordinates subagents"
+version = "0.2.0"
+description = "A personal AI agent that observes your digital life and maintains a living wiki about the people and projects that matter to you"
+readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "google-genai>=1.0.0",
-    "rumps>=0.4.0",
     "Pillow>=10.0",
     "imagehash>=4.3",
-    "flask>=3.0",
+    "fastapi>=0.100",
+    "uvicorn>=0.20",
+    "PyYAML>=6.0",
     "pyobjc-framework-Cocoa>=10.0",
 ]
 
@@ -21,6 +23,12 @@ lighthouse = "lighthouse.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+lighthouse = [
+    "default_assets/CLAUDE.md",
+    "default_assets/prompts/*.md",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

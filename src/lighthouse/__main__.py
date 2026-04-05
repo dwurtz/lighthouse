@@ -115,12 +115,23 @@ def _show_status() -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="lighthouse — David's personal agent")
+    parser = argparse.ArgumentParser(
+        description="Lighthouse — a personal AI agent that observes your digital life "
+                    "and maintains a living wiki about the people and projects that matter to you."
+    )
     sub = parser.add_subparsers(dest="command")
 
-    sub.add_parser("monitor", help="Run the headless signal/analysis loop")
+    sub.add_parser(
+        "configure",
+        help="Interactive first-run setup — store API key in keychain, create self-page",
+    )
+    sub.add_parser(
+        "health",
+        help="Run all startup checks and print current configuration state",
+    )
+    sub.add_parser("monitor", help="Run the headless observe/integrate/reflect loop")
     sub.add_parser("status", help="Print liveness summary")
-    web_p = sub.add_parser("web", help="Start the FastAPI backend for the notch app")
+    web_p = sub.add_parser("web", help="Start the FastAPI backend for the popover")
     web_p.add_argument("--port", type=int, default=5055)
     link_p = sub.add_parser(
         "linkify",
@@ -159,7 +170,11 @@ def main() -> None:
     _setup_logging()
     LIGHTHOUSE_HOME.mkdir(parents=True, exist_ok=True)
 
-    if command == "monitor":
+    if command == "configure":
+        _run_configure()
+    elif command == "health":
+        _run_health()
+    elif command == "monitor":
         _ensure_single_instance("monitor")
         asyncio.run(_run_monitor())
     elif command == "web":
@@ -175,6 +190,168 @@ def main() -> None:
     else:
         parser.print_help()
         sys.exit(1)
+
+
+def _run_configure() -> None:
+    """Interactive first-run setup.
+
+    Walks the user through the minimum setup needed to boot Lighthouse
+    from a fresh clone: API key, self-page, default prompts, health
+    check. Designed to be safe to re-run — detects existing config and
+    asks before overwriting.
+    """
+    import getpass
+    from lighthouse.config import LIGHTHOUSE_HOME, WIKI_DIR
+    from lighthouse.secrets import get_api_key, store_api_key, api_key_source
+
+    print("Lighthouse setup")
+    print("=" * 60)
+    print()
+
+    # --- 1. Gemini API key (stored in macOS Keychain) ---
+    print("[1/4] Gemini API key")
+    existing = get_api_key()
+    source = api_key_source()
+    if existing:
+        print(f"  already configured ({source})")
+        ans = input("  replace it? [y/N] ").strip().lower()
+        if ans != "y":
+            print("  keeping existing key")
+        else:
+            key = getpass.getpass("  new GEMINI_API_KEY: ").strip()
+            if key:
+                store_api_key(key)
+                print("  stored in macOS keychain (service=lighthouse)")
+            else:
+                print("  empty input, skipping")
+    else:
+        print("  get a free key at https://aistudio.google.com/app/apikey")
+        key = getpass.getpass("  GEMINI_API_KEY: ").strip()
+        if not key:
+            print("  no key entered — setup cannot continue")
+            sys.exit(1)
+        store_api_key(key)
+        print("  stored in macOS keychain (service=lighthouse)")
+    print()
+
+    # --- 2. Wiki layout + default prompts ---
+    print("[2/4] Wiki layout")
+    print(f"  wiki lives at: {WIKI_DIR}")
+    WIKI_DIR.mkdir(parents=True, exist_ok=True)
+    (WIKI_DIR / "people").mkdir(exist_ok=True)
+    (WIKI_DIR / "projects").mkdir(exist_ok=True)
+    (WIKI_DIR / "prompts").mkdir(exist_ok=True)
+
+    # Copy bundled default prompts + CLAUDE.md if missing
+    from pathlib import Path
+    repo_defaults = Path(__file__).parent / "default_assets"
+    if repo_defaults.is_dir():
+        for src in repo_defaults.glob("prompts/*.md"):
+            dst = WIKI_DIR / "prompts" / src.name
+            if not dst.exists():
+                dst.write_text(src.read_text())
+                print(f"  created prompts/{src.name}")
+        for fname in ("CLAUDE.md",):
+            src = repo_defaults / fname
+            dst = WIKI_DIR / fname
+            if src.exists() and not dst.exists():
+                dst.write_text(src.read_text())
+                print(f"  created {fname}")
+    else:
+        print(f"  (default assets not found at {repo_defaults} — skipping defaults)")
+
+    # Ensure the wiki is a git repo
+    try:
+        from lighthouse.wiki_git import ensure_repo
+        ensure_repo()
+        print("  wiki git repo ready")
+    except Exception as e:
+        print(f"  warning: git init skipped ({e})")
+    print()
+
+    # --- 3. Self-page (identity) ---
+    print("[3/4] Identity self-page")
+    from lighthouse.identity import load_user
+    user = load_user()
+    if not user.is_generic:
+        print(f"  already configured: {user.name} <{user.email}>")
+    else:
+        name = input("  full name (e.g. Jane Doe): ").strip()
+        if not name:
+            print("  skipping — run `lighthouse configure` again later to add")
+        else:
+            email = input("  email: ").strip()
+            first_default = name.split()[0] if name else ""
+            first = input(f"  preferred first name [{first_default}]: ").strip() or first_default
+            slug = _slugify(name)
+            self_path = WIKI_DIR / "people" / f"{slug}.md"
+            if self_path.exists():
+                print(f"  {self_path} already exists — not overwriting")
+            else:
+                frontmatter = ["---", "self: true"]
+                if email:
+                    frontmatter.append("emails:")
+                    frontmatter.append(f"  - {email}")
+                frontmatter.append(f"preferred_name: {first}")
+                frontmatter.append("---")
+                body = f"\n# {name}\n\nA short bio — role, current focus, key relationships. The agent reads this at the top of every prompt to know who it's working for.\n"
+                self_path.write_text("\n".join(frontmatter) + body)
+                print(f"  created {self_path.relative_to(WIKI_DIR.parent)}")
+    print()
+
+    # --- 4. Health check ---
+    print("[4/4] Health check")
+    _run_health(indent="  ")
+    print()
+    print("=" * 60)
+    print("Setup complete. Next steps:")
+    print()
+    print("  1. Grant macOS permissions in System Settings → Privacy & Security:")
+    print("     - Full Disk Access → Lighthouse.app + python3")
+    print("     - Screen & Audio Recording → Lighthouse.app")
+    print("     - Contacts → Lighthouse.app")
+    print("  2. Start the agent:")
+    print("     python -m lighthouse monitor           # headless CLI")
+    print("     open Lighthouse.app                     # menu-bar app (if built)")
+    print()
+
+
+def _run_health(indent: str = "") -> None:
+    """Print current config + all startup checks, then exit."""
+    from lighthouse.health_check import run_health_checks
+    from lighthouse.config import LIGHTHOUSE_HOME, WIKI_DIR, INTEGRATE_MODEL, VISION_MODEL, REFLECT_MODEL
+    from lighthouse.secrets import api_key_source
+
+    if not indent:
+        print("Lighthouse health check")
+        print("=" * 60)
+        print()
+        print(f"  LIGHTHOUSE_HOME  = {LIGHTHOUSE_HOME}")
+        print(f"  WIKI_DIR         = {WIKI_DIR}")
+        print(f"  INTEGRATE_MODEL  = {INTEGRATE_MODEL}")
+        print(f"  VISION_MODEL     = {VISION_MODEL}")
+        print(f"  REFLECT_MODEL    = {REFLECT_MODEL}")
+        print(f"  API key source   = {api_key_source()}")
+        print()
+
+    results = run_health_checks()
+    any_fail = False
+    for r in results:
+        icon = "✓" if r.ok else "✗"
+        print(f"{indent}{icon} {r.name}: {r.detail}")
+        if not r.ok:
+            any_fail = True
+            print(f"{indent}  fix: {r.fix}")
+    if not indent and any_fail:
+        print()
+        print("One or more checks failed. Address the fixes above, then re-run.")
+        sys.exit(1)
+
+
+def _slugify(name: str) -> str:
+    import re
+    s = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+    return s or "unnamed"
 
 
 async def _run_onboard(*, days: int, force: bool, only: str | None) -> None:

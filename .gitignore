@@ -44,3 +44,10 @@ tests/fixtures/screenshots/baseline_descriptions/
 # Temp / runtime outputs that only make sense on one machine
 logs/
 *.log
+
+# Icon build artifacts — intermediate files regenerable from menubar/icon/lighthouse.svg
+menubar/icon/Lighthouse.icns
+menubar/icon/Lighthouse.iconset/
+menubar/icon/app_icon.svg
+menubar/icon/lighthouse.png
+menubar/icon/lighthouse@2x.png

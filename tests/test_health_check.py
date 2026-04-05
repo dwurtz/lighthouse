@@ -86,16 +86,25 @@ def test_check_wiki_missing_prompt(isolated_home):
 def test_check_gemini_key_present(monkeypatch):
     monkeypatch.setenv("GEMINI_API_KEY", "fake-key-abcdef1234")
     monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    # Invalidate the process-level secrets cache so the env var is re-read
+    import lighthouse.secrets as sec
+    monkeypatch.setattr(sec, "_cache_valid", False)
     r = _check_gemini_key()
     assert r.ok is True
 
 
 def test_check_gemini_key_missing(monkeypatch):
+    """When neither env vars nor the keychain have the key, the check fails."""
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    # Invalidate cache AND stub the keychain read so this test doesn't
+    # depend on what's in the developer's actual login keychain.
+    import lighthouse.secrets as sec
+    monkeypatch.setattr(sec, "_cache_valid", False)
+    monkeypatch.setattr(sec, "_read_keychain", lambda *a, **kw: None)
     r = _check_gemini_key()
     assert r.ok is False
-    assert "GEMINI_API_KEY" in r.fix
+    assert "configure" in r.fix.lower() or "keychain" in r.fix.lower()
 
 
 def test_check_ffmpeg_returns_result():

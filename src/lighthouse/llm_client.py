@@ -1,7 +1,9 @@
-"""Gemini LLM client for the lighthouse.
+"""Gemini LLM client for Lighthouse.
 
 Uses the google-genai SDK for all LLM calls. All methods are async.
-Requires GEMINI_API_KEY or GOOGLE_API_KEY in the environment.
+The API key is resolved via ``lighthouse.secrets.get_api_key()`` which
+checks environment variables first (``GEMINI_API_KEY`` /
+``GOOGLE_API_KEY``) and falls back to the macOS login keychain.
 """
 
 from __future__ import annotations
@@ -48,10 +50,40 @@ def _parse_json(raw: str) -> Any:
     return json.loads(text)
 
 
+def _ensure_api_key_in_env() -> None:
+    """Populate os.environ['GEMINI_API_KEY'] from the keychain if not set.
+
+    The google-genai SDK reads the key from the environment at
+    ``genai.Client()`` construction time. When Lighthouse is launched
+    from the Swift menu-bar app (launchd-inherited environment), env
+    vars are NOT populated from the user's shell profile — so we have
+    to fetch the key from the keychain and set it explicitly before
+    the SDK initializes its client.
+
+    This runs ONCE at module import time and again at GeminiClient
+    construction as a safety net. ``secrets.get_api_key()`` is cached
+    so repeat calls don't spawn fresh ``security`` subprocesses.
+    """
+    import os
+    if os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"):
+        return
+    from lighthouse.secrets import get_api_key
+    key = get_api_key()
+    if key:
+        os.environ["GEMINI_API_KEY"] = key
+
+
+# Pre-populate at import time so any code that reads os.environ
+# directly (the google-genai SDK, tests, subprocess.Popen spawns) sees
+# the key before it's needed.
+_ensure_api_key_in_env()
+
+
 class GeminiClient:
     """Async wrapper around the google-genai SDK for all agent LLM operations."""
 
     def __init__(self) -> None:
+        _ensure_api_key_in_env()
         self.client = genai.Client()
 
     # ------------------------------------------------------------------
