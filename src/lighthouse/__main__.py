@@ -130,6 +130,10 @@ def main() -> None:
         help="Run all startup checks and print current configuration state",
     )
     sub.add_parser("monitor", help="Run the headless observe/integrate/reflect loop")
+    sub.add_parser(
+        "mcp",
+        help="Start the MCP server (stdio transport) — connects to Claude Desktop/Code",
+    )
     sub.add_parser("status", help="Print liveness summary")
     web_p = sub.add_parser("web", help="Start the FastAPI backend for the popover")
     web_p.add_argument("--port", type=int, default=5055)
@@ -174,6 +178,8 @@ def main() -> None:
         _run_configure()
     elif command == "health":
         _run_health()
+    elif command == "mcp":
+        _run_mcp()
     elif command == "monitor":
         _ensure_single_instance("monitor")
         asyncio.run(_run_monitor())
@@ -346,6 +352,12 @@ def _run_health(indent: str = "") -> None:
         print()
         print("One or more checks failed. Address the fixes above, then re-run.")
         sys.exit(1)
+
+
+def _run_mcp() -> None:
+    """Start the MCP server over stdio for Claude Desktop / Claude Code."""
+    from lighthouse.mcp_server import run_mcp_server
+    asyncio.run(run_mcp_server())
 
 
 def _slugify(name: str) -> str:

@@ -16,6 +16,7 @@ dependencies = [
     "uvicorn>=0.20",
     "PyYAML>=6.0",
     "pyobjc-framework-Cocoa>=10.0",
+    "mcp>=1.0",
 ]
 
 [project.scripts]
