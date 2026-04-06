@@ -98,7 +98,26 @@ def _most_recent_slot(now: datetime) -> datetime:
 _run_lock = asyncio.Lock()
 
 
-def _recent_signals_text(days: int = 7, max_chars: int = 6000) -> str:
+def _recent_signals_text(days: int = 7, max_chars: int = 500_000) -> str:
+    """Build the recent-observations block for the reflect prompt.
+
+    Pro 3.1 Preview has a 1M token context window. Reflect runs 3×/day,
+    not 288×/day like integrate — we can afford to fill it. The more
+    observations Pro sees, the more stale wiki pages it catches, the
+    more events it can cross-reference, and the better its morning
+    notes are.
+
+    Budget: 500KB / full text per observation (up to 2000 chars each) /
+    last 10,000 lines. At ~200 bytes per average observation line,
+    500KB ≈ 2,500 observations ≈ roughly a full day's stream. For a
+    7-day lookback window the tail-10K cap naturally keeps the most
+    recent ~3 days in full detail.
+
+    Previous budgets:
+      v1: 6KB / 200-char / 400 lines (Flash-Lite era)
+      v2: 60KB / 800-char / 2000 lines
+      v3: 500KB / 2000-char / 10000 lines (current — Pro 3.1 with 1M context)
+    """
     path = OBSERVATIONS_LOG
     if not path.exists():
         return "(no signals)"
@@ -116,14 +135,57 @@ def _recent_signals_text(days: int = 7, max_chars: int = 6000) -> str:
                 continue
             source = s.get("source", "?")
             sender = s.get("sender", "")
-            text = (s.get("text", "") or "")[:200]
+            text = (s.get("text", "") or "")[:2000]
             lines_out.append(f"[{ts[:19]}] [{source}] {sender}: {text}")
         except Exception:
             continue
-    out = "\n".join(lines_out[-400:])
+    out = "\n".join(lines_out[-10_000:])
     if len(out) > max_chars:
         out = out[-max_chars:]
     return out or "(no recent signals)"
+
+
+def _recent_events_text(days: int = 7) -> str:
+    """Read all event pages from the last N days and format for the reflect prompt.
+
+    Events are the timestamped, entity-linked records created by the
+    integrate cycle. Giving them to reflect lets Pro cross-reference
+    what actually happened against what the entity pages currently say
+    — catching wrong attributions, missing details, stale commitments,
+    and events that should have been linked but weren't.
+    """
+    events_dir = WIKI_DIR / "events"
+    if not events_dir.is_dir():
+        return "(no events yet)"
+
+    from datetime import date as _date
+    today = _date.today()
+    cutoff = today - timedelta(days=days)
+    entries: list[tuple[str, str]] = []  # (date_slug, content)
+
+    for day_dir in sorted(events_dir.iterdir()):
+        if not day_dir.is_dir():
+            continue
+        try:
+            dir_date = _date.fromisoformat(day_dir.name)
+        except ValueError:
+            continue
+        if dir_date < cutoff:
+            continue
+        for event_file in sorted(day_dir.glob("*.md")):
+            try:
+                content = event_file.read_text(encoding="utf-8", errors="replace")
+                entries.append((f"{day_dir.name}/{event_file.stem}", content.strip()))
+            except OSError:
+                continue
+
+    if not entries:
+        return "(no events in the last 7 days)"
+
+    lines = []
+    for slug, content in entries:
+        lines.append(f"### events/{slug}\n\n{content}")
+    return "\n\n---\n\n".join(lines)
 
 
 _NAME_RE = re.compile(r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2})\b")
@@ -391,6 +453,11 @@ async def _run_reflection_body() -> dict:
     wiki_text = wiki_store.render_for_prompt()
     signals_text = _recent_signals_text()
 
+    # Recent events — the timestamped event pages from the last 7 days.
+    # Reflect needs these to cross-reference what happened against entity
+    # pages and spot gaps, contradictions, and stale commitments.
+    events_text = _recent_events_text(days=7)
+
     from lighthouse.observations.contacts import get_contacts_summary
     contacts_text = get_contacts_summary()
 
@@ -410,12 +477,16 @@ async def _run_reflection_body() -> dict:
         contacts_text=contacts_text,
         schema=schema,
         wiki_text=wiki_text,
+        recent_events=events_text,
         recent_observations=signals_text,
         orphan_people=orphan_text,
         **user_fields,
     )
 
-    log.info("Reflection: running Pro with %d chars of context", len(prompt))
+    log.info(
+        "Reflection: running Pro with %d chars of context (wiki=%d, events=%d, obs=%d)",
+        len(prompt), len(wiki_text), len(events_text), len(signals_text),
+    )
 
     gemini = GeminiClient()
     # Let exceptions propagate to the wrapper — that's how the
@@ -426,7 +497,7 @@ async def _run_reflection_body() -> dict:
         contents=prompt,
         config=types.GenerateContentConfig(
             response_mime_type="application/json",
-            max_output_tokens=32000,
+            max_output_tokens=65536,
             temperature=0.3,
         ),
     )
