@@ -450,7 +450,7 @@ def linkify_wiki(wiki_dir: Path | None = None, *, dry_run: bool = False) -> Link
     # Collect ALL markdown files to process: category subdirs + root-level files
     # (goals.md, CLAUDE.md, reflection.md, etc.). Skip index.md and log.md
     # which are auto-generated / append-only and shouldn't be linkified.
-    _SKIP_ROOT = {"index.md", "log.md"}
+    _SKIP_ROOT = {"index.md", "log.md", "claude.md"}
     all_paths: list[Path] = []
 
     # Category subdirectories (people/, projects/, events/)
