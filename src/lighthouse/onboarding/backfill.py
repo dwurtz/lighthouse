@@ -40,6 +40,8 @@ ALL_STEPS: list[tuple[str, str]] = [
     ("sent_email_backfill", "30 days of sent Gmail threads"),
     ("imessage_backfill", "30 days of iMessage conversations"),
     ("whatsapp_backfill", "30 days of WhatsApp conversations"),
+    ("calendar_backfill", "30 days of calendar meetings + Granola notes"),
+    ("meet_transcript_backfill", "30 days of Google Meet transcripts"),
 ]
 
 
@@ -222,10 +224,79 @@ async def backfill_whatsapp(
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Step: Calendar backfill (with Granola enrichment)
+# ---------------------------------------------------------------------------
+
+
+async def backfill_calendar(
+    *,
+    days: int = 30,
+    wiki_lock: asyncio.Lock | None = None,
+    gemini: Any = None,
+    force: bool = False,
+    on_progress: Any = None,
+) -> dict[str, Any]:
+    """Ingest past calendar meetings, enriched with Granola notes.
+
+    Google Calendar is the source of truth for "what meetings happened."
+    Granola is the enrichment layer that attaches notes/transcripts to
+    matching events. The join happens inside ``enrich_calendar_observations``
+    which matches by date + attendee email overlap. Unmatched Granola
+    docs (meetings not on this user's calendar) are emitted as standalone
+    observations so nothing is lost.
+    """
+    from lighthouse.observations.calendar import fetch_calendar_backfill
+    from lighthouse.observations.granola import enrich_calendar_observations
+    from lighthouse.onboarding.runner import run_step
+
+    def _fetch() -> list:
+        cal_obs = fetch_calendar_backfill(days=days)
+        return enrich_calendar_observations(cal_obs, days=days)
+
+    return await run_step(
+        name="calendar_backfill",
+        fetch_fn=_fetch,
+        wiki_lock=wiki_lock,
+        gemini=gemini,
+        force=force,
+        on_progress=on_progress,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Step: Google Meet transcript backfill
+# ---------------------------------------------------------------------------
+
+
+async def backfill_meet_transcripts(
+    *,
+    days: int = 30,
+    wiki_lock: asyncio.Lock | None = None,
+    gemini: Any = None,
+    force: bool = False,
+    on_progress: Any = None,
+) -> dict[str, Any]:
+    """Ingest Google Meet transcripts from the last ``days`` days."""
+    from lighthouse.observations.meet import fetch_meet_transcripts_backfill
+    from lighthouse.onboarding.runner import run_step
+
+    return await run_step(
+        name="meet_transcript_backfill",
+        fetch_fn=lambda: fetch_meet_transcripts_backfill(days=days),
+        wiki_lock=wiki_lock,
+        gemini=gemini,
+        force=force,
+        on_progress=on_progress,
+    )
+
+
 STEP_DISPATCH: dict[str, Any] = {
     "sent_email_backfill": backfill_sent_email,
     "imessage_backfill": backfill_imessage,
     "whatsapp_backfill": backfill_whatsapp,
+    "calendar_backfill": backfill_calendar,
+    "meet_transcript_backfill": backfill_meet_transcripts,
 }
 
 
@@ -262,6 +333,12 @@ async def run_all_pending_steps(
         "imessage_backfill": "imessage_backfill",
         "whatsapp": "whatsapp_backfill",
         "whatsapp_backfill": "whatsapp_backfill",
+        "calendar": "calendar_backfill",
+        "calendar_backfill": "calendar_backfill",
+        "granola": "calendar_backfill",
+        "meet": "meet_transcript_backfill",
+        "meet_transcript": "meet_transcript_backfill",
+        "meet_transcript_backfill": "meet_transcript_backfill",
     }
     only_step: str | None = None
     if only is not None:

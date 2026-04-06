@@ -1,0 +1,1042 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Context Engine — Your life, organized by AI</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,300;0,400;0,500;1,400&family=Instrument+Serif:ital@0;1&family=Manrope:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+
+:root {
+  --bg: #06060b;
+  --bg-elevated: #0c0c14;
+  --bg-card: #0f0f1a;
+  --border: #1a1a2e;
+  --border-bright: #2a2a4a;
+  --text: #e8e6f0;
+  --text-dim: #6b6880;
+  --text-muted: #3d3a50;
+  --accent: #c4f04d;
+  --accent-dim: #8ab030;
+  --accent-glow: rgba(196, 240, 77, 0.08);
+  --red: #ff4d4d;
+  --blue: #4d9fff;
+
+  --font-display: 'Instrument Serif', Georgia, serif;
+  --font-body: 'Manrope', system-ui, sans-serif;
+  --font-mono: 'DM Mono', 'SF Mono', monospace;
+
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+html { scroll-behavior: smooth; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-body);
+  font-size: 16px;
+  line-height: 1.6;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Noise overlay */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");
+  background-size: 256px;
+  pointer-events: none;
+  z-index: 9999;
+}
+
+/* Grid background */
+.grid-bg {
+  position: fixed;
+  inset: 0;
+  background-image:
+    linear-gradient(var(--border) 1px, transparent 1px),
+    linear-gradient(90deg, var(--border) 1px, transparent 1px);
+  background-size: 80px 80px;
+  opacity: 0.15;
+  pointer-events: none;
+  z-index: 0;
+  mask-image: radial-gradient(ellipse 80% 60% at 50% 30%, black 20%, transparent 70%);
+}
+
+/* ─── Layout ─── */
+.container {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 0 24px;
+  position: relative;
+  z-index: 1;
+}
+
+section {
+  padding: 120px 0;
+}
+
+/* ─── Reveal animation ─── */
+.reveal {
+  opacity: 0;
+  transform: translateY(32px);
+  transition: opacity 0.9s var(--ease), transform 0.9s var(--ease);
+}
+.reveal.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* ─── Navigation ─── */
+nav {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  padding: 20px 0;
+  background: linear-gradient(var(--bg), transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.nav-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-decoration: none;
+  color: var(--text);
+}
+
+.logo-arcs {
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+}
+
+.logo-arcs path {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2.5;
+  stroke-linecap: round;
+}
+
+.logo-text {
+  font-family: var(--font-body);
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: -0.02em;
+}
+
+.nav-links {
+  display: flex;
+  gap: 32px;
+  list-style: none;
+}
+
+.nav-links a {
+  color: var(--text-dim);
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  transition: color 0.3s;
+}
+
+.nav-links a:hover { color: var(--text); }
+
+/* ─── Hero ─── */
+.hero {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding-top: 80px;
+  position: relative;
+}
+
+.hero-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  background: var(--accent-glow);
+  border: 1px solid rgba(196, 240, 77, 0.15);
+  border-radius: 100px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--accent);
+  margin-bottom: 40px;
+  width: fit-content;
+}
+
+.hero-badge::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  background: var(--accent);
+  border-radius: 50%;
+  animation: pulse 2s ease infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+.hero h1 {
+  font-family: var(--font-display);
+  font-size: clamp(48px, 7vw, 88px);
+  line-height: 1.0;
+  letter-spacing: -0.03em;
+  font-weight: 400;
+  max-width: 900px;
+  margin-bottom: 32px;
+}
+
+.hero h1 em {
+  font-style: italic;
+  color: var(--accent);
+}
+
+.hero-sub {
+  font-size: 18px;
+  color: var(--text-dim);
+  max-width: 520px;
+  line-height: 1.7;
+  margin-bottom: 48px;
+  font-weight: 300;
+}
+
+.hero-cta {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 28px;
+  background: var(--accent);
+  color: var(--bg);
+  text-decoration: none;
+  font-weight: 700;
+  font-size: 14px;
+  border-radius: 8px;
+  border: none;
+  cursor: pointer;
+  transition: transform 0.2s, box-shadow 0.3s;
+  letter-spacing: -0.01em;
+}
+
+.btn-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 32px rgba(196, 240, 77, 0.25);
+}
+
+.btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 28px;
+  background: transparent;
+  color: var(--text-dim);
+  text-decoration: none;
+  font-weight: 500;
+  font-size: 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border-bright);
+  transition: border-color 0.3s, color 0.3s;
+}
+
+.btn-secondary:hover {
+  border-color: var(--text-dim);
+  color: var(--text);
+}
+
+/* ─── Problem ─── */
+.problem {
+  border-top: 1px solid var(--border);
+}
+
+.problem-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 80px;
+  align-items: center;
+}
+
+.problem-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  color: var(--red);
+  margin-bottom: 20px;
+}
+
+.problem h2 {
+  font-family: var(--font-display);
+  font-size: 44px;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+  font-weight: 400;
+  margin-bottom: 24px;
+}
+
+.problem p {
+  color: var(--text-dim);
+  font-size: 16px;
+  line-height: 1.8;
+}
+
+.terminal-mock {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+
+.terminal-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.terminal-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--border-bright);
+}
+
+.terminal-body {
+  padding: 20px;
+  line-height: 1.9;
+  color: var(--text-dim);
+}
+
+.terminal-body .prompt { color: var(--accent); }
+.terminal-body .comment { color: var(--text-muted); }
+.terminal-body .string { color: #e8a4ff; }
+.terminal-body .key { color: var(--blue); }
+
+/* ─── Features ─── */
+.features {
+  border-top: 1px solid var(--border);
+}
+
+.features-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  color: var(--accent);
+  margin-bottom: 20px;
+}
+
+.features h2 {
+  font-family: var(--font-display);
+  font-size: 44px;
+  line-height: 1.1;
+  font-weight: 400;
+  margin-bottom: 64px;
+  max-width: 500px;
+}
+
+.feature-cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1px;
+  background: var(--border);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  overflow: hidden;
+}
+
+.feature-card {
+  background: var(--bg-card);
+  padding: 40px 32px;
+  transition: background 0.4s;
+}
+
+.feature-card:hover {
+  background: var(--bg-elevated);
+}
+
+.feature-fn {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  color: var(--accent);
+  margin-bottom: 16px;
+  padding: 6px 12px;
+  background: rgba(196, 240, 77, 0.06);
+  border-radius: 6px;
+  display: inline-block;
+}
+
+.feature-card h3 {
+  font-family: var(--font-body);
+  font-size: 18px;
+  font-weight: 600;
+  margin-bottom: 12px;
+  letter-spacing: -0.01em;
+}
+
+.feature-card p {
+  color: var(--text-dim);
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+/* ─── How it works ─── */
+.how {
+  border-top: 1px solid var(--border);
+}
+
+.how-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  color: var(--accent);
+  margin-bottom: 20px;
+}
+
+.how h2 {
+  font-family: var(--font-display);
+  font-size: 44px;
+  line-height: 1.1;
+  font-weight: 400;
+  margin-bottom: 64px;
+}
+
+.pipeline {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  position: relative;
+}
+
+.pipeline::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, var(--border), var(--accent-dim), var(--border));
+  z-index: 0;
+}
+
+.pipe-step {
+  flex: 1;
+  text-align: center;
+  position: relative;
+  z-index: 1;
+  padding: 0 12px;
+}
+
+.pipe-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: var(--bg-card);
+  border: 1px solid var(--border-bright);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 16px;
+  font-size: 20px;
+  transition: border-color 0.3s, box-shadow 0.3s;
+}
+
+.pipe-step:hover .pipe-icon {
+  border-color: var(--accent);
+  box-shadow: 0 0 24px var(--accent-glow);
+}
+
+.pipe-step h4 {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.05em;
+  margin-bottom: 8px;
+  color: var(--text);
+}
+
+.pipe-step p {
+  font-size: 13px;
+  color: var(--text-dim);
+  line-height: 1.5;
+}
+
+/* ─── Install ─── */
+.install {
+  border-top: 1px solid var(--border);
+  text-align: center;
+}
+
+.install h2 {
+  font-family: var(--font-display);
+  font-size: 56px;
+  line-height: 1.0;
+  font-weight: 400;
+  margin-bottom: 20px;
+}
+
+.install h2 em {
+  font-style: italic;
+  color: var(--accent);
+}
+
+.install > .container > p {
+  color: var(--text-dim);
+  font-size: 17px;
+  margin-bottom: 48px;
+  max-width: 500px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.install-code {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 32px 40px;
+  font-family: var(--font-mono);
+  font-size: 15px;
+  text-align: left;
+  max-width: 640px;
+  margin: 0 auto 48px;
+  line-height: 2.0;
+  color: var(--text-dim);
+  position: relative;
+  overflow: hidden;
+}
+
+.install-code .prompt { color: var(--accent); }
+.install-code .comment { color: var(--text-muted); }
+
+.install-code::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+}
+
+/* ─── Response demo ─── */
+.response-demo {
+  border-top: 1px solid var(--border);
+}
+
+.response-demo-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  color: var(--accent);
+  margin-bottom: 20px;
+}
+
+.response-demo h2 {
+  font-family: var(--font-display);
+  font-size: 44px;
+  line-height: 1.1;
+  font-weight: 400;
+  margin-bottom: 16px;
+}
+
+.response-demo > .container > p {
+  color: var(--text-dim);
+  margin-bottom: 48px;
+  max-width: 600px;
+}
+
+.response-block {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.response-header {
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-dim);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.response-header .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.response-body {
+  padding: 24px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.8;
+  color: var(--text-dim);
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.response-body .section-head {
+  color: var(--text);
+  font-weight: 500;
+  margin-top: 16px;
+}
+
+.response-body .section-head:first-child { margin-top: 0; }
+
+.response-body .wiki-link { color: var(--blue); }
+.response-body .observation-ts { color: var(--accent-dim); }
+.response-body .key { color: var(--accent); }
+
+/* ─── Works with ─── */
+.works-with {
+  border-top: 1px solid var(--border);
+  text-align: center;
+}
+
+.works-with-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  color: var(--text-muted);
+  margin-bottom: 12px;
+}
+
+.works-with h2 {
+  font-family: var(--font-display);
+  font-size: 36px;
+  line-height: 1.1;
+  font-weight: 400;
+  margin-bottom: 16px;
+}
+
+.works-with > .container > p {
+  color: var(--text-dim);
+  font-size: 15px;
+  margin-bottom: 48px;
+  max-width: 480px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.logo-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 48px;
+  flex-wrap: wrap;
+  margin-bottom: 48px;
+}
+
+.logo-bar-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-dim);
+  font-family: var(--font-body);
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  transition: color 0.3s;
+  text-decoration: none;
+}
+
+.logo-bar-item:hover { color: var(--text); }
+
+.logo-bar-item svg {
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+}
+
+.logo-bar-item .logo-dot {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.works-with-note {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-muted);
+  padding: 12px 20px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: inline-block;
+}
+
+/* ─── Footer ─── */
+footer {
+  border-top: 1px solid var(--border);
+  padding: 48px 0;
+}
+
+.footer-inner {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.footer-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.footer-text {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+footer a {
+  color: var(--text-dim);
+  text-decoration: none;
+  font-size: 13px;
+  transition: color 0.3s;
+}
+
+footer a:hover { color: var(--accent); }
+
+/* ─── Responsive ─── */
+@media (max-width: 768px) {
+  section { padding: 80px 0; }
+  .hero h1 { font-size: 40px; }
+  .problem-grid { grid-template-columns: 1fr; gap: 48px; }
+  .feature-cards { grid-template-columns: 1fr; }
+  .pipeline { flex-direction: column; gap: 32px; }
+  .pipeline::before { display: none; }
+  .nav-links { display: none; }
+  .install h2 { font-size: 36px; }
+  .install-code { padding: 20px; font-size: 13px; }
+  .logo-bar { gap: 24px; }
+  .logo-bar-item { font-size: 13px; }
+}
+</style>
+</head>
+<body>
+
+<div class="grid-bg"></div>
+
+<!-- Nav -->
+<nav>
+  <div class="container nav-inner">
+    <a href="#" class="logo">
+      <svg class="logo-arcs" viewBox="0 0 28 28">
+        <path d="M16 3 A11 11 0 0 0 16 25" />
+        <path d="M16 7.5 A6.5 6.5 0 0 0 16 20.5" />
+        <path d="M16 11.5 A2.5 2.5 0 0 0 16 16.5" />
+        <path d="M13 11 L9 14 L13 17" />
+      </svg>
+      <span class="logo-text">Context Engine</span>
+    </a>
+    <ul class="nav-links">
+      <li><a href="#features">Features</a></li>
+      <li><a href="#how">How it works</a></li>
+      <li><a href="#install">Install</a></li>
+      <li><a href="https://github.com/dwurtz/lighthouse">GitHub ↗</a></li>
+    </ul>
+  </div>
+</nav>
+
+<!-- Hero -->
+<section class="hero">
+  <div class="container">
+    <div class="hero-badge reveal">Open Source · macOS · Runs Locally</div>
+    <h1 class="reveal" style="transition-delay: 0.1s">A personal AI that actually <em>knows&nbsp;you</em></h1>
+    <p class="hero-sub reveal" style="transition-delay: 0.2s">Context Engine watches your digital life — email, messages, meetings, calendar — and builds a living wiki of everyone you know and everything you're working on. Installs as an MCP server on Claude, Cursor, Windsurf, and more.</p>
+    <div class="hero-cta reveal" style="transition-delay: 0.3s">
+      <a href="#install" class="btn-primary">Install in 60 seconds →</a>
+      <a href="https://github.com/dwurtz/lighthouse" class="btn-secondary">View on GitHub</a>
+    </div>
+  </div>
+</section>
+
+<!-- Problem -->
+<section class="problem">
+  <div class="container">
+    <div class="problem-grid">
+      <div class="reveal">
+        <div class="problem-label">the problem</div>
+        <h2>Your context is scattered across ten&nbsp;apps</h2>
+        <p>Who you talked to last week. What you committed to in that email. The meeting notes you never wrote up. The project that quietly stalled. It's all there — spread across Gmail, iMessage, WhatsApp, Granola, Google Calendar, and a dozen browser tabs. Context Engine watches all of it and writes the summary you'd never get around to writing yourself.</p>
+      </div>
+      <div class="terminal-mock reveal" style="transition-delay: 0.15s">
+        <div class="terminal-bar">
+          <div class="terminal-dot"></div>
+          <div class="terminal-dot"></div>
+          <div class="terminal-dot"></div>
+        </div>
+        <div class="terminal-body">
+          <div><span class="comment">// What Context Engine writes while you work:</span></div>
+          <br>
+          <div><span class="key">people/</span><span class="string">amanda-peffer</span>.md</div>
+          <div>Amanda works at Blade & Rose. She shared a</div>
+          <div>screenshot of sales data in Slack yesterday</div>
+          <div>and asked about the revenue-impacting change.</div>
+          <br>
+          <div><span class="key">projects/</span><span class="string">palo-alto-relocation</span>.md</div>
+          <div>David starts at Google April 20. Dominique</div>
+          <div>found an Atherton rental at $16k/mo. Temporary</div>
+          <div>housing still undecided (Google vs. Airbnb).</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Features -->
+<section class="features" id="features">
+  <div class="container">
+    <div class="features-label reveal">what it does</div>
+    <h2 class="reveal">Your life, continuously&nbsp;organized</h2>
+    <div class="feature-cards reveal" style="transition-delay: 0.1s">
+      <div class="feature-card">
+        <div class="feature-fn">personal wiki</div>
+        <h3>People and projects, always current</h3>
+        <p>A page for every person who matters and every project you're managing. Updated automatically from your signals. Browse in Obsidian, search from the command line, or let your AI read it.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-fn">ambient observation</div>
+        <h3>It watches so you don't have to</h3>
+        <p>Email threads, iMessage and WhatsApp conversations, Google Meet transcripts, Granola meeting notes, calendar events, browser activity, screenshots. All collected silently, processed locally.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-fn">meeting intelligence</div>
+        <h3>Meetings become wiki pages</h3>
+        <p>Calendar is the source of truth for what happened. Granola and Meet attach the notes. Every meeting automatically updates the right people and project pages — even ones with no notes taken.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-fn">contact enrichment</div>
+        <h3>Phone, email, company — filled in</h3>
+        <p>Cross-references macOS Contacts, Gmail headers, and message handles to populate every person's page with real contact info. No manual data entry.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-fn">onboarding</div>
+        <h3>30 days of context on first run</h3>
+        <p>Don't start from an empty wiki. On first launch, Context Engine ingests your last month of sent email, messages, meetings, and notes — and builds a complete picture of your life in minutes.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-fn">MCP + Obsidian</div>
+        <h3>Supercharges your existing AI</h3>
+        <p>Installs as an MCP server on Claude, Cursor, Windsurf, and any MCP-compatible client. One tool call gives your AI full personal context. Also works as a plain Obsidian vault you can browse and edit&nbsp;yourself.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- How it works -->
+<section class="how" id="how">
+  <div class="container">
+    <div class="how-label reveal">architecture</div>
+    <h2 class="reveal">Observe. Integrate. Reflect.</h2>
+    <div class="pipeline reveal" style="transition-delay: 0.1s">
+      <div class="pipe-step">
+        <div class="pipe-icon">👁</div>
+        <h4>Observe</h4>
+        <p>Gmail, Calendar, iMessage, WhatsApp, Granola, Meet transcripts, Chrome, screenshots, clipboard</p>
+      </div>
+      <div class="pipe-step">
+        <div class="pipe-icon">⚡</div>
+        <h4>Integrate</h4>
+        <p>Every few minutes, new observations are analyzed and merged into the wiki — updating people pages, enriching projects, and linking entities as your day&nbsp;unfolds.</p>
+      </div>
+      <div class="pipe-step">
+        <div class="pipe-icon">🔮</div>
+        <h4>Reflect</h4>
+        <p>Three times a day, a deeper pass reads the whole wiki, cleans up stale facts, enriches contacts, links entities, and writes notes about what stands&nbsp;out.</p>
+      </div>
+      <div class="pipe-step">
+        <div class="pipe-icon" style="border-color: var(--accent);">
+          <svg width="20" height="20" viewBox="0 0 28 28"><path d="M14 4 A10 10 0 0 0 14 24" fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-linecap="round"/><path d="M14 8 A6 6 0 0 0 14 20" fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-linecap="round"/></svg>
+        </div>
+        <h4>Serve</h4>
+        <p>Browse your wiki in Obsidian. Query it via MCP from Claude or any AI. Search it from the command line. It's plain markdown files — yours&nbsp;forever.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Response demo -->
+<section class="response-demo">
+  <div class="container">
+    <div class="response-demo-label reveal">what it builds</div>
+    <h2 class="reveal">A wiki that writes itself</h2>
+    <p class="reveal">Every person page, project page, and relationship link is created and maintained automatically from your real activity:</p>
+    <div class="response-block reveal" style="transition-delay: 0.1s">
+      <div class="response-header"><span class="dot"></span> ~/Lighthouse/people/amanda-peffer.md</div>
+      <div class="response-body">
+<span class="section-head">---</span>
+<span class="key">emails</span>: [amanda@bladeandrose.co.uk]
+<span class="key">keywords</span>: [shopify, e-commerce, blade-and-rose]
+<span class="section-head">---</span>
+
+<span class="section-head"># Amanda Peffer</span>
+
+Amanda works at Blade & Rose (bladeandrose.co.uk)
+and is David's primary stakeholder on the
+<span class="wiki-link">[[ship-new-blade-rose-theme]]</span> project.
+Her husband <span class="wiki-link">[[jon-peffer]]</span> is part of the
+same Slack DM thread. Recently, Amanda shared a
+screenshot of product sales data and asked about the
+business logic behind a revenue-impacting theme change.
+
+<span class="section-head"># Related</span>
+
+<span class="wiki-link">[[jon-peffer]]</span> · <span class="wiki-link">[[tom-thurlow]]</span> · <span class="wiki-link">[[ship-new-blade-rose-theme]]</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Works with -->
+<section class="works-with">
+  <div class="container">
+    <div class="works-with-label reveal">works with</div>
+    <h2 class="reveal">Installs on the AI you already&nbsp;use</h2>
+    <p class="reveal">Context Engine runs as an MCP server. Connect it once — every conversation gets your full personal context automatically.</p>
+    <div class="logo-bar reveal" style="transition-delay: 0.1s">
+      <span class="logo-bar-item">
+        <span class="logo-dot" style="background: #d97706; color: #fff; border-radius: 50%;">C</span>
+        Claude
+      </span>
+      <span class="logo-bar-item">
+        <span class="logo-dot" style="background: #2563eb; color: #fff;">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M2 8h4l2-6 2 12 2-6h4" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </span>
+        Cursor
+      </span>
+      <span class="logo-bar-item">
+        <span class="logo-dot" style="background: #06b6d4; color: #fff; border-radius: 50%;">W</span>
+        Windsurf
+      </span>
+      <span class="logo-bar-item">
+        <span class="logo-dot" style="background: #10a37f; color: #fff; border-radius: 50%;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="#fff"><path d="M22.2 14.4a5.4 5.4 0 0 1-4.8 4.8 5.4 5.4 0 0 1-2.4-1.2 5.4 5.4 0 0 1-3.6 2.4A5.4 5.4 0 0 1 6 18a5.4 5.4 0 0 1-4.2-6 5.4 5.4 0 0 1 3-4.2A5.4 5.4 0 0 1 7.2 3a5.4 5.4 0 0 1 5.4 1.8A5.4 5.4 0 0 1 18 6a5.4 5.4 0 0 1 4.2 8.4z"/></svg>
+        </span>
+        ChatGPT
+      </span>
+      <span class="logo-bar-item">
+        <span class="logo-dot" style="background: #8b5cf6; color: #fff; border-radius: 50%;">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="#fff"><circle cx="8" cy="8" r="3"/><path d="M8 1v3M8 12v3M1 8h3M12 8h3" stroke="#fff" stroke-width="1.5" stroke-linecap="round"/></svg>
+        </span>
+        Copilot
+      </span>
+      <span class="logo-bar-item">
+        <span class="logo-dot" style="background: var(--bg-card); border: 1px solid var(--border-bright); color: var(--text-dim);">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M2 4l6-2 6 2v8l-6 2-6-2V4z" stroke="currentColor" stroke-width="1.2"/><path d="M2 4l6 2 6-2M8 6v8" stroke="currentColor" stroke-width="1.2"/></svg>
+        </span>
+        Obsidian
+      </span>
+    </div>
+    <div class="works-with-note reveal" style="transition-delay: 0.15s">
+      Any MCP-compatible client works. Context Engine auto-configures itself during setup.
+    </div>
+  </div>
+</section>
+
+<!-- Install -->
+<section class="install" id="install">
+  <div class="container">
+    <h2 class="reveal">Up and running in <em>sixty seconds</em></h2>
+    <p class="reveal">Clone, configure, launch. Context Engine onboards itself from your last 30 days of activity.</p>
+    <div class="install-code reveal" style="transition-delay: 0.1s">
+      <span class="comment"># install</span><br>
+      <span class="prompt">$</span> git clone https://github.com/dwurtz/lighthouse<br>
+      <span class="prompt">$</span> cd lighthouse && python -m lighthouse configure<br>
+      <br>
+      <span class="comment"># configure walks you through:</span><br>
+      <span class="comment"># → API key (stored in macOS Keychain)</span><br>
+      <span class="comment"># → identity self-page</span><br>
+      <span class="comment"># → wiki layout + default prompts</span><br>
+      <span class="comment"># → health check</span><br>
+      <br>
+      <span class="comment"># start the agent</span><br>
+      <span class="prompt">$</span> python -m lighthouse monitor<br>
+      <br>
+      <span class="comment"># your wiki populates in minutes.</span><br>
+      <span class="comment"># open ~/Lighthouse/ in Obsidian to browse.</span>
+    </div>
+    <div class="reveal" style="transition-delay: 0.2s">
+      <a href="https://github.com/dwurtz/lighthouse" class="btn-primary">View on GitHub →</a>
+    </div>
+  </div>
+</section>
+
+<!-- Footer -->
+<footer>
+  <div class="container footer-inner">
+    <div class="footer-left">
+      <svg class="logo-arcs" viewBox="0 0 28 28" width="20" height="20">
+        <path d="M14 4 A10 10 0 0 0 14 24" fill="none" stroke="var(--text-muted)" stroke-width="2.5" stroke-linecap="round"/>
+        <path d="M14 8 A6 6 0 0 0 14 20" fill="none" stroke="var(--text-muted)" stroke-width="2.5" stroke-linecap="round"/>
+      </svg>
+      <span class="footer-text">Context Engine · Open Source · Runs Locally</span>
+    </div>
+    <a href="https://github.com/dwurtz/lighthouse">github.com/dwurtz/lighthouse</a>
+  </div>
+</footer>
+
+<script>
+// Scroll reveal
+const reveals = document.querySelectorAll('.reveal');
+const observer = new IntersectionObserver((entries) => {
+  entries.forEach(entry => {
+    if (entry.isIntersecting) {
+      entry.target.classList.add('visible');
+    }
+  });
+}, { threshold: 0.1, rootMargin: '0px 0px -40px 0px' });
+reveals.forEach(el => observer.observe(el));
+
+// Trigger hero reveals immediately
+document.addEventListener('DOMContentLoaded', () => {
+  document.querySelectorAll('.hero .reveal').forEach(el => {
+    setTimeout(() => el.classList.add('visible'), 100);
+  });
+});
+</script>
+
+</body>
+</html>

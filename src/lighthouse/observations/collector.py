@@ -12,7 +12,7 @@ from typing import Any
 from lighthouse.config import IGNORED_APPS, LIGHTHOUSE_HOME
 from lighthouse.observations.active_app import get_active_app
 from lighthouse.observations.browser import collect_browser_history
-from lighthouse.observations.calendar import collect_upcoming_events
+from lighthouse.observations.calendar import collect_upcoming_events, collect_past_events
 from lighthouse.observations.clipboard import collect_clipboard
 from lighthouse.observations.drive import collect_recent_drive_activity
 from lighthouse.observations.email import collect_recent_emails
@@ -21,6 +21,8 @@ from lighthouse.observations.screenshot import capture_screenshot_if_changed
 from lighthouse.observations.tasks import collect_pending_tasks
 from lighthouse.observations.types import Observation
 from lighthouse.observations.whatsapp import collect_whatsapp
+from lighthouse.observations.granola import collect_recent_granola
+from lighthouse.observations.meet import collect_recent_transcripts
 
 log = logging.getLogger(__name__)
 
@@ -102,14 +104,18 @@ class Observer:
             except Exception:
                 log.exception("Email collector error")
 
-        # Calendar — every 5th cycle
+        # Calendar — every 5th cycle (both upcoming + recently finished)
         self._calendar_counter += 1
         if self._calendar_counter >= self._gws_every:
             self._calendar_counter = 0
             try:
                 raw.extend(collect_upcoming_events())
             except Exception:
-                log.exception("Calendar collector error")
+                log.exception("Calendar upcoming collector error")
+            try:
+                raw.extend(collect_past_events())
+            except Exception:
+                log.exception("Calendar past collector error")
 
         # Drive — every 5th cycle
         self._drive_counter += 1
@@ -128,6 +134,20 @@ class Observer:
                 raw.extend(collect_pending_tasks())
             except Exception:
                 log.exception("Tasks collector error")
+
+        # Granola meeting notes — every 5th cycle (reads local JSON cache)
+        if self._tasks_counter == 0:  # piggyback on tasks counter
+            try:
+                raw.extend(collect_recent_granola())
+            except Exception:
+                log.exception("Granola collector error")
+
+        # Meet transcripts — every 5th cycle (Drive API query)
+        if self._email_counter == 0:  # piggyback on email counter
+            try:
+                raw.extend(collect_recent_transcripts())
+            except Exception:
+                log.exception("Meet transcript collector error")
 
         # Microphone: handled entirely by the web server via
         # /api/mic/start and /api/mic/stop. Nothing to poll here — mic

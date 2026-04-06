@@ -163,7 +163,7 @@ def main() -> None:
     )
     onboard_p.add_argument(
         "--only",
-        choices=["email", "imessage", "whatsapp"],
+        choices=["email", "imessage", "whatsapp", "calendar", "meet"],
         default=None,
         help="Run only one step instead of all pending steps",
     )

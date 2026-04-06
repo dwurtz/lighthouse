@@ -14,7 +14,9 @@ earlier steps.
 
 from lighthouse.onboarding.backfill import (
     ALL_STEPS,
+    backfill_calendar,
     backfill_imessage,
+    backfill_meet_transcripts,
     backfill_sent_email,
     backfill_whatsapp,
     is_step_done,
@@ -25,7 +27,9 @@ from lighthouse.onboarding.backfill import (
 
 __all__ = [
     "ALL_STEPS",
+    "backfill_calendar",
     "backfill_imessage",
+    "backfill_meet_transcripts",
     "backfill_sent_email",
     "backfill_whatsapp",
     "is_step_done",
