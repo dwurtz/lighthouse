@@ -367,12 +367,22 @@ class AgentLoop:
             self.phase = "IDLE"
             return
 
-        signals_text = self._format_signals(kept_items)
+        # Split into message-type (conversations, high-detail events) and
+        # context-type (screenshots, browser, clipboard — ambient context).
+        # Processing them separately ensures conversations get focused
+        # attention from the model instead of being diluted by 12 screenshots
+        # of code editing. Both batches go through the same integrate prompt.
+        _MESSAGE_SOURCES = {"imessage", "whatsapp", "email", "chat", "microphone"}
+        message_items = [d for d in kept_items if d.get("source") in _MESSAGE_SOURCES]
+        context_items = [d for d in kept_items if d.get("source") not in _MESSAGE_SOURCES]
+
         if len(kept_items) < len(signal_items):
             log.info(
-                "Triage kept %d / %d signals for Flash",
+                "Triage kept %d / %d signals for Flash (%d messages, %d context)",
                 len(kept_items),
                 len(signal_items),
+                len(message_items),
+                len(context_items),
             )
 
         # 2. Rebuild the wiki index so any out-of-band changes (manual
@@ -395,18 +405,35 @@ class AgentLoop:
             log.exception("wiki_retrieval failed -- falling back to full wiki")
             wiki_text = wiki_store.render_for_prompt()
 
-        # 3. One LLM call
-        log.info("Running analysis on recent signals...")
-        result = await self.gemini.integrate_observations(
-            signals_text=signals_text,
-            wiki_text=wiki_text,
-        )
+        # 3. Run integrate — message batch and context batch separately.
+        #    This ensures conversations get focused model attention instead
+        #    of being diluted by ambient screenshots. Both batches use the
+        #    same prompt and wiki context.
+        all_wiki_updates: list[dict] = []
+        all_reasoning: list[str] = []
 
-        wiki_updates = result.get("wiki_updates", [])
-        reasoning = result.get("reasoning", "")
-        log.info("Cycle: %d wiki updates", len(wiki_updates))
-        if reasoning:
-            log.info("Reasoning: %s", reasoning[:200])
+        for batch_name, batch_items in [("messages", message_items), ("context", context_items)]:
+            if not batch_items:
+                continue
+            batch_text = self._format_signals(batch_items)
+            log.info("Running analysis on %d %s...", len(batch_items), batch_name)
+            try:
+                result = await self.gemini.integrate_observations(
+                    signals_text=batch_text,
+                    wiki_text=wiki_text,
+                )
+                updates = result.get("wiki_updates", [])
+                reasoning = result.get("reasoning", "")
+                all_wiki_updates.extend(updates)
+                if reasoning:
+                    all_reasoning.append(reasoning)
+                    log.info("Reasoning (%s): %s", batch_name, reasoning[:200])
+            except Exception:
+                log.exception("integrate %s batch failed", batch_name)
+
+        wiki_updates = all_wiki_updates
+        reasoning = " | ".join(all_reasoning)
+        log.info("Cycle: %d wiki updates total", len(wiki_updates))
 
         # 4. Apply (guarded by the shared wiki lock so a concurrent
         #    first-run onboarding backfill can't stomp these writes).
@@ -418,7 +445,6 @@ class AgentLoop:
         self.matches_found += applied
 
         # Human-readable log in the wiki (browse in Obsidian).
-        # log.md failure is not critical, but surface it instead of swallowing.
         try:
             from lighthouse.activity_log import append_log_entry
             if wiki_updates:
