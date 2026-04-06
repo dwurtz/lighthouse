@@ -597,6 +597,17 @@ async def _run_reflection_body() -> dict:
         except Exception:
             log.exception("reflect goal_actions failed")
 
+    # Update goals.md — add/complete tasks, add/resolve waiting-for.
+    tasks_update = data.get("tasks_update")
+    if tasks_update:
+        try:
+            from lighthouse.goals import apply_tasks_update
+            changes = apply_tasks_update(tasks_update)
+            if changes:
+                log.info("reflect: updated %d item(s) in goals.md", changes)
+        except Exception:
+            log.exception("reflect tasks_update failed")
+
     # Deterministic linkify pass — catches any entity mentions the LLM
     # left as plain text. Runs AFTER the LLM updates so the catalog
     # includes any pages reflection just created, and BEFORE the git commit

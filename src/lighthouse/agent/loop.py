@@ -413,6 +413,7 @@ class AgentLoop:
         all_reasoning: list[str] = []
 
         all_goal_actions: list[dict] = []
+        all_tasks_updates: list[dict] = []
 
         for batch_name, batch_items in [("messages", message_items), ("context", context_items)]:
             if not batch_items:
@@ -428,6 +429,8 @@ class AgentLoop:
                 reasoning = result.get("reasoning", "")
                 all_wiki_updates.extend(updates)
                 all_goal_actions.extend(result.get("goal_actions") or [])
+                if result.get("tasks_update"):
+                    all_tasks_updates.append(result["tasks_update"])
                 if reasoning:
                     all_reasoning.append(reasoning)
                     log.info("Reasoning (%s): %s", batch_name, reasoning[:200])
@@ -459,6 +462,17 @@ class AgentLoop:
                     log.info("Cycle: executed %d goal action(s)", actions_done)
             except Exception:
                 log.exception("goal_actions execution failed")
+
+        # 4b. Update goals.md — add/complete tasks, add/resolve waiting-for.
+        #      The agent maintains the task list based on observed commitments.
+        for tu in all_tasks_updates:
+            try:
+                from lighthouse.goals import apply_tasks_update
+                changes = apply_tasks_update(tu)
+                if changes:
+                    log.info("Cycle: updated %d item(s) in goals.md", changes)
+            except Exception:
+                log.exception("goals tasks_update failed")
 
         # Human-readable log in the wiki (browse in Obsidian).
         try:
