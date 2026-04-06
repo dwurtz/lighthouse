@@ -484,6 +484,15 @@ async def _run_reflection_body() -> dict:
             refresh_index()
         except Exception:
             pass
+        # Re-index QMD so new events + wiki changes are searchable.
+        # update re-indexes changed files; embed computes vectors for new chunks.
+        try:
+            import subprocess
+            subprocess.run(["qmd", "update"], capture_output=True, timeout=30)
+            subprocess.run(["qmd", "embed"], capture_output=True, timeout=120)
+            log.info("QMD index + embeddings refreshed")
+        except Exception:
+            log.debug("QMD refresh failed", exc_info=True)
         try:
             from lighthouse.wiki_git import commit_changes
             msg_parts = []

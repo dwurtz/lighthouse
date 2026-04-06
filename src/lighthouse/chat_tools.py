@@ -40,8 +40,9 @@ from lighthouse.activity_log import append_log_entry
 log = logging.getLogger(__name__)
 
 
-CATEGORIES = ("people", "projects")
-_SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$")
+CATEGORIES = ("people", "projects", "events")
+# Event slugs can include a date prefix: "2026-04-05/event-name"
+_SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]*(?:/[a-z0-9][a-z0-9-]*)?$")
 
 
 @dataclass

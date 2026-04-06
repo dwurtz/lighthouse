@@ -1,12 +1,17 @@
-"""Personal wiki — entity-keyed knowledge pages.
+"""Personal wiki — entity-keyed knowledge pages + event log.
 
-The wiki IS the agent's memory. The analysis cycle reads the wiki as context,
-observes new signals, and rewrites affected pages in one LLM call. No separate
-fact/commitment extraction step.
+The wiki IS the agent's memory. Three categories:
+  - ``people/`` — one page per real person
+  - ``projects/`` — one page per active project, goal, or life thread
+  - ``events/YYYY-MM-DD/`` — timestamped event pages, linked from entities
 
-Wiki pages live in ~/Lighthouse/ so they're browsable in Finder
-and openable as an Obsidian vault. Two categories only: people and projects.
-Everything ongoing — goals, initiatives, life threads, situations — is a project.
+Entity pages describe **state** (who/what something IS). Event pages
+describe **what happened** (timestamped, linked to entities). Entity
+pages reference events via ``[[event-slug]]``; events reference entities
+via ``[[person-or-project-slug]]``. QMD indexes all three categories.
+
+The wiki lives at ``~/Lighthouse/`` so it's browsable in Finder and
+openable as an Obsidian vault.
 """
 
 from __future__ import annotations
@@ -20,7 +25,7 @@ from pathlib import Path
 log = logging.getLogger(__name__)
 
 
-CATEGORIES = ("people", "projects")
+CATEGORIES = ("people", "projects", "events")
 
 
 def slugify(name: str) -> str:
@@ -32,6 +37,7 @@ def ensure_dirs():
     for category in CATEGORIES:
         (WIKI_DIR / category).mkdir(parents=True, exist_ok=True)
     (WIKI_DIR / ".backups").mkdir(parents=True, exist_ok=True)
+    # Events get date subdirectories created on write, not upfront
 
 
 def read_all_pages() -> list[dict]:
@@ -116,18 +122,18 @@ def preserve_frontmatter(new_content: str, old_content: str) -> tuple[str, bool]
 
 
 def delete_page(category: str, slug: str) -> bool:
-    """Delete a wiki page. Backs it up to ``.backups`` first.
+    """Delete a wiki page or event. Backs it up to ``.backups`` first.
 
     Returns ``True`` if a page was removed, ``False`` if the page did
     not exist (no-op — still safe to call). Raises ``ValueError`` for
-    an unknown category.
+    an unknown category. For events, the slug may include a date prefix.
 
     Shared by the 5-minute integrate cycle and the nightly reflect pass
     so both take the same code path (backup → unlink → log).
     """
     if category not in CATEGORIES:
         raise ValueError(f"bad category: {category}")
-    path = WIKI_DIR / category / f"{slugify(slug)}.md"
+    path = _resolve_page_path(category, slug)
     if not path.exists():
         return False
     backup_page(path)
@@ -136,8 +142,35 @@ def delete_page(category: str, slug: str) -> bool:
     return True
 
 
+def _resolve_page_path(category: str, slug: str) -> Path:
+    """Resolve a category + slug to a filesystem path.
+
+    For ``people`` and ``projects``, the path is simply
+    ``WIKI_DIR/<category>/<slug>.md``.
+
+    For ``events``, the slug MAY include a date prefix:
+    ``2026-04-05/amanda-shared-sales-data`` → resolves to
+    ``WIKI_DIR/events/2026-04-05/amanda-shared-sales-data.md``.
+    If no date prefix, today's date is used as the subdirectory.
+    """
+    if category == "events":
+        if "/" in slug:
+            # slug = "2026-04-05/amanda-shared-sales-data"
+            date_part, event_slug = slug.split("/", 1)
+            return WIKI_DIR / "events" / date_part / f"{slugify(event_slug)}.md"
+        else:
+            # No date → use today
+            today = datetime.now().strftime("%Y-%m-%d")
+            return WIKI_DIR / "events" / today / f"{slugify(slug)}.md"
+    return WIKI_DIR / category / f"{slugify(slug)}.md"
+
+
 def write_page(category: str, slug: str, content: str) -> Path:
-    """Write (or overwrite) a wiki page. Backs up the old version first.
+    """Write (or overwrite) a wiki page or event. Backs up the old version first.
+
+    For ``events``, the slug can include a date prefix
+    (``2026-04-05/event-name``). If no prefix, today's date is used.
+    Parent directories are created automatically.
 
     If the old version had YAML frontmatter and the new content omitted
     it, the old frontmatter is grafted back onto the new body — a
@@ -147,7 +180,8 @@ def write_page(category: str, slug: str, content: str) -> Path:
     if category not in CATEGORIES:
         raise ValueError(f"bad category: {category}")
     ensure_dirs()
-    path = WIKI_DIR / category / f"{slugify(slug)}.md"
+    path = _resolve_page_path(category, slug)
+    path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists():
         old_content = path.read_text()
         backup_page(path)
@@ -252,12 +286,19 @@ def apply_updates(updates: list[dict]) -> int:
         except Exception:
             log.debug("wiki_index rebuild failed", exc_info=True)
 
-        # Refresh QMD so chat retrieval sees fresh content
+        # Refresh QMD so chat retrieval + Context Engine see fresh content.
+        # `qmd update` re-indexes changed files (including new event pages).
+        # We skip `qmd embed` here (it's slower) — reflect handles that 3×/day.
         try:
             from lighthouse.llm.search import refresh_index
             refresh_index()
         except Exception:
             log.debug("QMD refresh after wiki update failed", exc_info=True)
+        try:
+            import subprocess
+            subprocess.run(["qmd", "update"], capture_output=True, timeout=15)
+        except Exception:
+            log.debug("QMD update after wiki update failed", exc_info=True)
 
         # Commit to git — free version history for every wiki change
         try:

@@ -264,14 +264,48 @@ def create_server() -> Server:
 _WIKILINK_RE = re.compile(r"\[\[([^\]\n|]+?)(?:\|[^\]\n]*)?\]\]")
 
 
+def _qmd_query(topic: str, collection: str | None = None, limit: int = 5) -> str:
+    """Run a QMD hybrid query (BM25 + vector + HyDE reranking).
+
+    Returns the formatted text output from ``qmd query``. Falls back to
+    ``qmd search`` (BM25 only) if ``query`` fails, and returns an empty
+    string on any failure so callers degrade gracefully.
+    """
+    import subprocess
+    cmd = ["qmd", "query", topic, "-n", str(limit)]
+    if collection:
+        cmd += ["-c", collection]
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        if r.returncode == 0 and r.stdout.strip():
+            return r.stdout.strip()
+    except Exception:
+        pass
+    # Fallback to BM25 only
+    cmd[1] = "search"
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        if r.returncode == 0:
+            return r.stdout.strip()
+    except Exception:
+        pass
+    return ""
+
+
 def _get_context(topic: str) -> str:
     """Synthesize personal context for a topic from multiple sources.
 
-    Does in ONE call what would otherwise take 5-6 separate tool calls:
-    1. Semantic wiki search for the topic
-    2. User profile
-    3. Recent observations mentioning the topic
-    4. Related pages (one-hop wiki-link traversal from matched pages)
+    Uses QMD's hybrid search (BM25 + vector + HyDE) across the entire
+    Lighthouse wiki — people, projects, AND events — in a single query.
+    QMD returns the most semantically relevant chunks regardless of
+    category, so a search for "Amanda Peffer" can return her person page,
+    the Blade & Rose project page, AND timestamped event pages like
+    "amanda-shared-sales-data" — all ranked by relevance.
+
+    Also includes:
+    - User profile (always)
+    - One-hop wiki-link traversal for related entities
+    - Recent raw observations (last 60 min) for real-time context
 
     Returns a structured markdown bundle Claude can consume directly.
     """
@@ -288,33 +322,15 @@ def _get_context(topic: str) -> str:
         f"{user.profile_md.strip()}"
     )
 
-    # --- Wiki search for the topic ---
-    matched_pages: list[dict] = []
-    matched_slugs: set[str] = set()
-    try:
-        from lighthouse.llm.search import search as qmd_search
-        search_result = qmd_search(topic, limit=5, collection="wiki")
-        if search_result:
-            sections.append(f"## Wiki pages matching \"{topic}\"\n\n{search_result}")
-            # Extract slugs from the search result for link traversal
-            # QMD returns formatted text with page headers like "### category/slug"
-            for match in re.finditer(r"###\s+(\w+)/([a-z0-9-]+)", search_result):
-                cat, slug = match.group(1), match.group(2)
-                matched_slugs.add(slug)
-                path = WIKI_DIR / cat / f"{slug}.md"
-                if path.exists():
-                    matched_pages.append({
-                        "category": cat,
-                        "slug": slug,
-                        "content": path.read_text(),
-                    })
-    except Exception:
-        log.debug("QMD search failed", exc_info=True)
-
-    # Fallback: if QMD returned nothing, try a direct slug/title match
-    if not matched_pages:
+    # --- QMD hybrid search across wiki + events ---
+    qmd_result = _qmd_query(topic, collection="Lighthouse", limit=8)
+    if qmd_result:
+        sections.append(f"## Relevant pages and events for \"{topic}\"\n\n{qmd_result}")
+    else:
+        # Fallback: direct slug/title match
         topic_slug = re.sub(r"[^a-z0-9]+", "-", topic.lower()).strip("-")
         topic_lower = topic.lower()
+        fallback_pages: list[str] = []
         for category in ("people", "projects"):
             cat_dir = WIKI_DIR / category
             if not cat_dir.is_dir():
@@ -324,61 +340,24 @@ def _get_context(topic: str) -> str:
                 if topic_slug in slug or topic_lower in slug.replace("-", " "):
                     try:
                         content = path.read_text()
-                        matched_pages.append({
-                            "category": category,
-                            "slug": slug,
-                            "content": content,
-                        })
-                        matched_slugs.add(slug)
+                        fallback_pages.append(f"### {category}/{slug}\n\n{content.strip()}")
                     except OSError:
                         continue
-
-        if matched_pages:
-            page_text = "\n\n".join(
-                f"### {p['category']}/{p['slug']}\n\n{p['content'].strip()}"
-                for p in matched_pages[:5]
+        if fallback_pages:
+            sections.append(f"## Wiki pages matching \"{topic}\"\n\n" + "\n\n".join(fallback_pages[:5]))
+        else:
+            sections.append(
+                f"## Wiki pages matching \"{topic}\"\n\n"
+                f"(no pages found — the user may not have a wiki entry for this topic yet)"
             )
-            sections.append(f"## Wiki pages matching \"{topic}\"\n\n{page_text}")
 
-    if not matched_pages:
-        sections.append(
-            f"## Wiki pages matching \"{topic}\"\n\n"
-            f"(no pages found — the user may not have a wiki entry for this topic yet)"
-        )
-
-    # --- Related pages (one-hop link traversal) ---
-    linked_slugs: set[str] = set()
-    for page in matched_pages:
-        for m in _WIKILINK_RE.finditer(page["content"]):
-            link_target = m.group(1).strip().lower().replace(" ", "-")
-            if link_target not in matched_slugs:
-                linked_slugs.add(link_target)
-
-    if linked_slugs:
-        related: list[str] = []
-        for slug in sorted(linked_slugs)[:10]:
-            for category in ("people", "projects"):
-                path = WIKI_DIR / category / f"{slug}.md"
-                if path.exists():
-                    try:
-                        content = path.read_text()
-                        # Just the first paragraph, not the full page
-                        lines = [l for l in content.split("\n") if l.strip() and not l.startswith("---") and not l.startswith("#")]
-                        summary = lines[0][:200] if lines else "(empty)"
-                        related.append(f"- **{category}/{slug}**: {summary}")
-                    except OSError:
-                        continue
-                    break
-        if related:
-            sections.append("## Related pages (linked from the above)\n\n" + "\n".join(related))
-
-    # --- Recent observations mentioning the topic ---
+    # --- Recent raw observations (last 60 min — real-time layer) ---
     if OBSERVATIONS_LOG.exists():
-        cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=60)
         topic_words = set(topic.lower().split())
         matching_obs: list[str] = []
         try:
-            for line in OBSERVATIONS_LOG.read_text().splitlines()[-1000:]:
+            for line in OBSERVATIONS_LOG.read_text().splitlines()[-500:]:
                 try:
                     d = json.loads(line)
                     ts = datetime.fromisoformat(d["timestamp"])
@@ -399,8 +378,10 @@ def _get_context(topic: str) -> str:
             pass
 
         if matching_obs:
-            obs_text = "\n".join(matching_obs[-20:])
-            sections.append(f"## Recent activity mentioning \"{topic}\" (last 24h)\n\n{obs_text}")
+            sections.append(
+                f"## Live activity mentioning \"{topic}\" (last hour)\n\n"
+                + "\n".join(matching_obs[-15:])
+            )
 
     return "\n\n---\n\n".join(sections)
 
