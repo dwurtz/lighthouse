@@ -447,39 +447,65 @@ def linkify_wiki(wiki_dir: Path | None = None, *, dry_run: bool = False) -> Link
     catalog = build_catalog(wiki_dir)
     report = LinkifyReport()
 
+    # Collect ALL markdown files to process: category subdirs + root-level files
+    # (goals.md, CLAUDE.md, reflection.md, etc.). Skip index.md and log.md
+    # which are auto-generated / append-only and shouldn't be linkified.
+    _SKIP_ROOT = {"index.md", "log.md"}
+    all_paths: list[Path] = []
+
+    # Category subdirectories (people/, projects/, events/)
     for category in CATEGORIES:
         cat_dir = wiki_dir / category
         if not cat_dir.is_dir():
             continue
         for path in sorted(cat_dir.glob("*.md")):
-            if path.name.startswith((".", "_")):
-                continue
-            report.pages_scanned += 1
-            try:
-                text = path.read_text(encoding="utf-8", errors="replace")
-            except OSError:
-                continue
+            if not path.name.startswith((".", "_")):
+                all_paths.append(path)
 
-            # Preserve the frontmatter block verbatim; only linkify the body.
-            fm_match = _FRONTMATTER_RE.match(text)
-            if fm_match:
-                frontmatter = fm_match.group(1)
-                body = text[fm_match.end():]
-            else:
-                frontmatter = ""
-                body = text
+    # Root-level markdown files (goals.md, CLAUDE.md, reflection.md, etc.)
+    for path in sorted(wiki_dir.glob("*.md")):
+        if path.name.startswith((".", "_")):
+            continue
+        if path.name.lower() in _SKIP_ROOT:
+            continue
+        all_paths.append(path)
 
-            new_body, added = linkify_body(body, catalog, self_slug=path.stem)
-            if added:
-                report.pages_changed += 1
-                for slug, n in added.items():
-                    report.links_added += n
-                    report.links_by_slug[slug] = report.links_by_slug.get(slug, 0) + n
-                if not dry_run:
-                    try:
-                        path.write_text(frontmatter + new_body, encoding="utf-8")
-                    except OSError as e:
-                        log.warning("linkify: failed to write %s: %s", path, e)
+    # Also process event subdirectories (events/YYYY-MM-DD/*.md)
+    events_dir = wiki_dir / "events"
+    if events_dir.is_dir():
+        for day_dir in sorted(events_dir.iterdir()):
+            if day_dir.is_dir():
+                for path in sorted(day_dir.glob("*.md")):
+                    if not path.name.startswith((".", "_")):
+                        all_paths.append(path)
+
+    for path in all_paths:
+        report.pages_scanned += 1
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+
+        # Preserve the frontmatter block verbatim; only linkify the body.
+        fm_match = _FRONTMATTER_RE.match(text)
+        if fm_match:
+            frontmatter = fm_match.group(1)
+            body = text[fm_match.end():]
+        else:
+            frontmatter = ""
+            body = text
+
+        new_body, added = linkify_body(body, catalog, self_slug=path.stem)
+        if added:
+            report.pages_changed += 1
+            for slug, n in added.items():
+                report.links_added += n
+                report.links_by_slug[slug] = report.links_by_slug.get(slug, 0) + n
+            if not dry_run:
+                try:
+                    path.write_text(frontmatter + new_body, encoding="utf-8")
+                except OSError as e:
+                    log.warning("linkify: failed to write %s: %s", path, e)
 
     report.broken_refs = find_broken_refs(wiki_dir, catalog)
     return report
