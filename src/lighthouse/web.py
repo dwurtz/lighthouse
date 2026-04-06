@@ -31,7 +31,7 @@ from pathlib import Path
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 
-from lighthouse.config import LIGHTHOUSE_HOME
+from lighthouse.config import LIGHTHOUSE_HOME, REFLECT_MODEL
 from lighthouse.prompts import load as load_prompt
 
 app = FastAPI(title="lighthouse", version="0.2.0")
@@ -285,7 +285,7 @@ async def post_chat(body: dict):
         for round_idx in range(MAX_TOOL_ROUNDS):
             try:
                 resp = await gemini.client.aio.models.generate_content(
-                    model="gemini-2.5-pro",
+                    model=REFLECT_MODEL,  # Pro 3.1 — same model as reflect, strongest for tool use
                     contents=contents,
                     config=genai_types.GenerateContentConfig(
                         system_instruction=system_instruction,
