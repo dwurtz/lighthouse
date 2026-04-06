@@ -46,6 +46,14 @@ else
   fail=1
 fi
 
+if command -v node >/dev/null 2>&1; then
+  echo "${GREEN}✓${RESET} node $(node --version)"
+else
+  echo "${RED}✗${RESET} Node.js not found — required for gws (Google Workspace CLI)"
+  echo "  install with: brew install node"
+  fail=1
+fi
+
 if command -v ffmpeg >/dev/null 2>&1; then
   echo "${GREEN}✓${RESET} ffmpeg (push-to-record mic will work)"
 else
@@ -54,9 +62,10 @@ else
 fi
 
 if command -v gws >/dev/null 2>&1; then
-  echo "${GREEN}✓${RESET} gws (Gmail / Calendar / Drive / Tasks observations will work)"
+  gws_ver=$(gws --version 2>&1 | head -1)
+  echo "${GREEN}✓${RESET} gws $gws_ver"
 else
-  echo "${DIM}○${RESET} gws not found ${DIM}(optional — enables Google Workspace observations)${RESET}"
+  echo "${DIM}…${RESET} gws not installed — will install during setup"
 fi
 
 echo
@@ -77,6 +86,46 @@ echo "Installing Lighthouse + dependencies ..."
 
 echo
 echo "${GREEN}✓${RESET} package installed"
+echo
+
+# --- Google Workspace CLI (gws) -----------------------------------------
+# Required for Gmail, Calendar, Drive, and Tasks observations. Installed
+# globally via npm because it's a Node.js CLI tool, not a Python package.
+
+if ! command -v gws >/dev/null 2>&1; then
+  echo "Installing gws (Google Workspace CLI) ..."
+  npm install -g @googleworkspace/cli --silent 2>&1 | tail -3
+  if command -v gws >/dev/null 2>&1; then
+    echo "${GREEN}✓${RESET} gws installed"
+  else
+    echo "${RED}✗${RESET} gws install failed — you can retry manually:"
+    echo "  npm install -g @googleworkspace/cli"
+  fi
+fi
+
+echo
+# Check if gws is authenticated
+if command -v gws >/dev/null 2>&1; then
+  gws_auth=$(gws auth status 2>&1 | grep -c "encrypted_credentials_exists.*true")
+  if [ "$gws_auth" = "0" ]; then
+    echo "${BOLD}Google Workspace authentication${RESET}"
+    echo
+    echo "Lighthouse uses the gws CLI to read your Gmail, Calendar, Drive, and"
+    echo "Tasks. You need to authenticate once with your Google Workspace account."
+    echo
+    echo "This opens a browser for Google OAuth — log in with the account you"
+    echo "want Lighthouse to observe (work or personal)."
+    echo
+    read -p "Authenticate now? [Y/n] " auth_ans
+    if [ "$auth_ans" != "n" ] && [ "$auth_ans" != "N" ]; then
+      gws auth login 2>&1 || echo "${RED}auth failed — re-run: gws auth login${RESET}"
+    else
+      echo "Skipping. Run 'gws auth login' later to enable Workspace observations."
+    fi
+  else
+    echo "${GREEN}✓${RESET} gws authenticated"
+  fi
+fi
 echo
 
 # --- Hand off to the interactive configure command ---------------------

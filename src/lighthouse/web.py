@@ -542,28 +542,59 @@ async def _mic_stop_inner(reason: str = "manual") -> dict:
             "error": transcribe_error or "no speech detected",
         }
 
-    # Emit as a signal. Same format as chat signals — written directly to
-    # observations.jsonl so the next analysis cycle processes it.
+    # Treat voice input identically to a typed chat message. The user
+    # spoke — their words carry the same weight as anything they type
+    # into the chat input. This means:
+    #
+    # 1. Save to conversation.json as a user message so it appears in
+    #    the chat history and the agent can respond to it
+    # 2. Save as a source="chat" observation with sender="You" so the
+    #    integrate cycle's outbound-detection treats it as the user's
+    #    own words (commitments, decisions, retractions)
+    # 3. Log to activity_log as a chat entry, not a mic-only entry
+    #
+    # If the user says "delete the terafab page" by voice, the next
+    # chat exchange or integrate cycle will process it the same way as
+    # if they typed it. For immediate structural edits, the user should
+    # follow up in the chat popover (which now has the transcript in
+    # its history as context).
+
+    from lighthouse.identity import load_user
+    user = load_user()
+
     ts = datetime.now(timezone.utc).isoformat()
     id_key = "mic-" + hashlib.md5(f"{ts}-{transcript[:200]}".encode()).hexdigest()[:16]
+
+    # 1. Append to conversation.json so the chat popover has it
+    messages = _load_conversation()
+    messages.append({
+        "role": "user",
+        "content": transcript,
+        "timestamp": ts,
+        "source": "voice",
+    })
+    _save_conversation(messages)
+
+    # 2. Persist as a chat-equivalent observation — sender="You" so
+    #    is_outbound() fires and integrate treats it as high-signal
     try:
         OBSERVATIONS_LOG.parent.mkdir(parents=True, exist_ok=True)
         with open(OBSERVATIONS_LOG, "a") as f:
             f.write(json.dumps({
-                "source": "microphone",
-                "sender": "David (spoken)",
-                "text": transcript[:2000],
+                "source": "chat",
+                "sender": "You",
+                "text": f"[spoken] {transcript[:2000]}",
                 "timestamp": ts,
                 "id_key": id_key,
             }) + "\n")
     except Exception:
         pass
 
-    # Human-readable log in the wiki
+    # 3. Human-readable log in the wiki
     try:
         from lighthouse.activity_log import append_log_entry
         preview = " ".join(transcript.split())[:120]
-        append_log_entry("mic", f"David (spoken): {preview}")
+        append_log_entry("chat", f"{user.first_name} (spoken): {preview}")
     except Exception:
         pass
 
