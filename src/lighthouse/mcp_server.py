@@ -1,15 +1,23 @@
-"""Lighthouse MCP server — exposes the personal wiki to Claude.
+"""Lighthouse Context Engine — MCP server for Claude.
 
-Turns Lighthouse into a persistent personal-context layer that any MCP
-client (Claude Desktop, Claude Code, etc.) can query mid-conversation.
-Claude can search the wiki, read/write pages, see recent observations,
-and look up contacts — without the user re-explaining their life in
-every conversation.
+Exposes the user's personal wiki, observation stream, and contact graph
+to any MCP client (Claude Desktop, Claude Code) as a persistent context
+layer. Claude calls ``get_context(topic)`` at the start of any
+conversation that touches people, projects, or commitments, and gets
+back a pre-synthesized bundle of everything Lighthouse knows about that
+topic — no need to manually search, paginate, or assemble the picture.
+
+Three tools, not eight:
+
+    get_context(topic)                — one call, full picture
+    update_wiki(action, ...)          — write or delete a page
+    recent_activity(minutes, source)  — raw observation stream
 
 Start with:
-    python -m lighthouse mcp          # stdio transport (what Claude expects)
+    python -m lighthouse mcp
 
-Configure in Claude Desktop (~/Library/Application Support/Claude/claude_desktop_config.json):
+Configure in Claude Desktop:
+    ~/Library/Application Support/Claude/claude_desktop_config.json
     {
       "mcpServers": {
         "lighthouse": {
@@ -18,22 +26,13 @@ Configure in Claude Desktop (~/Library/Application Support/Claude/claude_desktop
         }
       }
     }
-
-Tools exposed:
-    search_wiki         — semantic search across all wiki pages
-    read_page           — full markdown content of one page
-    write_page          — create or update a page
-    delete_page         — remove a page
-    list_pages          — catalog of everything in the wiki
-    recent_observations — what the agent has seen recently
-    user_profile        — who the user is (name, email, bio)
-    search_contacts     — macOS contacts lookup
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -43,126 +42,132 @@ import mcp.types as types
 
 log = logging.getLogger(__name__)
 
-# Ensure the API key is in the environment before anything touches Gemini
+# Pre-populate the API key from keychain before any Gemini import
 from lighthouse.llm_client import _ensure_api_key_in_env
 _ensure_api_key_in_env()
 
 
-def create_server() -> Server:
-    """Build and return a configured MCP Server instance.
+# ---------------------------------------------------------------------------
+# System-level instruction injected into every Claude session that has
+# this MCP server connected. This is the key to proactive context use —
+# without it, Claude treats the tools as optional and only calls them
+# when it recognizes a gap. With it, Claude consults Lighthouse first.
+# ---------------------------------------------------------------------------
 
-    Each tool is a thin wrapper over an existing Lighthouse module — the
-    wiki store, chat_tools, retriever, observation log, identity, and
-    contacts. No new logic here, just MCP routing.
-    """
-    app = Server("lighthouse")
+_INSTRUCTIONS = """\
+You have a personal context engine called Lighthouse connected. It \
+maintains a living wiki about the user's people, projects, commitments, \
+and recent digital activity (messages, emails, calendar, screenshots, \
+browser history).
+
+Before answering any question about a specific person, project, \
+commitment, or recent event, call get_context(topic) first. The user \
+has an extensive personal wiki that knows things you don't — their \
+contacts, their projects, their recent messages, their commitments. \
+Don't guess when you can look it up.
+
+When the user asks you to remember something, update their wiki, or \
+correct a fact about someone, use update_wiki to make the change \
+directly. Every change is git-committed and reversible.
+
+When the user asks "what have I been doing" or wants real-time context, \
+use recent_activity to see their observation stream.\
+"""
+
+
+def create_server() -> Server:
+    """Build and return a configured MCP Server instance."""
+    app = Server(
+        name="lighthouse",
+        version="0.2.0",
+        instructions=_INSTRUCTIONS,
+    )
 
     # ------------------------------------------------------------------
-    # Tools
+    # Tools — three, designed around how Claude thinks
     # ------------------------------------------------------------------
 
     @app.list_tools()
     async def list_tools() -> list[types.Tool]:
         return [
             types.Tool(
-                name="search_wiki",
+                name="get_context",
                 description=(
-                    "Semantic search across the user's personal wiki. Returns "
-                    "the most relevant wiki page excerpts for a query. Use this "
-                    "when you need context about a person, project, or topic in "
-                    "the user's life."
+                    "Get personal context about a topic from the user's "
+                    "Lighthouse wiki. Returns a synthesized bundle of relevant "
+                    "wiki pages, the user's profile, recent observations "
+                    "mentioning the topic, and related linked pages — all in "
+                    "one call. ALWAYS call this before responding about a "
+                    "specific person, project, commitment, event, or anything "
+                    "that might be in the user's personal knowledge base. One "
+                    "call here replaces what would otherwise be 5-6 manual "
+                    "lookups. Topics can be a person's name, a project name, "
+                    "a keyword, or a natural-language question."
                 ),
                 inputSchema={
                     "type": "object",
                     "properties": {
-                        "query": {
+                        "topic": {
                             "type": "string",
-                            "description": "Natural-language search query",
+                            "description": (
+                                "What you need context about — a person's name, "
+                                "project name, keyword, or question. Examples: "
+                                "'Amanda Peffer', 'soccer carpool', 'Palo Alto "
+                                "relocation', 'what did I promise Sara'"
+                            ),
                         },
-                        "limit": {
-                            "type": "integer",
-                            "description": "Max pages to return (default 5)",
-                            "default": 5,
+                    },
+                    "required": ["topic"],
+                },
+            ),
+            types.Tool(
+                name="update_wiki",
+                description=(
+                    "Create, update, or delete a page in the user's personal "
+                    "wiki. Use this when the user asks you to remember "
+                    "something, correct a fact, add a person, or remove a "
+                    "page. Always call get_context first to read the existing "
+                    "page before overwriting — preserve YAML frontmatter and "
+                    "content you didn't mean to change. Every change is "
+                    "git-committed and reversible."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "action": {
+                            "type": "string",
+                            "enum": ["write", "delete"],
+                            "description": "'write' to create/update, 'delete' to remove",
                         },
-                    },
-                    "required": ["query"],
-                },
-            ),
-            types.Tool(
-                name="read_page",
-                description=(
-                    "Read the full markdown content of one wiki page, including "
-                    "YAML frontmatter. Use this to get detailed info about a "
-                    "specific person or project."
-                ),
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "category": {"type": "string", "enum": ["people", "projects"]},
-                        "slug": {"type": "string", "description": "kebab-case page identifier"},
-                    },
-                    "required": ["category", "slug"],
-                },
-            ),
-            types.Tool(
-                name="write_page",
-                description=(
-                    "Create or overwrite a wiki page. Always read_page first if "
-                    "the page might exist, so you preserve existing content you "
-                    "don't mean to change. Requires a reason for the audit trail."
-                ),
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "category": {"type": "string", "enum": ["people", "projects"]},
-                        "slug": {"type": "string"},
-                        "content": {"type": "string", "description": "Full markdown body"},
-                        "reason": {"type": "string", "description": "Why this change is being made"},
-                    },
-                    "required": ["category", "slug", "content", "reason"],
-                },
-            ),
-            types.Tool(
-                name="delete_page",
-                description=(
-                    "Remove a wiki page. Backed up via git so this is reversible. "
-                    "Only delete when the user clearly asks."
-                ),
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "category": {"type": "string", "enum": ["people", "projects"]},
-                        "slug": {"type": "string"},
-                        "reason": {"type": "string"},
-                    },
-                    "required": ["category", "slug", "reason"],
-                },
-            ),
-            types.Tool(
-                name="list_pages",
-                description=(
-                    "List every wiki page with its category, slug, and title. "
-                    "Optionally filter by category. Call this to discover what "
-                    "pages exist before searching or reading."
-                ),
-                inputSchema={
-                    "type": "object",
-                    "properties": {
                         "category": {
                             "type": "string",
                             "enum": ["people", "projects"],
-                            "description": "Optional filter",
+                        },
+                        "slug": {
+                            "type": "string",
+                            "description": "kebab-case page identifier (e.g. 'amanda-peffer')",
+                        },
+                        "content": {
+                            "type": "string",
+                            "description": "Full markdown body including YAML frontmatter (required for 'write', ignored for 'delete')",
+                        },
+                        "reason": {
+                            "type": "string",
+                            "description": "Why this change is being made — becomes the git commit message",
                         },
                     },
+                    "required": ["action", "category", "slug", "reason"],
                 },
             ),
             types.Tool(
-                name="recent_observations",
+                name="recent_activity",
                 description=(
-                    "Return the user's recent digital activity — messages sent "
-                    "and received, screenshots described, calendar events, "
-                    "browser visits, etc. Use this for real-time context about "
-                    "what the user has been doing."
+                    "See what the user has been doing recently — messages "
+                    "sent and received, screenshots described, calendar "
+                    "events, browser visits, clipboard copies, voice notes. "
+                    "Use this when the user asks 'what have I been doing', "
+                    "'what's on my screen', or when you need real-time "
+                    "context about their current activity."
                 ),
                 inputSchema={
                     "type": "object",
@@ -174,33 +179,13 @@ def create_server() -> Server:
                         },
                         "source": {
                             "type": "string",
-                            "description": "Filter to a specific source (imessage, whatsapp, email, screenshot, calendar, etc.)",
+                            "description": (
+                                "Filter to a specific source: imessage, whatsapp, "
+                                "email, screenshot, calendar, clipboard, chat, "
+                                "browser, drive, tasks. Omit for all sources."
+                            ),
                         },
                     },
-                },
-            ),
-            types.Tool(
-                name="user_profile",
-                description=(
-                    "Return the user's identity — name, email, phone, and their "
-                    "self-written bio from their wiki self-page. Use this to "
-                    "understand who you're talking to."
-                ),
-                inputSchema={"type": "object", "properties": {}},
-            ),
-            types.Tool(
-                name="search_contacts",
-                description=(
-                    "Search the user's macOS Contacts by name. Returns matching "
-                    "contact names. Useful for resolving who someone is when the "
-                    "user mentions a first name."
-                ),
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "query": {"type": "string", "description": "Name to search for"},
-                    },
-                    "required": ["query"],
                 },
             ),
         ]
@@ -208,14 +193,14 @@ def create_server() -> Server:
     @app.call_tool()
     async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
         try:
-            result = _dispatch_tool(name, arguments)
+            result = _dispatch(name, arguments)
             return [types.TextContent(type="text", text=result)]
         except Exception as e:
             log.exception("MCP tool %s failed", name)
             return [types.TextContent(type="text", text=f"error: {e}")]
 
     # ------------------------------------------------------------------
-    # Resources
+    # Resources — wiki pages readable directly by Claude
     # ------------------------------------------------------------------
 
     @app.list_resources()
@@ -224,17 +209,16 @@ def create_server() -> Server:
             types.Resource(
                 uri="lighthouse://index",
                 name="Wiki Index",
-                description="Auto-generated catalog of every person and project page",
+                description="Catalog of every person and project page",
                 mimeType="text/markdown",
             ),
             types.Resource(
                 uri="lighthouse://reflection",
                 name="Reflection Notes",
-                description="The agent's latest morning notes (what it noticed, what's stuck, questions for the user)",
+                description="The agent's latest morning notes",
                 mimeType="text/markdown",
             ),
         ]
-        # Add individual wiki pages as resources
         from lighthouse.config import WIKI_DIR
         for category in ("people", "projects"):
             cat_dir = WIKI_DIR / category
@@ -247,7 +231,7 @@ def create_server() -> Server:
                 resources.append(types.Resource(
                     uri=f"lighthouse://wiki/{category}/{slug}",
                     name=f"{category}/{slug}",
-                    description=f"Wiki page: {slug.replace('-', ' ').title()}",
+                    description=slug.replace("-", " ").title(),
                     mimeType="text/markdown",
                 ))
         return resources
@@ -255,66 +239,197 @@ def create_server() -> Server:
     @app.read_resource()
     async def read_resource(uri: str) -> str:
         from lighthouse.config import WIKI_DIR
-
         if uri == "lighthouse://index":
-            index_path = WIKI_DIR / "index.md"
-            return index_path.read_text() if index_path.exists() else "(no index yet)"
-
+            p = WIKI_DIR / "index.md"
+            return p.read_text() if p.exists() else "(no index)"
         if uri == "lighthouse://reflection":
-            ref_path = WIKI_DIR / "reflection.md"
-            return ref_path.read_text() if ref_path.exists() else "(no reflection notes yet)"
-
+            p = WIKI_DIR / "reflection.md"
+            return p.read_text() if p.exists() else "(no reflection notes)"
         if uri.startswith("lighthouse://wiki/"):
             parts = uri.replace("lighthouse://wiki/", "").split("/", 1)
             if len(parts) == 2:
-                category, slug = parts
-                path = WIKI_DIR / category / f"{slug}.md"
-                if path.exists():
-                    return path.read_text()
+                p = WIKI_DIR / parts[0] / f"{parts[1]}.md"
+                if p.exists():
+                    return p.read_text()
             return "(page not found)"
-
         return f"(unknown resource: {uri})"
 
     return app
 
 
 # ---------------------------------------------------------------------------
-# Tool dispatch — reuses existing Lighthouse modules
+# get_context — the core synthesis tool
 # ---------------------------------------------------------------------------
 
-def _dispatch_tool(name: str, args: dict) -> str:
-    """Route an MCP tool call to the right Lighthouse function.
+_WIKILINK_RE = re.compile(r"\[\[([^\]\n|]+?)(?:\|[^\]\n]*)?\]\]")
 
-    Returns a string (the tool result as text). Errors are returned as
-    descriptive strings, not exceptions — so the LLM can see what went
-    wrong and recover.
+
+def _get_context(topic: str) -> str:
+    """Synthesize personal context for a topic from multiple sources.
+
+    Does in ONE call what would otherwise take 5-6 separate tool calls:
+    1. Semantic wiki search for the topic
+    2. User profile
+    3. Recent observations mentioning the topic
+    4. Related pages (one-hop wiki-link traversal from matched pages)
+
+    Returns a structured markdown bundle Claude can consume directly.
     """
+    from lighthouse.config import WIKI_DIR, OBSERVATIONS_LOG
+    from lighthouse.identity import load_user
 
-    if name == "search_wiki":
+    sections: list[str] = []
+
+    # --- User profile (always included, cheap) ---
+    user = load_user()
+    sections.append(
+        f"## Who the user is\n\n"
+        f"**{user.name}** ({user.email})\n\n"
+        f"{user.profile_md.strip()}"
+    )
+
+    # --- Wiki search for the topic ---
+    matched_pages: list[dict] = []
+    matched_slugs: set[str] = set()
+    try:
         from lighthouse.llm.search import search as qmd_search
-        query = args.get("query", "")
-        limit = min(args.get("limit", 5), 20)
-        result = qmd_search(query, limit=limit, collection="wiki")
-        return result or "(no results)"
+        search_result = qmd_search(topic, limit=5, collection="wiki")
+        if search_result:
+            sections.append(f"## Wiki pages matching \"{topic}\"\n\n{search_result}")
+            # Extract slugs from the search result for link traversal
+            # QMD returns formatted text with page headers like "### category/slug"
+            for match in re.finditer(r"###\s+(\w+)/([a-z0-9-]+)", search_result):
+                cat, slug = match.group(1), match.group(2)
+                matched_slugs.add(slug)
+                path = WIKI_DIR / cat / f"{slug}.md"
+                if path.exists():
+                    matched_pages.append({
+                        "category": cat,
+                        "slug": slug,
+                        "content": path.read_text(),
+                    })
+    except Exception:
+        log.debug("QMD search failed", exc_info=True)
 
-    if name == "read_page":
-        from lighthouse.chat_tools import read_page
-        r = read_page(args.get("category", ""), args.get("slug", ""))
-        if r.ok and r.data:
-            if r.data.get("exists"):
-                return r.data["content"]
-            return f"Page {args.get('category')}/{args.get('slug')} does not exist."
-        return r.message
+    # Fallback: if QMD returned nothing, try a direct slug/title match
+    if not matched_pages:
+        topic_slug = re.sub(r"[^a-z0-9]+", "-", topic.lower()).strip("-")
+        topic_lower = topic.lower()
+        for category in ("people", "projects"):
+            cat_dir = WIKI_DIR / category
+            if not cat_dir.is_dir():
+                continue
+            for path in cat_dir.glob("*.md"):
+                slug = path.stem
+                if topic_slug in slug or topic_lower in slug.replace("-", " "):
+                    try:
+                        content = path.read_text()
+                        matched_pages.append({
+                            "category": category,
+                            "slug": slug,
+                            "content": content,
+                        })
+                        matched_slugs.add(slug)
+                    except OSError:
+                        continue
 
-    if name == "write_page":
-        from lighthouse.chat_tools import write_page
-        r = write_page(
-            args.get("category", ""),
-            args.get("slug", ""),
-            args.get("content", ""),
-            args.get("reason", "MCP tool call"),
+        if matched_pages:
+            page_text = "\n\n".join(
+                f"### {p['category']}/{p['slug']}\n\n{p['content'].strip()}"
+                for p in matched_pages[:5]
+            )
+            sections.append(f"## Wiki pages matching \"{topic}\"\n\n{page_text}")
+
+    if not matched_pages:
+        sections.append(
+            f"## Wiki pages matching \"{topic}\"\n\n"
+            f"(no pages found — the user may not have a wiki entry for this topic yet)"
         )
-        # Commit the change
+
+    # --- Related pages (one-hop link traversal) ---
+    linked_slugs: set[str] = set()
+    for page in matched_pages:
+        for m in _WIKILINK_RE.finditer(page["content"]):
+            link_target = m.group(1).strip().lower().replace(" ", "-")
+            if link_target not in matched_slugs:
+                linked_slugs.add(link_target)
+
+    if linked_slugs:
+        related: list[str] = []
+        for slug in sorted(linked_slugs)[:10]:
+            for category in ("people", "projects"):
+                path = WIKI_DIR / category / f"{slug}.md"
+                if path.exists():
+                    try:
+                        content = path.read_text()
+                        # Just the first paragraph, not the full page
+                        lines = [l for l in content.split("\n") if l.strip() and not l.startswith("---") and not l.startswith("#")]
+                        summary = lines[0][:200] if lines else "(empty)"
+                        related.append(f"- **{category}/{slug}**: {summary}")
+                    except OSError:
+                        continue
+                    break
+        if related:
+            sections.append("## Related pages (linked from the above)\n\n" + "\n".join(related))
+
+    # --- Recent observations mentioning the topic ---
+    if OBSERVATIONS_LOG.exists():
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+        topic_words = set(topic.lower().split())
+        matching_obs: list[str] = []
+        try:
+            for line in OBSERVATIONS_LOG.read_text().splitlines()[-1000:]:
+                try:
+                    d = json.loads(line)
+                    ts = datetime.fromisoformat(d["timestamp"])
+                    if ts.tzinfo is None:
+                        ts = ts.astimezone(timezone.utc)
+                    if ts < cutoff:
+                        continue
+                    text_lower = (d.get("text", "") + " " + d.get("sender", "")).lower()
+                    if any(w in text_lower for w in topic_words):
+                        hm = ts.strftime("%H:%M")
+                        matching_obs.append(
+                            f"[{hm}] [{d.get('source', '?')}] "
+                            f"{d.get('sender', '?')}: {d.get('text', '')[:200]}"
+                        )
+                except (json.JSONDecodeError, KeyError, ValueError):
+                    continue
+        except OSError:
+            pass
+
+        if matching_obs:
+            obs_text = "\n".join(matching_obs[-20:])
+            sections.append(f"## Recent activity mentioning \"{topic}\" (last 24h)\n\n{obs_text}")
+
+    return "\n\n---\n\n".join(sections)
+
+
+# ---------------------------------------------------------------------------
+# Tool dispatch
+# ---------------------------------------------------------------------------
+
+def _dispatch(name: str, args: dict) -> str:
+    if name == "get_context":
+        topic = args.get("topic", "")
+        if not topic:
+            return "(empty topic — tell me what you need context about)"
+        return _get_context(topic)
+
+    if name == "update_wiki":
+        action = args.get("action", "write")
+        category = args.get("category", "")
+        slug = args.get("slug", "")
+        reason = args.get("reason", "MCP update")
+
+        if action == "delete":
+            from lighthouse.chat_tools import delete_page
+            r = delete_page(category, slug, reason)
+        else:
+            content = args.get("content", "")
+            from lighthouse.chat_tools import write_page
+            r = write_page(category, slug, content, reason)
+
         if r.ok:
             try:
                 from lighthouse.wiki_git import commit_changes
@@ -325,35 +440,7 @@ def _dispatch_tool(name: str, args: dict) -> str:
                 pass
         return r.message
 
-    if name == "delete_page":
-        from lighthouse.chat_tools import delete_page
-        r = delete_page(
-            args.get("category", ""),
-            args.get("slug", ""),
-            args.get("reason", "MCP tool call"),
-        )
-        if r.ok:
-            try:
-                from lighthouse.wiki_git import commit_changes
-                from lighthouse.wiki_catalog import rebuild_index
-                rebuild_index()
-                commit_changes(f"mcp: {r.message}")
-            except Exception:
-                pass
-        return r.message
-
-    if name == "list_pages":
-        from lighthouse.chat_tools import list_pages
-        r = list_pages(args.get("category"))
-        if r.ok and r.data:
-            pages = r.data["pages"]
-            if not pages:
-                return "(no pages)"
-            lines = [f"- {p['category']}/{p['slug']} — {p['title']}" for p in pages]
-            return "\n".join(lines)
-        return r.message
-
-    if name == "recent_observations":
+    if name == "recent_activity":
         from lighthouse.config import OBSERVATIONS_LOG
         minutes = min(args.get("minutes", 30), 1440)
         source_filter = args.get("source")
@@ -379,44 +466,19 @@ def _dispatch_tool(name: str, args: dict) -> str:
                     continue
         return "\n".join(lines[-100:]) or f"(no observations in the last {minutes} minutes)"
 
-    if name == "user_profile":
-        from lighthouse.identity import load_user
-        user = load_user()
-        return (
-            f"Name: {user.name}\n"
-            f"First name: {user.first_name}\n"
-            f"Email: {user.email}\n"
-            f"Phone: {user.phone}\n"
-            f"\n{user.profile_md}"
-        )
-
-    if name == "search_contacts":
-        query = args.get("query", "").lower().strip()
-        if not query:
-            return "(empty query)"
-        from lighthouse.observations.contacts import _name_set, _build_index
-        if _name_set is None:
-            _build_index()
-        names = _name_set or set()
-        matches = [n for n in sorted(names) if query in n.lower()]
-        if not matches:
-            return f"(no contacts matching '{query}')"
-        return "\n".join(matches[:20])
-
     return f"(unknown tool: {name})"
 
 
 # ---------------------------------------------------------------------------
-# Entry point — called by `lighthouse mcp`
+# Entry point
 # ---------------------------------------------------------------------------
 
 async def run_mcp_server() -> None:
-    """Start the MCP server over stdio.
-
-    This is what Claude Desktop / Claude Code connects to. The transport
-    is stdio (stdin/stdout) as required by the MCP protocol for subprocess
-    servers. Logs go to stderr so they don't interfere with the protocol.
-    """
+    """Start the MCP server over stdio for Claude Desktop / Code."""
     server = create_server()
     async with stdio_server() as (read_stream, write_stream):
-        await server.run(read_stream, write_stream, server.create_initialization_options())
+        await server.run(
+            read_stream,
+            write_stream,
+            server.create_initialization_options(),
+        )
