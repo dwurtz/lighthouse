@@ -586,26 +586,16 @@ async def _run_reflection_body() -> dict:
                 except Exception:
                     log.exception("write failed: %s/%s", category, slug)
 
-    # Execute goal_actions — structured actions from the reflect output.
-    # These are real-world operations the agent performs on behalf of the
-    # user: creating calendar events, sending reminders, etc. Gated by
-    # goals.md — Pro only emits actions when they match a user-defined goal.
+    # Execute goal_actions — real-world operations triggered by goals.md
+    # automations. Uses the shared executor module (same as integrate).
     goal_actions = data.get("goal_actions") or []
     actions_executed = 0
-    for ga in goal_actions:
-        action_type = ga.get("type", "")
-        params = ga.get("params") or {}
-        reason = ga.get("reason", "")
+    if goal_actions:
         try:
-            if action_type == "calendar_create":
-                _execute_calendar_create(params, reason)
-                actions_executed += 1
-            else:
-                log.info("reflect goal_action: unknown type %s — skipping", action_type)
+            from lighthouse.goal_actions import execute_all
+            actions_executed = execute_all(goal_actions)
         except Exception:
-            log.exception("reflect goal_action %s failed", action_type)
-    if actions_executed:
-        log.info("reflect: executed %d goal action(s)", actions_executed)
+            log.exception("reflect goal_actions failed")
 
     # Deterministic linkify pass — catches any entity mentions the LLM
     # left as plain text. Runs AFTER the LLM updates so the catalog

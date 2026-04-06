@@ -412,6 +412,8 @@ class AgentLoop:
         all_wiki_updates: list[dict] = []
         all_reasoning: list[str] = []
 
+        all_goal_actions: list[dict] = []
+
         for batch_name, batch_items in [("messages", message_items), ("context", context_items)]:
             if not batch_items:
                 continue
@@ -425,6 +427,7 @@ class AgentLoop:
                 updates = result.get("wiki_updates", [])
                 reasoning = result.get("reasoning", "")
                 all_wiki_updates.extend(updates)
+                all_goal_actions.extend(result.get("goal_actions") or [])
                 if reasoning:
                     all_reasoning.append(reasoning)
                     log.info("Reasoning (%s): %s", batch_name, reasoning[:200])
@@ -443,6 +446,19 @@ class AgentLoop:
                 None, lambda: wiki_store.apply_updates(wiki_updates)
             )
         self.matches_found += applied
+
+        # 4a. Execute goal_actions — real-world operations triggered by
+        #      automations in goals.md (calendar events, email drafts, tasks,
+        #      notifications). Runs immediately at integrate-time so actions
+        #      fire within minutes of the triggering observation.
+        if all_goal_actions:
+            try:
+                from lighthouse.goal_actions import execute_all
+                actions_done = execute_all(all_goal_actions)
+                if actions_done:
+                    log.info("Cycle: executed %d goal action(s)", actions_done)
+            except Exception:
+                log.exception("goal_actions execution failed")
 
         # Human-readable log in the wiki (browse in Obsidian).
         try:
