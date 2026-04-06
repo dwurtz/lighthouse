@@ -119,12 +119,23 @@ class GeminiClient:
         from lighthouse.identity import load_user
         user_fields = load_user().as_prompt_fields()
 
+        # Goals — standing instructions that shape what the agent prioritizes.
+        from lighthouse.config import WIKI_DIR
+        goals_path = WIKI_DIR / "goals.md"
+        goals_text = ""
+        try:
+            if goals_path.exists():
+                goals_text = goals_path.read_text()
+        except Exception:
+            pass
+
         prompt = load_prompt("integrate").format(
             current_time=current_time,
             day_of_week=day_of_week,
             time_of_day=time_of_day,
             contacts_text=contacts_text,
             schema=schema,
+            goals=goals_text or "(no goals.md)",
             wiki_text=wiki_text or "(empty)",
             signals_text=signals_text or "(no new signals)",
             **user_fields,

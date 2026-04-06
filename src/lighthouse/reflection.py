@@ -188,6 +188,56 @@ def _recent_events_text(days: int = 7) -> str:
     return "\n\n---\n\n".join(lines)
 
 
+def _execute_calendar_create(params: dict, reason: str) -> None:
+    """Create a Google Calendar event via gws.
+
+    Called by the reflect cycle when a goal_action of type 'calendar_create'
+    is emitted. The params dict should have: summary, start, end, and
+    optionally location and description.
+    """
+    import subprocess as _sp
+
+    summary = params.get("summary", "")
+    start = params.get("start", "")
+    end = params.get("end", "")
+    if not summary or not start or not end:
+        log.warning("calendar_create: missing required params (summary/start/end)")
+        return
+
+    event_body: dict = {
+        "summary": summary,
+        "start": {"dateTime": start},
+        "end": {"dateTime": end},
+    }
+    if params.get("location"):
+        event_body["location"] = params["location"]
+    if params.get("description"):
+        event_body["description"] = params["description"]
+
+    try:
+        result = _sp.run(
+            [
+                "gws", "calendar", "events", "insert",
+                "--params", json.dumps({"calendarId": "primary"}),
+                "--json", json.dumps(event_body),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        if result.returncode == 0:
+            log.info("calendar_create: created '%s' at %s — %s", summary, start, reason)
+            try:
+                from lighthouse.activity_log import append_log_entry
+                append_log_entry("reflect", f"created calendar event: {summary} at {start}")
+            except Exception:
+                pass
+        else:
+            log.warning("calendar_create failed: %s", result.stderr[:200])
+    except Exception:
+        log.exception("calendar_create subprocess failed")
+
+
 _NAME_RE = re.compile(r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2})\b")
 _EMAIL_RE = re.compile(r"<([^>]+@[^>\s]+)>|([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})")
 
@@ -453,6 +503,12 @@ async def _run_reflection_body() -> dict:
     wiki_text = wiki_store.render_for_prompt()
     signals_text = _recent_signals_text()
 
+    # Goals — standing instructions, automations, and one-time tasks.
+    # These shape what reflect prioritizes, what it flags, and what
+    # actions it recommends. The user edits goals.md in Obsidian.
+    goals_path = WIKI_DIR / "goals.md"
+    goals_text = goals_path.read_text() if goals_path.exists() else "(no goals.md)"
+
     # Recent events — the timestamped event pages from the last 7 days.
     # Reflect needs these to cross-reference what happened against entity
     # pages and spot gaps, contradictions, and stale commitments.
@@ -476,6 +532,7 @@ async def _run_reflection_body() -> dict:
         current_time=datetime.now().strftime("%A, %B %d, %Y — %H:%M"),
         contacts_text=contacts_text,
         schema=schema,
+        goals=goals_text,
         wiki_text=wiki_text,
         recent_events=events_text,
         recent_observations=signals_text,
@@ -528,6 +585,27 @@ async def _run_reflection_body() -> dict:
                              action, category, slug, (u.get("reason") or "")[:80])
                 except Exception:
                     log.exception("write failed: %s/%s", category, slug)
+
+    # Execute goal_actions — structured actions from the reflect output.
+    # These are real-world operations the agent performs on behalf of the
+    # user: creating calendar events, sending reminders, etc. Gated by
+    # goals.md — Pro only emits actions when they match a user-defined goal.
+    goal_actions = data.get("goal_actions") or []
+    actions_executed = 0
+    for ga in goal_actions:
+        action_type = ga.get("type", "")
+        params = ga.get("params") or {}
+        reason = ga.get("reason", "")
+        try:
+            if action_type == "calendar_create":
+                _execute_calendar_create(params, reason)
+                actions_executed += 1
+            else:
+                log.info("reflect goal_action: unknown type %s — skipping", action_type)
+        except Exception:
+            log.exception("reflect goal_action %s failed", action_type)
+    if actions_executed:
+        log.info("reflect: executed %d goal action(s)", actions_executed)
 
     # Deterministic linkify pass — catches any entity mentions the LLM
     # left as plain text. Runs AFTER the LLM updates so the catalog
