@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Déjà — From chatbot to chief of staff</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;1,300;1,400;1,500&family=DM+Mono:wght@300;400&family=Inter:wght@300;400;500&display=swap" rel="stylesheet">
@@ -177,7 +178,7 @@ footer{border-top:1px solid var(--border);padding:48px 0}
     <ul class="nav-l">
       <li><a href="#features">Features</a></li>
       <li><a href="#how">How it works</a></li>
-      <li><a href="#install">Download</a></li>
+      <li><a href="/download">Download</a></li>
     </ul>
   </div>
 </nav>
@@ -187,7 +188,7 @@ footer{border-top:1px solid var(--border);padding:48px 0}
   <div class="w">
     <div class="hero-grid">
       <div class="hero-left">
-        <div class="tag r">Free · Open Source · macOS</div>
+        <div class="tag r">macOS · Runs Locally</div>
         <h1 class="r" style="transition-delay:0.1s">From chatbot<br>to <em>chief of staff</em></h1>
         <p class="hero-sub r" style="transition-delay:0.2s">Déjà connects your email, calendar, messages, and meetings to the AI you already use. Install once — every conversation gets smarter.</p>
         <div class="cta r" style="transition-delay:0.3s">
@@ -240,9 +241,9 @@ footer{border-top:1px solid var(--border);padding:48px 0}
         <p>Reads your last 30 days on first launch. By the time you open Claude, it already knows your world.</p>
       </div>
       <div class="card">
-        <div class="label-sm">Open source</div>
+        <div class="label-sm">Your data</div>
         <h3>Your data, your control</h3>
-        <p>Your wiki lives as plain files on your Mac. Fully open source — read the code, audit every prompt, run your own models.</p>
+        <p>Your wiki lives as plain files on your Mac. Read them in Obsidian, search from the terminal, back them up however you want.</p>
       </div>
     </div>
   </div>
@@ -279,7 +280,7 @@ footer{border-top:1px solid var(--border);padding:48px 0}
 <section class="inst" id="install">
   <div class="w">
     <h2 class="r">Try it in <em>sixty seconds</em></h2>
-    <p class="r">Free, open source, runs entirely on your Mac.</p>
+    <p class="r">Runs entirely on your Mac.</p>
     <div class="r" style="transition-delay:0.1s">
       <a href="#" class="btn btn-p">Download for Mac</a>
     </div>
@@ -291,7 +292,7 @@ footer{border-top:1px solid var(--border);padding:48px 0}
     <div class="foot-l">
       <svg viewBox="4400 5100 3000 1800" xmlns="http://www.w3.org/2000/svg"><g transform="translate(0,12000) scale(1,-1)" fill="#ffffff"><path d="M6216 6740 c-39 -31 -42 -42 -21 -88 45 -98 184 -49 157 55 -15 63 -80 79 -136 33z"/><path d="M4524 6666 c5 -47 18 -57 93 -72 416 -82 402 -753 -18 -824 -71 -12 -79 -19 -79 -74 0 -59 1 -59 85 -45 506 84 610 789 151 1017 -145 72 -241 71 -232 -2z"/><path d="M6220 5944 c0 -495 -11 -564 -91 -564 -19 0 -29 -21 -29 -60 0 -69 30 -76 118 -31 111 57 122 117 122 649 l0 482 -60 0 -60 0 0 -476z"/><path d="M5400 6360 c-119 -64 -170 -163 -170 -330 0 -324 329 -496 592 -308 l62 43 -42 42 c-35 35 -48 38 -77 18 -119 -85 -259 -81 -347 9 -121 123 -102 135 219 142 l288 5 -9 108 c-21 251 -291 393 -516 271z m345 -139 c109 -122 86 -141 -175 -141 -249 0 -252 2 -184 102 92 136 256 154 359 39z"/><path d="M6745 6361 c-91 -42 -99 -55 -60 -108 23 -32 30 -31 105 8 145 76 310 16 310 -113 0 -46 -5 -48 -151 -48 -190 0 -278 -35 -322 -128 -125 -261 282 -444 519 -233 80 72 108 398 45 519 -71 137 -269 183 -446 103z m355 -432 c0 -143 -190 -226 -316 -138 -128 90 -25 209 180 209 l136 0 0 -71z"/></g></svg>
     </div>
-    <span class="foot-r">Free · Open Source · macOS</span>
+    <span class="foot-r">macOS · Runs Locally</span>
   </div>
 </footer>
 
@@ -355,15 +356,71 @@ function dotRing(canvas,radius,count,dotSize,speed){
   const cx=W/2,cy=H/2,radius=380;
   const COUNT=80;
 
-  const COLORS=['#7eb8da','#d4a574','#a8d4a0','#c9b3df','#dfb3b3','#dfd4b3','#b3c9df'];
-  const LABELS=[
-    'Email from Sarah','Reply to James','Marketing thread','Invoice received',
-    'Standup at 10am','1:1 with manager','Client call','Board review',
-    'iMessage from Mom','WhatsApp group','Slack DM','Voice note',
-    'Meeting notes saved','Granola transcript','Action items','Summary generated',
-    'New contact: Lisa','Phone number added','Company enriched',
-    'Project updated','Status changed','Commitment tracked','Follow-up drafted',
-    'Screenshot analyzed','Browser visit','Calendar synced','Drive file opened',
+  // Colors by signal type
+  const C={
+    email:'#7eb8da',    // blue
+    cal:'#d4a574',      // amber
+    msg:'#a8d4a0',      // green
+    meet:'#c9b3df',     // purple
+    contact:'#dfb3b3',  // pink
+    project:'#dfd4b3',  // gold
+    wiki:'#b3c9df',     // slate
+  };
+  const EVENTS=[
+    // Email — sent, received, threads
+    {l:'Sent reply to contractor',c:C.email},
+    {l:'Email from recruiter',c:C.email},
+    {l:'Thread: Q2 pricing rollback',c:C.email},
+    {l:'Follow-up drafted to Sarah',c:C.email},
+    {l:'Invoice from landscaper',c:C.email},
+    {l:'Sent: listing agreement signed',c:C.email},
+    {l:'Email from kids\' coach',c:C.email},
+    {l:'Newsletter archived',c:C.email},
+    {l:'Thread: relocation logistics',c:C.email},
+    {l:'Reply to design feedback',c:C.email},
+    // Calendar — past & upcoming
+    {l:'1:1 with manager ended',c:C.cal},
+    {l:'Board review tomorrow 2pm',c:C.cal},
+    {l:'Call with Alex — 35 min',c:C.cal},
+    {l:'Team standup ended',c:C.cal},
+    {l:'Interview loop completed',c:C.cal},
+    {l:'Parent-teacher conf at 4pm',c:C.cal},
+    {l:'Dentist appointment moved',c:C.cal},
+    // Messages — iMessage, WhatsApp, Slack
+    {l:'iMessage from partner',c:C.msg},
+    {l:'WhatsApp: soccer parents',c:C.msg},
+    {l:'Slack DM from Amanda',c:C.msg},
+    {l:'iMessage: "on my way"',c:C.msg},
+    {l:'WhatsApp: sent voice note',c:C.msg},
+    {l:'Slack thread: theme bug',c:C.msg},
+    {l:'iMessage from Mom',c:C.msg},
+    {l:'Group chat: weekend plans',c:C.msg},
+    // Meetings — Granola, Meet transcripts
+    {l:'Meeting notes: product sync',c:C.meet},
+    {l:'Transcript: investor call',c:C.meet},
+    {l:'Action items extracted',c:C.meet},
+    {l:'Granola: design review',c:C.meet},
+    {l:'Meeting with no notes recorded',c:C.meet},
+    {l:'Transcript: onboarding call',c:C.meet},
+    // Contacts — enrichment
+    {l:'Phone added: +1 480-600-8011',c:C.contact},
+    {l:'New contact: Jake Fowler',c:C.contact},
+    {l:'Company enriched: Shopify',c:C.contact},
+    {l:'Email found: kaz@opendoor.com',c:C.contact},
+    {l:'Contact merged: duplicate',c:C.contact},
+    // Projects — updates, status
+    {l:'Project updated: home reno',c:C.project},
+    {l:'Commitment tracked: send deck',c:C.project},
+    {l:'Project closed: offer declined',c:C.project},
+    {l:'New project: Seattle move',c:C.project},
+    {l:'Stalled: waiting on reply',c:C.project},
+    // Wiki — page writes
+    {l:'Wiki: created people/jake-fowler',c:C.wiki},
+    {l:'Wiki: updated pricing-overhaul',c:C.wiki},
+    {l:'Wiki: linked 3 entities',c:C.wiki},
+    {l:'Wiki: enriched 12 contacts',c:C.wiki},
+    {l:'Reflect: cleaned stale facts',c:C.wiki},
+    {l:'Wiki: 94 people, 23 projects',c:C.wiki},
   ];
 
   const dots=[];
@@ -375,7 +432,7 @@ function dotRing(canvas,radius,count,dotSize,speed){
 
   for(let i=0;i<COUNT;i++){
     const angle=(Math.PI*2/COUNT)*i;
-    const ci=Math.floor(Math.random()*COLORS.length);
+    const ev=EVENTS[i%EVENTS.length];
     dots.push({
       baseAngle:angle,
       phase:Math.random()*Math.PI*2,
@@ -383,12 +440,11 @@ function dotRing(canvas,radius,count,dotSize,speed){
       freqR:0.35+Math.random()*0.35,
       ampA:0.008+Math.random()*0.015,
       ampR:0.02+Math.random()*0.04,
-      color:COLORS[ci],
+      color:ev.c,
       size:1+Math.random()*1.5,
       opacity:0.4+Math.random()*0.5,
-      // activation state
-      active:0, // 0-1 for glow intensity
-      label:LABELS[Math.floor(Math.random()*LABELS.length)],
+      active:0,
+      label:ev.l,
     });
   }
 
