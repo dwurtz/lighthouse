@@ -1,27 +1,27 @@
 #!/bin/bash
-# Build and sign Lighthouse app + recorder helper.
+# Build and sign Deja app + recorder helper.
 # The cert-based signature ensures TCC permissions survive recompiles.
 
 set -e
 DIR="$(cd "$(dirname "$0")" && pwd)"
-APP="$DIR/../Lighthouse.app"
+APP="$DIR/../Deja.app"
 
-echo "Compiling Lighthouse..."
+echo "Compiling Deja..."
 xcrun swiftc -parse-as-library \
     -framework SwiftUI -framework AppKit \
-    -o "$DIR/Lighthouse" "$DIR/Lighthouse.swift"
+    -o "$DIR/Deja" "$DIR/Deja.swift"
 
-echo "Compiling LighthouseRecorder..."
+echo "Compiling DejaRecorder..."
 xcrun swiftc \
     -framework Foundation -framework ScreenCaptureKit \
     -framework AVFoundation -framework CoreMedia \
-    -o "$DIR/LighthouseRecorder" "$DIR/LighthouseRecorder.swift"
+    -o "$DIR/DejaRecorder" "$DIR/DejaRecorder.swift"
 
 echo "Copying to app bundle..."
-cp "$DIR/Lighthouse" "$APP/Contents/MacOS/Lighthouse"
+cp "$DIR/Deja" "$APP/Contents/MacOS/Deja"
 
 echo "Signing..."
-codesign --force --sign "Lighthouse Dev" --deep "$APP"
-codesign --force --sign "Lighthouse Dev" "$DIR/LighthouseRecorder"
+codesign --force --sign "Deja Dev" --deep "$APP"
+codesign --force --sign "Deja Dev" "$DIR/DejaRecorder"
 
 echo "Done. Restart the app to pick up changes."

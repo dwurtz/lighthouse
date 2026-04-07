@@ -10,8 +10,8 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from lighthouse.observations.collector import Observer
-from lighthouse.observations.types import Observation
+from deja.observations.collector import Observer
+from deja.observations.types import Observation
 
 
 def _mk_signal(id_key: str, source: str = "imessage", text: str = "hi") -> Observation:

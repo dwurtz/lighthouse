@@ -5,7 +5,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-from lighthouse.health_check import (
+from deja.health_check import (
     CheckResult,
     _check_ffmpeg,
     _check_gemini_key,
@@ -87,7 +87,7 @@ def test_check_gemini_key_present(monkeypatch):
     monkeypatch.setenv("GEMINI_API_KEY", "fake-key-abcdef1234")
     monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
     # Invalidate the process-level secrets cache so the env var is re-read
-    import lighthouse.secrets as sec
+    import deja.secrets as sec
     monkeypatch.setattr(sec, "_cache_valid", False)
     r = _check_gemini_key()
     assert r.ok is True
@@ -99,7 +99,7 @@ def test_check_gemini_key_missing(monkeypatch):
     monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
     # Invalidate cache AND stub the keychain read so this test doesn't
     # depend on what's in the developer's actual login keychain.
-    import lighthouse.secrets as sec
+    import deja.secrets as sec
     monkeypatch.setattr(sec, "_cache_valid", False)
     monkeypatch.setattr(sec, "_read_keychain", lambda *a, **kw: None)
     r = _check_gemini_key()

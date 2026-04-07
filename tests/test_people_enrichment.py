@@ -18,7 +18,7 @@ import pytest
 
 def test_merge_adds_email_as_list():
     """Contact fields are always list-valued — supports multiple per person."""
-    from lighthouse.people_enrichment import ContactMatch, _merge_contact_fields
+    from deja.people_enrichment import ContactMatch, _merge_contact_fields
     fm = {"keywords": ["soccer"]}
     match = ContactMatch(emails=["jane@example.com"], sources=["macos"])
     merged, change = _merge_contact_fields(fm, match)
@@ -31,7 +31,7 @@ def test_merge_adds_email_as_list():
 
 
 def test_merge_appends_multiple_emails():
-    from lighthouse.people_enrichment import ContactMatch, _merge_contact_fields
+    from deja.people_enrichment import ContactMatch, _merge_contact_fields
     fm = {"emails": ["jane@old.com"]}
     match = ContactMatch(emails=["jane@new.com", "jane@old.com"], sources=["macos"])
     merged, change = _merge_contact_fields(fm, match)
@@ -43,7 +43,7 @@ def test_merge_appends_multiple_emails():
 def test_merge_migrates_legacy_singular_email_to_list():
     """Pages from before this change used ``email: foo@bar.com``; first
     touch should migrate them to ``emails: [foo@bar.com]``."""
-    from lighthouse.people_enrichment import ContactMatch, _merge_contact_fields
+    from deja.people_enrichment import ContactMatch, _merge_contact_fields
     fm = {"email": "jane@legacy.com"}
     match = ContactMatch(emails=["jane@new.com"], sources=["macos"])
     merged, change = _merge_contact_fields(fm, match)
@@ -52,7 +52,7 @@ def test_merge_migrates_legacy_singular_email_to_list():
 
 
 def test_merge_appends_new_phone_only():
-    from lighthouse.people_enrichment import ContactMatch, _merge_contact_fields
+    from deja.people_enrichment import ContactMatch, _merge_contact_fields
     fm = {"phones": ["+1 415 555 1234"]}
     match = ContactMatch(
         phones=["(415) 555-1234", "+1 212 555 9999"],  # first is a duplicate (normalized)
@@ -67,7 +67,7 @@ def test_merge_appends_new_phone_only():
 
 
 def test_merge_migrates_legacy_singular_phone_to_list():
-    from lighthouse.people_enrichment import ContactMatch, _merge_contact_fields
+    from deja.people_enrichment import ContactMatch, _merge_contact_fields
     fm = {"phone": "+14155551234"}
     match = ContactMatch(phones=["+12125559999"], sources=["macos"])
     merged, change = _merge_contact_fields(fm, match)
@@ -77,7 +77,7 @@ def test_merge_migrates_legacy_singular_phone_to_list():
 
 def test_merge_single_phone_still_uses_list_form():
     """Even a single phone is stored as a list — no singular special case."""
-    from lighthouse.people_enrichment import ContactMatch, _merge_contact_fields
+    from deja.people_enrichment import ContactMatch, _merge_contact_fields
     fm = {}
     match = ContactMatch(phones=["+14155551234"], sources=["macos"])
     merged, change = _merge_contact_fields(fm, match)
@@ -86,7 +86,7 @@ def test_merge_single_phone_still_uses_list_form():
 
 
 def test_merge_adds_company_when_missing():
-    from lighthouse.people_enrichment import ContactMatch, _merge_contact_fields
+    from deja.people_enrichment import ContactMatch, _merge_contact_fields
     fm = {}
     match = ContactMatch(company="Acme Corp", sources=["macos"])
     merged, change = _merge_contact_fields(fm, match)
@@ -95,7 +95,7 @@ def test_merge_adds_company_when_missing():
 
 
 def test_merge_never_overwrites_existing_company():
-    from lighthouse.people_enrichment import ContactMatch, _merge_contact_fields
+    from deja.people_enrichment import ContactMatch, _merge_contact_fields
     fm = {"company": "Legacy Inc"}
     match = ContactMatch(company="New Co", sources=["macos"])
     merged, change = _merge_contact_fields(fm, match)
@@ -104,7 +104,7 @@ def test_merge_never_overwrites_existing_company():
 
 
 def test_merge_empty_match_no_changes():
-    from lighthouse.people_enrichment import ContactMatch, _merge_contact_fields
+    from deja.people_enrichment import ContactMatch, _merge_contact_fields
     fm = {"keywords": ["soccer"]}
     match = ContactMatch()
     merged, change = _merge_contact_fields(fm, match)
@@ -117,7 +117,7 @@ def test_merge_empty_match_no_changes():
 # ---------------------------------------------------------------------------
 
 def test_apply_enrichment_preserves_body_verbatim():
-    from lighthouse.people_enrichment import ContactMatch, _apply_enrichment
+    from deja.people_enrichment import ContactMatch, _apply_enrichment
     text = (
         "---\n"
         "keywords: [soccer, parent]\n"
@@ -146,7 +146,7 @@ def test_apply_enrichment_preserves_body_verbatim():
 def test_apply_enrichment_migrates_legacy_email_and_appends():
     """A page with legacy ``email: foo`` gets migrated to the plural form
     and the new address is appended."""
-    from lighthouse.people_enrichment import ContactMatch, _apply_enrichment
+    from deja.people_enrichment import ContactMatch, _apply_enrichment
     text = (
         "---\n"
         "email: existing@set.com\n"
@@ -164,7 +164,7 @@ def test_apply_enrichment_migrates_legacy_email_and_appends():
 
 
 def test_apply_enrichment_creates_frontmatter_when_missing():
-    from lighthouse.people_enrichment import ContactMatch, _apply_enrichment
+    from deja.people_enrichment import ContactMatch, _apply_enrichment
     text = "# Jane Doe\n\nA person with no frontmatter.\n"
     match = ContactMatch(emails=["jane@example.com"], sources=["macos"])
     new_text, change = _apply_enrichment(text, match)
@@ -180,7 +180,7 @@ def test_apply_enrichment_creates_frontmatter_when_missing():
 # ---------------------------------------------------------------------------
 
 def test_name_candidates_includes_title_and_aliases():
-    from lighthouse.people_enrichment import _name_candidates
+    from deja.people_enrichment import _name_candidates
     cands = _name_candidates("Jane Doe", ["Janey", "JD"])
     assert "jane doe" in cands
     assert "janey" in cands
@@ -190,7 +190,7 @@ def test_name_candidates_includes_title_and_aliases():
 def test_name_candidates_strips_parenthetical():
     """Page title 'Justin (Molly's Dad)' should also match plain 'Justin'
     as a fallback — but the full form wins if both are in Contacts."""
-    from lighthouse.people_enrichment import _name_candidates
+    from deja.people_enrichment import _name_candidates
     cands = _name_candidates("Justin (Molly's Dad)", [])
     assert "justin (molly's dad)" in cands
     assert "justin" in cands
@@ -201,7 +201,7 @@ def test_name_candidates_strips_parenthetical():
 # ---------------------------------------------------------------------------
 
 def test_lookup_macos_ambiguous_skips(monkeypatch):
-    from lighthouse import people_enrichment as ce
+    from deja import people_enrichment as ce
     fake_contacts = [
         {"full_name": "Justin Smith", "first": "Justin", "last": "Smith",
          "org": "Acme", "nickname": "", "phones": ["555-1111"], "emails": ["js@a.com"]},
@@ -216,7 +216,7 @@ def test_lookup_macos_ambiguous_skips(monkeypatch):
 
 
 def test_lookup_macos_unique_full_name_match(monkeypatch):
-    from lighthouse import people_enrichment as ce
+    from deja import people_enrichment as ce
     fake = [
         {"full_name": "Jane Doe", "first": "Jane", "last": "Doe",
          "org": "Acme Corp", "nickname": "Janey",
@@ -234,7 +234,7 @@ def test_lookup_macos_unique_full_name_match(monkeypatch):
 
 
 def test_lookup_macos_alias_match(monkeypatch):
-    from lighthouse import people_enrichment as ce
+    from deja import people_enrichment as ce
     fake = [{
         "full_name": "Robert Toy", "first": "Robert", "last": "Toy",
         "org": "", "nickname": "Coach Rob",
@@ -247,7 +247,7 @@ def test_lookup_macos_alias_match(monkeypatch):
 
 
 def test_lookup_macos_no_match_returns_empty(monkeypatch):
-    from lighthouse import people_enrichment as ce
+    from deja import people_enrichment as ce
     monkeypatch.setattr(ce, "_macos_cache", [])
     match = ce.lookup_macos_contact("Nobody Special", [])
     assert match.is_empty()
@@ -260,7 +260,7 @@ def test_lookup_macos_no_match_returns_empty(monkeypatch):
 
 def test_enrich_people_pages_writes_changes(isolated_home, monkeypatch):
     _, wiki = isolated_home
-    import lighthouse.people_enrichment as ce
+    import deja.people_enrichment as ce
     monkeypatch.setattr(ce, "WIKI_DIR", wiki)
     # Stub out Gmail so we don't hit the network
     monkeypatch.setattr(ce, "lookup_gmail_for_name",
@@ -295,7 +295,7 @@ def test_enrich_people_pages_writes_changes(isolated_home, monkeypatch):
 
 def test_enrich_people_pages_skips_self(isolated_home, monkeypatch):
     _, wiki = isolated_home
-    import lighthouse.people_enrichment as ce
+    import deja.people_enrichment as ce
     monkeypatch.setattr(ce, "WIKI_DIR", wiki)
     monkeypatch.setattr(ce, "_macos_cache", [
         {"full_name": "Me Myself", "first": "Me", "last": "Myself",
@@ -314,7 +314,7 @@ def test_enrich_people_pages_skips_self(isolated_home, monkeypatch):
 
 def test_enrich_people_pages_is_idempotent(isolated_home, monkeypatch):
     _, wiki = isolated_home
-    import lighthouse.people_enrichment as ce
+    import deja.people_enrichment as ce
     monkeypatch.setattr(ce, "WIKI_DIR", wiki)
     monkeypatch.setattr(ce, "lookup_gmail_for_name",
                         lambda name, **kw: ce.ContactMatch())

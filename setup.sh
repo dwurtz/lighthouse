@@ -1,8 +1,8 @@
 #!/bin/bash
-# Lighthouse — one-command setup for a fresh clone.
+# Déjà — one-command setup for a fresh clone.
 #
 # Checks prereqs, creates a venv, installs the package, then hands off
-# to `lighthouse configure` which prompts for your Gemini API key (stored
+# to `deja configure` which prompts for your Gemini API key (stored
 # in macOS Keychain), creates your identity self-page, copies the default
 # prompts into your wiki, and runs a health check.
 #
@@ -18,7 +18,7 @@ RED=$(tput setaf 1 2>/dev/null || echo)
 RESET=$(tput sgr0 2>/dev/null || echo)
 
 echo
-echo "${BOLD}Lighthouse setup${RESET}"
+echo "${BOLD}Déjà setup${RESET}"
 echo "${DIM}A personal AI agent for your Mac${RESET}"
 echo
 
@@ -27,7 +27,7 @@ echo
 fail=0
 
 if [ "$(uname)" != "Darwin" ]; then
-  echo "${RED}✗${RESET} Lighthouse targets macOS. Other platforms are not supported."
+  echo "${RED}✗${RESET} Déjà targets macOS. Other platforms are not supported."
   fail=1
 else
   echo "${GREEN}✓${RESET} macOS detected"
@@ -38,7 +38,7 @@ if command -v python3 >/dev/null 2>&1; then
   if python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)'; then
     echo "${GREEN}✓${RESET} python3 $pyver"
   else
-    echo "${RED}✗${RESET} python3 is $pyver but Lighthouse needs 3.10+. Install from https://www.python.org/downloads/"
+    echo "${RED}✗${RESET} python3 is $pyver but Déjà needs 3.10+. Install from https://www.python.org/downloads/"
     fail=1
   fi
 else
@@ -81,7 +81,7 @@ if [ ! -d venv ]; then
   python3 -m venv venv
 fi
 
-echo "Installing Lighthouse + dependencies ..."
+echo "Installing Déjà + dependencies ..."
 ./venv/bin/pip install -e . --quiet --upgrade-strategy=only-if-needed
 
 echo
@@ -110,11 +110,11 @@ if command -v gws >/dev/null 2>&1; then
   if [ "$gws_auth" = "0" ]; then
     echo "${BOLD}Google Workspace authentication${RESET}"
     echo
-    echo "Lighthouse uses the gws CLI to read your Gmail, Calendar, Drive, and"
+    echo "Déjà uses the gws CLI to read your Gmail, Calendar, Drive, and"
     echo "Tasks. You need to authenticate once with your Google Workspace account."
     echo
     echo "This opens a browser for Google OAuth — log in with the account you"
-    echo "want Lighthouse to observe (work or personal)."
+    echo "want Déjà to observe (work or personal)."
     echo
     read -p "Authenticate now? [Y/n] " auth_ans
     if [ "$auth_ans" != "n" ] && [ "$auth_ans" != "N" ]; then
@@ -130,4 +130,4 @@ echo
 
 # --- Hand off to the interactive configure command ---------------------
 
-./venv/bin/python -m lighthouse configure
+./venv/bin/python -m deja configure

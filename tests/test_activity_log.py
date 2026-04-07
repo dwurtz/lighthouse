@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from lighthouse.activity_log import _ENTRY_PREFIX, append_log_entry, read_recent_log
+from deja.activity_log import _ENTRY_PREFIX, append_log_entry, read_recent_log
 
 
 def test_append_creates_file_with_preamble(isolated_home):
@@ -57,7 +57,7 @@ def test_read_recent_log_empty_when_missing(isolated_home):
 
 def test_append_swallows_exception_on_bad_path(isolated_home, monkeypatch):
     # Simulate a disk failure — append should never raise.
-    import lighthouse.activity_log as wl
+    import deja.activity_log as wl
     monkeypatch.setattr(wl, "LOG_PATH", wl.LOG_PATH.parent / "ro" / "log.md")
     # Don't create the parent — write should fail silently
     append_log_entry("cycle", "test")  # must not raise

@@ -16,7 +16,7 @@ import pytest
 def wiki_mod_with_patched_paths(isolated_home, monkeypatch):
     """wiki_index captures WIKI_DIR and INDEX_PATH at import time — patch both."""
     _, wiki = isolated_home
-    import lighthouse.wiki_catalog as wi
+    import deja.wiki_catalog as wi
     monkeypatch.setattr(wi, "WIKI_DIR", wiki)
     monkeypatch.setattr(wi, "INDEX_PATH", wiki / "index.md")
     (wiki / "people").mkdir()
@@ -143,7 +143,7 @@ def test_rebuild_handles_unterminated_frontmatter(wiki_mod_with_patched_paths):
 
 
 def test_is_placeholder_summary_variants():
-    from lighthouse.wiki_catalog import _is_placeholder_summary
+    from deja.wiki_catalog import _is_placeholder_summary
     assert _is_placeholder_summary("---")
     assert _is_placeholder_summary("--")
     assert _is_placeholder_summary("")

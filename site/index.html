@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Déjaa — From chatbot to chief of staff</title>
+<title>Déjà — From chatbot to chief of staff</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Instrument+Serif:ital@0;1&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -50,12 +50,15 @@ body::after{
 .grid-bg{
   position:fixed;inset:0;
   background-image:
-    linear-gradient(rgba(255,255,255,0.025) 1px,transparent 1px),
-    linear-gradient(90deg,rgba(255,255,255,0.025) 1px,transparent 1px);
+    linear-gradient(rgba(255,255,255,0.07) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(255,255,255,0.07) 1px,transparent 1px);
   background-size:64px 64px;
-  mask-image:radial-gradient(ellipse 70% 50% at 50% 0%,black,transparent 70%);
+  mask-image:radial-gradient(ellipse 80% 70% at 50% 20%,black,transparent 70%);
   pointer-events:none;z-index:0;
 }
+
+/* Dot canvas */
+#dots{position:fixed;inset:0;pointer-events:none;z-index:0}
 
 /* Layout */
 .w{max-width:1200px;margin:0 auto;padding:0 32px;position:relative;z-index:1}
@@ -195,18 +198,19 @@ footer a:hover{color:var(--accent)}
 <body>
 
 <div class="grid-bg"></div>
+<canvas id="dots"></canvas>
 
 <nav>
   <div class="w nav-i">
     <a href="#" class="logo">
       <svg viewBox="0 0 28 28"><circle cx="11" cy="14" r="9" opacity="0.35"/><circle cx="17" cy="14" r="9"/></svg>
-      <span>Déjaa</span>
+      <span>Déjà</span>
     </a>
     <ul class="nav-l">
       <li><a href="#features">Features</a></li>
       <li><a href="#how">How it works</a></li>
       <li><a href="#install">Install</a></li>
-      <li><a href="https://github.com/dwurtz/dejaa">GitHub ↗</a></li>
+      <li><a href="#install">Download</a></li>
     </ul>
   </div>
 </nav>
@@ -215,17 +219,13 @@ footer a:hover{color:var(--accent)}
   <div class="w">
     <div class="tag r">Free · Open Source · macOS</div>
     <h1 class="r" style="transition-delay:0.1s">From chatbot<br>to <em>chief of staff</em></h1>
-    <p class="r" style="transition-delay:0.2s">Déjaa connects your email, calendar, messages, and meetings to the AI you already use. Install once — every conversation gets smarter.</p>
+    <p class="r" style="transition-delay:0.2s">Déjà connects your email, calendar, messages, and meetings to the AI you already use. Install once — every conversation gets smarter.</p>
     <div class="cta r" style="transition-delay:0.3s">
       <a href="#install" class="btn btn-p">Get started →</a>
-      <a href="https://github.com/dwurtz/dejaa" class="btn btn-s">GitHub</a>
+      <a href="#features" class="btn btn-s">Learn more</a>
     </div>
     <div class="logos r" style="transition-delay:0.4s">
-      <span><span class="d" style="background:#d97706;color:#fff;border-radius:50%">C</span>Claude</span>
-      <span><span class="d" style="background:#2563eb;color:#fff"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M2 8h4l2-6 2 12 2-6h4" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>Cursor</span>
-      <span><span class="d" style="background:#06b6d4;color:#fff;border-radius:50%">W</span>Windsurf</span>
-      <span><span class="d" style="background:#10a37f;color:#fff;border-radius:50%">G</span>ChatGPT</span>
-      <span><span class="d" style="background:#8b5cf6;color:#fff;border-radius:50%">C</span>Copilot</span>
+      Works with <span>Claude</span> · <span>Cursor</span> · <span>Windsurf</span> · <span>ChatGPT</span> · <span>Copilot</span> · <span>any MCP client</span>
     </div>
   </div>
 </section>
@@ -263,9 +263,9 @@ footer a:hover{color:var(--accent)}
         <p>Reads your last 30 days on first launch. By the time you open Claude, it already knows your world.</p>
       </div>
       <div class="card">
-        <div class="tag-sm">Privacy</div>
-        <h3>Runs on your Mac. Period.</h3>
-        <p>Your data never leaves your machine. Plain files, open source, no cloud, no account.</p>
+        <div class="tag-sm">Open source</div>
+        <h3>Your data, your control</h3>
+        <p>Your wiki lives as plain files on your Mac. Fully open source — read the code, audit every prompt, run your own models.</p>
       </div>
     </div>
   </div>
@@ -303,15 +303,8 @@ footer a:hover{color:var(--accent)}
   <div class="w">
     <h2 class="r">Try it in <em>sixty seconds</em></h2>
     <p class="r">Free, open source, runs entirely on your Mac.</p>
-    <div class="code-block r" style="transition-delay:0.1s">
-      <span class="p">$</span> git clone https://github.com/dwurtz/dejaa<br>
-      <span class="p">$</span> cd dejaa && python -m dejaa configure<br>
-      <span class="p">$</span> python -m dejaa monitor<br>
-      <br>
-      <span class="c"># That's it. Open Claude and ask about your day.</span>
-    </div>
-    <div class="r" style="transition-delay:0.2s">
-      <a href="https://github.com/dwurtz/dejaa" class="btn btn-p">View on GitHub →</a>
+    <div class="r" style="transition-delay:0.1s">
+      <a href="#" class="btn btn-p">Download for Mac →</a>
     </div>
   </div>
 </section>
@@ -320,13 +313,155 @@ footer a:hover{color:var(--accent)}
   <div class="w foot">
     <div class="foot-l">
       <svg viewBox="0 0 28 28"><circle cx="11" cy="14" r="7" opacity="0.35"/><circle cx="17" cy="14" r="7"/></svg>
-      <span class="foot-t">Déjaa · Open Source</span>
+      <span class="foot-t">Déjà · Open Source</span>
     </div>
-    <a href="https://github.com/dwurtz/dejaa">github.com/dwurtz/dejaa</a>
+    <span class="foot-t">macOS · Free · Open Source</span>
   </div>
 </footer>
 
 <script>
+// Grid dots — navigate the grid endlessly, avoiding each other
+(function(){
+  const c=document.getElementById('dots');
+  const ctx=c.getContext('2d');
+  const GRID=64;
+  const COUNT=25;
+  const ACCENT=[196,240,77];
+
+  let W,H,cols,rows;
+  const dots=[];
+
+  const DX=[1,0,-1,0];
+  const DY=[0,1,0,-1];
+
+  function resize(){
+    W=c.width=window.innerWidth;
+    H=c.height=window.innerHeight;
+    cols=Math.ceil(W/GRID)+1;
+    rows=Math.ceil(H/GRID)+1;
+  }
+
+  function tooClose(gx,gy,skip){
+    for(let i=0;i<dots.length;i++){
+      if(i===skip)continue;
+      const o=dots[i];
+      // check both current cell and target cell
+      const dx=Math.abs(o.tgx-gx);
+      const dy=Math.abs(o.tgy-gy);
+      if(dx+dy<=2)return true;
+    }
+    return false;
+  }
+
+  function pickDir(d,idx){
+    // never reverse — filter out the opposite of current dir
+    const reverse=(d.dir+2)%4;
+    const options=[];
+
+    for(let nd=0;nd<4;nd++){
+      if(nd===reverse)continue;
+      const nx=d.tgx+DX[nd];
+      const ny=d.tgy+DY[nd];
+      // soft wrap — allow going off edge, we'll wrap coords
+      const wx=((nx%cols)+cols)%cols;
+      const wy=((ny%rows)+rows)%rows;
+      if(tooClose(wx,wy,idx))continue;
+      // weight forward heavier for smoother paths
+      const w=nd===d.dir?6:2;
+      for(let k=0;k<w;k++)options.push(nd);
+    }
+
+    if(options.length>0){
+      return options[Math.floor(Math.random()*options.length)];
+    }
+    // all forward/side blocked — allow reverse as last resort
+    return reverse;
+  }
+
+  function init(){
+    resize();
+    for(let i=0;i<COUNT;i++){
+      const gx=Math.floor(Math.random()*cols);
+      const gy=Math.floor(Math.random()*rows);
+      const dir=Math.floor(Math.random()*4);
+      const speed=0.3+Math.random()*0.4; // varied speeds
+      dots.push({
+        gx, gy,         // current grid cell (where we came from)
+        tgx:gx+DX[dir], // target grid cell (where we're heading)
+        tgy:gy+DY[dir],
+        dir,
+        t:0,             // 0→1 interpolation between gx,gy → tgx,tgy
+        speed:speed/GRID,
+        opacity:0.2+Math.random()*0.3,
+        size:1.5+Math.random()*1,
+      });
+    }
+  }
+
+  function tick(){
+    for(let i=0;i<dots.length;i++){
+      const d=dots[i];
+      d.t+=d.speed;
+
+      if(d.t>=1){
+        // arrived — snap to target, pick new direction
+        d.gx=((d.tgx%cols)+cols)%cols;
+        d.gy=((d.tgy%rows)+rows)%rows;
+        d.t=0;
+        d.dir=pickDir(d,i);
+        d.tgx=d.gx+DX[d.dir];
+        d.tgy=d.gy+DY[d.dir];
+      }
+    }
+  }
+
+  function draw(){
+    ctx.clearRect(0,0,W,H);
+    tick();
+
+    for(let i=0;i<dots.length;i++){
+      const d=dots[i];
+      // smooth interpolation with slight ease
+      const t=d.t*d.t*(3-2*d.t); // smoothstep
+      const wx=((d.gx%cols)+cols)%cols;
+      const wy=((d.gy%rows)+rows)%rows;
+      const x=(wx+DX[d.dir]*t)*GRID;
+      const y=(wy+DY[d.dir]*t)*GRID;
+
+      // dot
+      ctx.beginPath();
+      ctx.arc(x,y,d.size,0,Math.PI*2);
+      ctx.fillStyle=`rgba(${ACCENT[0]},${ACCENT[1]},${ACCENT[2]},${d.opacity})`;
+      ctx.fill();
+
+      // glow
+      ctx.beginPath();
+      ctx.arc(x,y,d.size*5,0,Math.PI*2);
+      ctx.fillStyle=`rgba(${ACCENT[0]},${ACCENT[1]},${ACCENT[2]},${d.opacity*0.1})`;
+      ctx.fill();
+
+      // fading trail — 3 segments behind
+      for(let s=1;s<=3;s++){
+        const tt=Math.max(0,t-s*0.25);
+        const tx=(wx+DX[d.dir]*tt)*GRID;
+        const ty=(wy+DY[d.dir]*tt)*GRID;
+        const fade=d.opacity*(1-s*0.3);
+        if(fade<=0)continue;
+        ctx.beginPath();
+        ctx.arc(tx,ty,d.size*0.6,0,Math.PI*2);
+        ctx.fillStyle=`rgba(${ACCENT[0]},${ACCENT[1]},${ACCENT[2]},${fade*0.4})`;
+        ctx.fill();
+      }
+    }
+    requestAnimationFrame(draw);
+  }
+
+  window.addEventListener('resize',resize);
+  init();
+  draw();
+})();
+
+// Reveal
 const els=document.querySelectorAll('.r');
 const obs=new IntersectionObserver(e=>{e.forEach(x=>{if(x.isIntersecting)x.target.classList.add('v')})},{threshold:0.1,rootMargin:'0px 0px -40px 0px'});
 els.forEach(e=>obs.observe(e));

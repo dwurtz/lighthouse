@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from lighthouse import wiki as wiki_mod
+from deja import wiki as wiki_mod
 
 
 def test_slugify_normalizes():
@@ -13,8 +13,8 @@ def test_slugify_normalizes():
 
 def test_write_page_and_read_all(isolated_home, monkeypatch):
     # Neutralize git / index / QMD side effects — we're testing routing only.
-    monkeypatch.setattr("lighthouse.wiki_git.ensure_repo", lambda: None)
-    monkeypatch.setattr("lighthouse.wiki_git.commit_changes", lambda msg: None)
+    monkeypatch.setattr("deja.wiki_git.ensure_repo", lambda: None)
+    monkeypatch.setattr("deja.wiki_git.commit_changes", lambda msg: None)
 
     wiki_mod.write_page("people", "Jane Doe", "# Jane\n\nNotes.")
     pages = wiki_mod.read_all_pages()
@@ -31,11 +31,11 @@ def test_write_page_rejects_bad_category(isolated_home):
 
 
 def test_apply_updates_skips_invalid(isolated_home, monkeypatch):
-    monkeypatch.setattr("lighthouse.wiki_git.ensure_repo", lambda: None)
-    monkeypatch.setattr("lighthouse.wiki_git.commit_changes", lambda msg: None)
-    monkeypatch.setattr("lighthouse.wiki_catalog.rebuild_index", lambda: None)
+    monkeypatch.setattr("deja.wiki_git.ensure_repo", lambda: None)
+    monkeypatch.setattr("deja.wiki_git.commit_changes", lambda msg: None)
+    monkeypatch.setattr("deja.wiki_catalog.rebuild_index", lambda: None)
     # wiki.apply_updates imports refresh_index lazily — stub at the source.
-    import lighthouse.llm.search as search
+    import deja.llm.search as search
     monkeypatch.setattr(search, "refresh_index", lambda: None)
 
     updates = [
@@ -56,10 +56,10 @@ def test_apply_updates_empty_list_noop(isolated_home):
 
 
 def _stub_side_effects(monkeypatch):
-    monkeypatch.setattr("lighthouse.wiki_git.ensure_repo", lambda: None)
-    monkeypatch.setattr("lighthouse.wiki_git.commit_changes", lambda msg: None)
-    monkeypatch.setattr("lighthouse.wiki_catalog.rebuild_index", lambda: None)
-    import lighthouse.llm.search as search
+    monkeypatch.setattr("deja.wiki_git.ensure_repo", lambda: None)
+    monkeypatch.setattr("deja.wiki_git.commit_changes", lambda msg: None)
+    monkeypatch.setattr("deja.wiki_catalog.rebuild_index", lambda: None)
+    import deja.llm.search as search
     monkeypatch.setattr(search, "refresh_index", lambda: None)
 
 
@@ -89,7 +89,7 @@ def test_apply_updates_delete_action_routes(isolated_home, monkeypatch):
     assert (wiki_mod.WIKI_DIR / "projects" / "terafab.md").exists()
 
     logged: list[tuple[str, str]] = []
-    import lighthouse.activity_log as activity_log
+    import deja.activity_log as activity_log
     monkeypatch.setattr(
         activity_log,
         "append_log_entry",

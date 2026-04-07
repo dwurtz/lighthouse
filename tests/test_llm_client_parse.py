@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from lighthouse.llm_client import _parse_json
+from deja.llm_client import _parse_json
 
 
 def test_plain_json_object():

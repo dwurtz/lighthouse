@@ -1,7 +1,7 @@
 """Shared test fixtures.
 
-Every test runs against throwaway LIGHTHOUSE_HOME and LIGHTHOUSE_WIKI dirs so
-nothing in ~/.lighthouse or ~/Lighthouse Wiki is touched.
+Every test runs against throwaway DEJA_HOME and DEJA_WIKI dirs so
+nothing in ~/.deja or ~/Deja is touched.
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def isolated_home(request, monkeypatch, tmp_path):
-    """Point LIGHTHOUSE_HOME and LIGHTHOUSE_WIKI at tmp dirs for every test.
+    """Point DEJA_HOME and DEJA_WIKI at tmp dirs for every test.
 
     Config reads these at import time, so we also patch the already-imported
     module attributes for any modules that cached them.
@@ -28,34 +28,35 @@ def isolated_home(request, monkeypatch, tmp_path):
         yield None
         return
 
-    home = tmp_path / "workagent_home"
+    home = tmp_path / "deja_home"
     wiki = tmp_path / "wiki"
     home.mkdir()
     wiki.mkdir()
 
-    monkeypatch.setenv("LIGHTHOUSE_HOME", str(home))
-    monkeypatch.setenv("LIGHTHOUSE_WIKI", str(wiki))
+    monkeypatch.setenv("DEJA_HOME", str(home))
+    monkeypatch.setenv("DEJA_WIKI", str(wiki))
 
     # Patch modules that cached the paths at import time.
-    import lighthouse.config as config
-    monkeypatch.setattr(config, "LIGHTHOUSE_HOME", home)
+    import deja.config as config
+    monkeypatch.setattr(config, "DEJA_HOME", home)
+    monkeypatch.setattr(config, "LIGHTHOUSE_HOME", home)  # back-compat alias
     monkeypatch.setattr(config, "WIKI_DIR", wiki)
 
-    import lighthouse.wiki as wiki_mod
+    import deja.wiki as wiki_mod
     monkeypatch.setattr(wiki_mod, "WIKI_DIR", wiki)
 
-    import lighthouse.activity_log as wiki_log
+    import deja.activity_log as wiki_log
     monkeypatch.setattr(wiki_log, "LOG_PATH", wiki / "log.md")
 
-    # Modules that did `from lighthouse.config import LIGHTHOUSE_HOME` captured
+    # Modules that did `from deja.config import DEJA_HOME` captured
     # the original path at import time — patch their local bindings too.
-    import lighthouse.observations.collector as collector_mod
-    monkeypatch.setattr(collector_mod, "LIGHTHOUSE_HOME", home)
+    import deja.observations.collector as collector_mod
+    monkeypatch.setattr(collector_mod, "DEJA_HOME", home)
 
-    import lighthouse.health_check as sc_mod
+    import deja.health_check as sc_mod
     monkeypatch.setattr(sc_mod, "WIKI_DIR", wiki)
 
-    import lighthouse.identity as user_mod
+    import deja.identity as user_mod
     monkeypatch.setattr(user_mod, "WIKI_DIR", wiki)
 
     yield home, wiki

@@ -1,6 +1,6 @@
-# Lighthouse
+# Deja
 
-A personal AI agent for macOS. Lighthouse runs in the background, observes
+A personal AI agent for macOS. Deja runs in the background, observes
 your digital life -- messages, email, calendar, screen, clipboard, browser,
 voice -- and maintains a living wiki about the people, projects, and events
 that matter to you. The wiki is browsable in Obsidian, versioned in git,
@@ -11,8 +11,8 @@ persistent memory across sessions.
 ## Install
 
 ```bash
-git clone https://github.com/dwurtz/lighthouse.git
-cd lighthouse
+git clone https://github.com/dwurtz/deja.git
+cd deja
 ./setup.sh
 ```
 
@@ -20,17 +20,17 @@ cd lighthouse
 installs the package, installs and authenticates the `gws` CLI for Google
 Workspace, prompts for your Gemini API key (stored in macOS Keychain via
 `security add-generic-password`), creates your identity self-page, copies
-default prompts into `~/Lighthouse/prompts/`, and runs a health check.
+default prompts into `~/Deja/prompts/`, and runs a health check.
 Safe to re-run.
 
 ```bash
-./venv/bin/python -m lighthouse monitor   # headless CLI
+./venv/bin/python -m deja monitor   # headless CLI
 ```
 
 
 ## How it works -- the four-tier pipeline
 
-Lighthouse has four tiers that run at different cadences, using different
+Deja has four tiers that run at different cadences, using different
 models, at different costs. Together they form a pipeline: observe raw
 context, integrate it into structured wiki pages, reflect on the full
 picture periodically, and serve the result to Claude on demand.
@@ -53,7 +53,7 @@ appends new entries to `observations.jsonl`. Sources:
 | Google Tasks | `observations/tasks.py` | every 5th cycle |
 | Granola notes | `observations/granola.py` | every 5th cycle |
 | Meet transcripts | `observations/meet.py` | every 5th cycle |
-| Meeting recording | `meeting_transcribe.py` + `LighthouseRecorder` | user-initiated |
+| Meeting recording | `meeting_transcribe.py` + `DejaRecorder` | user-initiated |
 
 No LLM calls happen at this tier except for screenshots: `VISION_MODEL`
 (default: `gemini-2.5-flash`) generates a wiki-grounded description of
@@ -136,7 +136,7 @@ Claude Code. No LLM calls -- pure retrieval and write-back. See the
 
 ## The wiki
 
-The wiki lives at `~/Lighthouse/` (override with `LIGHTHOUSE_WIKI` env
+The wiki lives at `~/Deja/` (override with `DEJA_WIKI` env
 var). It is an Obsidian vault, a git repo, and the agent's sole persistent
 memory. Three categories of pages:
 
@@ -166,7 +166,7 @@ Root-level files:
 
 ## Meeting Recording
 
-Lighthouse replaces Granola with native meeting recording. No paid
+Deja replaces Granola with native meeting recording. No paid
 subscriptions, no third-party services -- just local audio capture,
 Gemini transcription, and wiki event pages.
 
@@ -176,11 +176,11 @@ Gemini transcription, and wiki event pages.
    floating pill drops from the menu bar showing the meeting title,
    time, and a **Take notes** button.
 2. Click **Take notes** -- the pill expands with a scratchpad for
-   jotting notes during the meeting. A separate `LighthouseRecorder`
+   jotting notes during the meeting. A separate `DejaRecorder`
    process captures system audio (both sides of the call via
    ScreenCaptureKit) and microphone (your voice via ffmpeg).
 3. Audio is written as 5-minute WAV chunks to
-   `~/.lighthouse/meeting_audio/<session>/`. Chunks are transcribed
+   `~/.deja/meeting_audio/<session>/`. Chunks are transcribed
    progressively during the meeting via Gemini Flash.
 4. Click **Stop** (or 5 minutes of silence triggers auto-stop) --
    the pill shows "Generating notes..." while Gemini Pro creates the
@@ -193,7 +193,7 @@ Gemini transcription, and wiki event pages.
 menu bar header anytime -- phone calls, in-person conversations,
 anything. The AI generates the title from the transcript content.
 
-Files: `menubar/LighthouseRecorder.swift` (ScreenCaptureKit audio
+Files: `menubar/DejaRecorder.swift` (ScreenCaptureKit audio
 capture), `meeting_transcribe.py` (transcription + wiki page
 creation), `meeting_coordinator.py` (calendar-aware pill trigger).
 
@@ -243,7 +243,7 @@ action is logged to `log.md`.
 ## Context Engine (MCP)
 
 Claude has no memory between sessions. The Context Engine gives it one.
-It runs as an MCP server (`python -m lighthouse mcp`) and exposes three
+It runs as an MCP server (`python -m deja mcp`) and exposes three
 tools:
 
 | Tool | What it does |
@@ -261,9 +261,9 @@ questions about people, projects, commitments, or recent events.
 ```json
 {
   "mcpServers": {
-    "lighthouse": {
+    "deja": {
       "command": "/path/to/venv/bin/python",
-      "args": ["-m", "lighthouse", "mcp"]
+      "args": ["-m", "deja", "mcp"]
     }
   }
 }
@@ -286,23 +286,24 @@ File: `~/Library/Application Support/Claude/claude_desktop_config.json`
 
 All models are Gemini. The API key is resolved via `secrets.py`:
 `GEMINI_API_KEY` env var > `GOOGLE_API_KEY` env var > macOS Keychain
-(service: `lighthouse`, account: `gemini-api-key`).
+(service: `deja`, account: `gemini-api-key`). Falls back to legacy
+keychain service `lighthouse` for migration.
 
 
 ## CLI
 
 | Command | What it does |
 |---|---|
-| `lighthouse configure` | Interactive first-run setup -- API key, self-page, prompts, health check |
-| `lighthouse health` | Print all startup probes + current config state |
-| `lighthouse monitor` | Headless observe + integrate + reflect loop |
-| `lighthouse web [--port N]` | FastAPI backend for the menu-bar popover (default port 5055) |
-| `lighthouse mcp` | Start the Context Engine MCP server (stdio transport) |
-| `lighthouse status` | Print last observation timestamp + liveness |
-| `lighthouse linkify [--dry-run]` | Sweep the wiki and wrap unlinked entity mentions in `[[slug]]` syntax |
-| `lighthouse onboard [--days N] [--only SOURCE] [--force]` | One-time wiki bootstrap from historical email, iMessage, WhatsApp, calendar, Meet transcripts |
+| `deja configure` | Interactive first-run setup -- API key, self-page, prompts, health check |
+| `deja health` | Print all startup probes + current config state |
+| `deja monitor` | Headless observe + integrate + reflect loop |
+| `deja web [--port N]` | FastAPI backend for the menu-bar popover (default port 5055) |
+| `deja mcp` | Start the Context Engine MCP server (stdio transport) |
+| `deja status` | Print last observation timestamp + liveness |
+| `deja linkify [--dry-run]` | Sweep the wiki and wrap unlinked entity mentions in `[[slug]]` syntax |
+| `deja onboard [--days N] [--only SOURCE] [--force]` | One-time wiki bootstrap from historical email, iMessage, WhatsApp, calendar, Meet transcripts |
 
-Source: `__main__.py`. The menu-bar app (`Lighthouse.app`) spawns
+Source: `__main__.py`. The menu-bar app (`Deja.app`) spawns
 `monitor` and `web` as child processes.
 
 
@@ -310,14 +311,14 @@ Source: `__main__.py`. The menu-bar app (`Lighthouse.app`) spawns
 
 | Path | Contents |
 |---|---|
-| `~/.lighthouse/` | Runtime state: `observations.jsonl`, `integrations.jsonl`, `config.yaml`, `lighthouse.log`, `conversation.json`, `last_reflection_run`, PID files |
-| `~/Lighthouse/` | The wiki (git repo). Override via `LIGHTHOUSE_WIKI` env var. |
-| macOS Keychain | Gemini API key (service: `lighthouse`, account: `gemini-api-key`) |
+| `~/.deja/` | Runtime state: `observations.jsonl`, `integrations.jsonl`, `config.yaml`, `deja.log`, `conversation.json`, `last_reflection_run`, PID files |
+| `~/Deja/` | The wiki (git repo). Override via `DEJA_WIKI` env var. |
+| macOS Keychain | Gemini API key (service: `deja`, account: `gemini-api-key`) |
 
 
 ## Configuration
 
-`~/.lighthouse/config.yaml` -- everything optional, sensible defaults:
+`~/.deja/config.yaml` -- everything optional, sensible defaults:
 
 ```yaml
 # LLM routing
@@ -347,14 +348,14 @@ ignored_apps: [cmux, Activity Monitor, Python, Terminal]
 ## macOS permissions
 
 Grant each in **System Settings > Privacy & Security**. Run
-`lighthouse health` to see which are still missing.
+`deja health` to see which are still missing.
 
 | Permission | Why |
 |---|---|
-| **Full Disk Access** (Lighthouse.app + Python binary) | iMessage and WhatsApp SQLite database reads |
-| **Screen & System Audio Recording** (Lighthouse.app) | Screenshot observations via `screencapture` |
-| **Contacts** (Lighthouse.app) | macOS Contacts enrichment in reflect pass |
-| **Microphone** (Lighthouse.app) | Push-to-record Listen button in the popover |
+| **Full Disk Access** (Deja.app + Python binary) | iMessage and WhatsApp SQLite database reads |
+| **Screen & System Audio Recording** (Deja.app) | Screenshot observations via `screencapture` |
+| **Contacts** (Deja.app) | macOS Contacts enrichment in reflect pass |
+| **Microphone** (Deja.app) | Push-to-record Listen button in the popover |
 
 
 ## Privacy

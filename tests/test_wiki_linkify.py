@@ -21,7 +21,7 @@ import pytest
 def linkify_mod(isolated_home, monkeypatch):
     """wiki_linkify captured WIKI_DIR at import time — patch it."""
     _, wiki = isolated_home
-    import lighthouse.wiki_linkify as wl
+    import deja.wiki_linkify as wl
     monkeypatch.setattr(wl, "WIKI_DIR", wiki)
     (wiki / "people").mkdir()
     (wiki / "projects").mkdir()
@@ -88,7 +88,7 @@ def test_build_catalog_drops_short_phrases(linkify_mod):
 # ---------------------------------------------------------------------------
 
 def _cat(**kw):
-    from lighthouse.wiki_linkify import Entity
+    from deja.wiki_linkify import Entity
     phrases = tuple(kw.pop("phrases", (kw.get("title", kw["slug"]),)))
     return Entity(
         slug=kw["slug"],
@@ -99,7 +99,7 @@ def _cat(**kw):
 
 
 def test_linkify_basic_match():
-    from lighthouse.wiki_linkify import linkify_body
+    from deja.wiki_linkify import linkify_body
     catalog = [_cat(slug="jane-doe", title="Jane Doe", phrases=("Jane Doe", "Jane"))]
     body = "I talked to Jane Doe about the project."
     out, added = linkify_body(body, catalog)
@@ -108,7 +108,7 @@ def test_linkify_basic_match():
 
 
 def test_linkify_first_occurrence_only():
-    from lighthouse.wiki_linkify import linkify_body
+    from deja.wiki_linkify import linkify_body
     catalog = [_cat(slug="jane-doe", title="Jane Doe", phrases=("Jane Doe",))]
     body = "Jane Doe called. Later Jane Doe emailed. Finally Jane Doe texted."
     out, added = linkify_body(body, catalog)
@@ -119,7 +119,7 @@ def test_linkify_first_occurrence_only():
 
 
 def test_linkify_skips_self_reference():
-    from lighthouse.wiki_linkify import linkify_body
+    from deja.wiki_linkify import linkify_body
     catalog = [_cat(slug="jane-doe", title="Jane Doe", phrases=("Jane Doe",))]
     body = "Jane Doe writes about herself."
     out, _ = linkify_body(body, catalog, self_slug="jane-doe")
@@ -127,7 +127,7 @@ def test_linkify_skips_self_reference():
 
 
 def test_linkify_skips_existing_wiki_link():
-    from lighthouse.wiki_linkify import linkify_body
+    from deja.wiki_linkify import linkify_body
     catalog = [_cat(slug="jane-doe", title="Jane Doe", phrases=("Jane Doe",))]
     body = "Already linked: [[jane-doe|Jane Doe]] is great."
     out, added = linkify_body(body, catalog)
@@ -139,7 +139,7 @@ def test_linkify_respects_existing_title_form_link():
     """An LLM-written [[Soccer Carpool]] (title form) should suppress a
     later [[soccer-carpool|soccer carpool]] on the same page — same
     entity, no duplicate linking."""
-    from lighthouse.wiki_linkify import linkify_body
+    from deja.wiki_linkify import linkify_body
     catalog = [_cat(slug="soccer-carpool", title="Soccer Carpool",
                     phrases=("Soccer Carpool", "soccer carpool"))]
     body = (
@@ -153,7 +153,7 @@ def test_linkify_respects_existing_title_form_link():
 
 
 def test_linkify_skips_fenced_code_block():
-    from lighthouse.wiki_linkify import linkify_body
+    from deja.wiki_linkify import linkify_body
     catalog = [_cat(slug="palo-alto", title="Palo Alto", phrases=("Palo Alto",))]
     body = "```\nPalo Alto\n```\n\nBut Palo Alto matters."
     out, added = linkify_body(body, catalog)
@@ -165,7 +165,7 @@ def test_linkify_skips_fenced_code_block():
 
 
 def test_linkify_skips_inline_code():
-    from lighthouse.wiki_linkify import linkify_body
+    from deja.wiki_linkify import linkify_body
     catalog = [_cat(slug="loop-py", title="loop.py", phrases=("loop.py",))]
     body = "Check `loop.py` for the bug."
     out, added = linkify_body(body, catalog)
@@ -175,7 +175,7 @@ def test_linkify_skips_inline_code():
 
 
 def test_linkify_skips_markdown_link():
-    from lighthouse.wiki_linkify import linkify_body
+    from deja.wiki_linkify import linkify_body
     catalog = [_cat(slug="jane-doe", title="Jane Doe", phrases=("Jane Doe",))]
     body = "See [Jane Doe](https://example.com/janedoe)."
     out, added = linkify_body(body, catalog)
@@ -185,7 +185,7 @@ def test_linkify_skips_markdown_link():
 
 def test_linkify_word_boundary_non_word_chars():
     """Phrases containing & or ' must still bound correctly."""
-    from lighthouse.wiki_linkify import linkify_body
+    from deja.wiki_linkify import linkify_body
     catalog = [_cat(slug="blade-and-rose", title="Blade & Rose", phrases=("Blade & Rose",))]
     body = "The Blade & Rose brand is great."
     out, _ = linkify_body(body, catalog)
@@ -194,7 +194,7 @@ def test_linkify_word_boundary_non_word_chars():
 
 def test_linkify_respects_word_boundaries():
     """'rose' should not match inside 'rosemary'."""
-    from lighthouse.wiki_linkify import linkify_body
+    from deja.wiki_linkify import linkify_body
     catalog = [_cat(slug="rose", title="Rose", phrases=("Rose",))]
     body = "I planted rosemary and basil."
     out, added = linkify_body(body, catalog)
@@ -204,7 +204,7 @@ def test_linkify_respects_word_boundaries():
 
 def test_linkify_longest_phrase_wins():
     """Overlapping matches should resolve to the most specific entity."""
-    from lighthouse.wiki_linkify import linkify_body
+    from deja.wiki_linkify import linkify_body
     catalog = [
         _cat(slug="rose", title="Rose", phrases=("Rose",)),
         _cat(slug="blade-and-rose", title="Blade & Rose", phrases=("Blade & Rose",)),
@@ -218,7 +218,7 @@ def test_linkify_longest_phrase_wins():
 
 
 def test_linkify_case_insensitive_match_preserves_case():
-    from lighthouse.wiki_linkify import linkify_body
+    from deja.wiki_linkify import linkify_body
     catalog = [_cat(slug="jane-doe", title="Jane Doe", phrases=("Jane Doe",))]
     body = "I talked to jane doe yesterday."
     out, _ = linkify_body(body, catalog)
@@ -227,7 +227,7 @@ def test_linkify_case_insensitive_match_preserves_case():
 
 
 def test_linkify_bare_form_when_matched_equals_slug():
-    from lighthouse.wiki_linkify import linkify_body
+    from deja.wiki_linkify import linkify_body
     catalog = [_cat(slug="palo-alto-relocation", phrases=("palo-alto-relocation",))]
     body = "The palo-alto-relocation project is ongoing."
     out, _ = linkify_body(body, catalog)

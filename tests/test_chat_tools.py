@@ -14,17 +14,17 @@ import pytest
 def ct(isolated_home, monkeypatch):
     """Chat tools module with WIKI_DIR patched to the tmp wiki."""
     _, wiki = isolated_home
-    import lighthouse.chat_tools as ct_mod
-    import lighthouse.wiki as wiki_mod
+    import deja.chat_tools as ct_mod
+    import deja.wiki as wiki_mod
     monkeypatch.setattr(ct_mod, "WIKI_DIR", wiki)
     monkeypatch.setattr(wiki_mod, "WIKI_DIR", wiki)
     # Neutralize git so writes don't try to commit
-    monkeypatch.setattr("lighthouse.wiki_git.ensure_repo", lambda: None)
-    monkeypatch.setattr("lighthouse.wiki_git.commit_changes", lambda msg: None)
-    import lighthouse.wiki_catalog as wc
+    monkeypatch.setattr("deja.wiki_git.ensure_repo", lambda: None)
+    monkeypatch.setattr("deja.wiki_git.commit_changes", lambda msg: None)
+    import deja.wiki_catalog as wc
     monkeypatch.setattr(wc, "rebuild_index", lambda: 0)
     # wiki.apply_updates imports search.refresh_index lazily
-    import lighthouse.llm.search as search
+    import deja.llm.search as search
     monkeypatch.setattr(search, "refresh_index", lambda: None)
     (wiki / "people").mkdir()
     (wiki / "projects").mkdir()

@@ -3,7 +3,7 @@ requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "lighthouse"
+name = "deja"
 version = "0.2.0"
 description = "A personal AI agent that observes your digital life and maintains a living wiki about the people and projects that matter to you"
 readme = "README.md"
@@ -20,13 +20,13 @@ dependencies = [
 ]
 
 [project.scripts]
-lighthouse = "lighthouse.__main__:main"
+deja = "deja.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
-lighthouse = [
+deja = [
     "default_assets/CLAUDE.md",
     "default_assets/prompts/*.md",
 ]

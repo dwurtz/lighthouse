@@ -16,7 +16,7 @@ import pytest
 
 @pytest.fixture
 def reflect_mod(monkeypatch):
-    import lighthouse.reflection as reflection
+    import deja.reflection as reflection
     # Force the default 3-slot schedule for deterministic tests. Any
     # override via config.yaml would otherwise leak in.
     monkeypatch.setattr(reflection, "REFLECT_SLOT_HOURS", (2, 11, 18))

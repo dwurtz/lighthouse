@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from lighthouse.identity import UserProfile, _first_name, _parse_self_page, load_user
+from deja.identity import UserProfile, _first_name, _parse_self_page, load_user
 
 
 # ---------------------------------------------------------------------------
@@ -72,7 +72,7 @@ def _write_self_page(wiki, slug, content):
 
 def test_load_user_from_frontmatter_flag(isolated_home, monkeypatch):
     _, wiki = isolated_home
-    import lighthouse.identity as user_mod
+    import deja.identity as user_mod
     monkeypatch.setattr(user_mod, "WIKI_DIR", wiki)
 
     _write_self_page(wiki, "jane-doe",
@@ -99,8 +99,8 @@ def test_load_user_from_frontmatter_flag(isolated_home, monkeypatch):
 
 def test_load_user_respects_config_user_slug(isolated_home, monkeypatch):
     _, wiki = isolated_home
-    import lighthouse.identity as user_mod
-    import lighthouse.config as config
+    import deja.identity as user_mod
+    import deja.config as config
     monkeypatch.setattr(user_mod, "WIKI_DIR", wiki)
     monkeypatch.setattr(config, "USER_SLUG", "custom-slug")
 
@@ -119,7 +119,7 @@ def test_load_user_respects_config_user_slug(isolated_home, monkeypatch):
 
 def test_load_user_first_name_from_full_name_when_no_preferred(isolated_home, monkeypatch):
     _, wiki = isolated_home
-    import lighthouse.identity as user_mod
+    import deja.identity as user_mod
     monkeypatch.setattr(user_mod, "WIKI_DIR", wiki)
 
     _write_self_page(wiki, "bob-smith",
@@ -135,8 +135,8 @@ def test_load_user_first_name_from_full_name_when_no_preferred(isolated_home, mo
 
 def test_load_user_falls_back_to_generic_when_no_self_page(isolated_home, monkeypatch):
     _, wiki = isolated_home
-    import lighthouse.identity as user_mod
-    import lighthouse.config as config
+    import deja.identity as user_mod
+    import deja.config as config
     monkeypatch.setattr(user_mod, "WIKI_DIR", wiki)
     monkeypatch.setattr(config, "USER_SLUG", "")
     (wiki / "people").mkdir()  # empty dir, no pages
@@ -151,8 +151,8 @@ def test_load_user_falls_back_to_generic_when_no_self_page(isolated_home, monkey
 
 def test_load_user_generic_when_people_dir_missing(isolated_home, monkeypatch):
     _, wiki = isolated_home
-    import lighthouse.identity as user_mod
-    import lighthouse.config as config
+    import deja.identity as user_mod
+    import deja.config as config
     monkeypatch.setattr(user_mod, "WIKI_DIR", wiki)
     monkeypatch.setattr(config, "USER_SLUG", "")
     # Don't create people/ at all
@@ -165,7 +165,7 @@ def test_load_user_missing_email_still_returns_profile(isolated_home, monkeypatc
     """A self-page with no email should still produce a usable profile —
     the startup check catches the missing email separately."""
     _, wiki = isolated_home
-    import lighthouse.identity as user_mod
+    import deja.identity as user_mod
     monkeypatch.setattr(user_mod, "WIKI_DIR", wiki)
 
     _write_self_page(wiki, "no-email",
@@ -180,7 +180,7 @@ def test_load_user_missing_email_still_returns_profile(isolated_home, monkeypatc
 
 def test_as_prompt_fields_has_expected_keys(isolated_home, monkeypatch):
     _, wiki = isolated_home
-    import lighthouse.identity as user_mod
+    import deja.identity as user_mod
     monkeypatch.setattr(user_mod, "WIKI_DIR", wiki)
     _write_self_page(wiki, "test-user",
         "---\nself: true\nemail: t@u.com\npreferred_name: Tina\n---\n# Test User\n\nBio.\n"
@@ -195,8 +195,8 @@ def test_as_prompt_fields_has_expected_keys(isolated_home, monkeypatch):
 
 def test_as_prompt_fields_generic_has_placeholder_profile(isolated_home, monkeypatch):
     _, wiki = isolated_home
-    import lighthouse.identity as user_mod
-    import lighthouse.config as config
+    import deja.identity as user_mod
+    import deja.config as config
     monkeypatch.setattr(user_mod, "WIKI_DIR", wiki)
     monkeypatch.setattr(config, "USER_SLUG", "")
 

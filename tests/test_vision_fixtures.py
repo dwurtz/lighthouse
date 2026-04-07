@@ -64,7 +64,7 @@ def test_vision_case(case: dict):
         pytest.skip(f"fixture image {filename} not present")
 
     # Import lazily so the module loads even when google-genai fails.
-    from lighthouse.llm_client import GeminiClient
+    from deja.llm_client import GeminiClient
 
     client = GeminiClient()
     result = asyncio.run(client.describe_screen(str(img_path)))

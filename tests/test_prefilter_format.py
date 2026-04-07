@@ -6,7 +6,7 @@ pure-function building blocks.
 
 from __future__ import annotations
 
-from lighthouse.llm import prefilter as local_llm
+from deja.llm import prefilter as local_llm
 
 
 def test_triage_sources_covers_messages():
