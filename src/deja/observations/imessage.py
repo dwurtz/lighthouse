@@ -16,11 +16,13 @@ Two entry points:
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import sqlite3
 from datetime import datetime, timedelta
+from pathlib import Path
 
-from deja.config import IMESSAGE_DB
+from deja.config import DEJA_HOME, IMESSAGE_DB
 from deja.observations.types import Observation
 
 log = logging.getLogger(__name__)
@@ -30,43 +32,31 @@ log = logging.getLogger(__name__)
 # as nanoseconds since that epoch (post-macOS 10.13) or seconds (earlier).
 _APPLE_EPOCH_OFFSET = 978307200
 
+# Buffer file written by the Swift app
+_IMESSAGE_BUFFER = DEJA_HOME / "imessage_buffer.json"
+
 
 def collect_imessages(since_minutes: int = 5, limit: int = 20) -> list[Observation]:
-    """Read recent iMessages from ~/Library/Messages/chat.db."""
+    """Read recent iMessages from the JSON buffer written by the Swift app.
+
+    The Swift app reads ~/Library/Messages/chat.db every 15 seconds and
+    writes the results to ~/.deja/imessage_buffer.json. This function
+    reads that buffer instead of accessing the database directly, so
+    the Python process does not need Full Disk Access.
+    """
     results: list[Observation] = []
     try:
-        if not IMESSAGE_DB.exists():
+        if not _IMESSAGE_BUFFER.exists():
             return results
-        conn = sqlite3.connect(str(IMESSAGE_DB))
-        conn.row_factory = sqlite3.Row
-        cutoff_unix = (datetime.now() - timedelta(minutes=since_minutes)).timestamp()
-        # Apple's epoch is 2001-01-01; chat.db stores date in nanoseconds
-        cutoff_apple_ns = int((cutoff_unix - 978307200) * 1_000_000_000)
-        rows = conn.execute(
-            """
-            SELECT
-                m.ROWID,
-                m.text,
-                datetime(m.date/1000000000 + 978307200, 'unixepoch', 'localtime') as dt,
-                CASE WHEN m.is_from_me = 1 THEN 'me' ELSE
-                    COALESCE(h.id, 'unknown')
-                END as sender
-            FROM message m
-            LEFT JOIN handle h ON m.handle_id = h.ROWID
-            WHERE m.text IS NOT NULL AND m.text != '' AND m.date > ?
-            ORDER BY m.date DESC
-            LIMIT ?
-            """,
-            (cutoff_apple_ns, limit),
-        ).fetchall()
-        conn.close()
-        for r in rows:
-            sender = "You" if r["sender"] == "me" else r["sender"]
-            text = (r["text"] or "")[:500]
+        data = json.loads(_IMESSAGE_BUFFER.read_text())
+        for r in data[:limit]:
+            sender = "You" if r.get("sender") == "me" else r.get("sender", "unknown")
+            text = (r.get("text") or "")[:500]
+            dt = r.get("dt", "")
             text_hash = hashlib.md5(text.encode()).hexdigest()[:12]
-            id_key = f"imsg-{sender}-{r['dt']}-{text_hash}"
+            id_key = f"imsg-{sender}-{dt}-{text_hash}"
             try:
-                ts = datetime.strptime(r["dt"], "%Y-%m-%d %H:%M:%S")
+                ts = datetime.strptime(dt, "%Y-%m-%d %H:%M:%S")
             except (ValueError, TypeError):
                 ts = datetime.now()
             results.append(

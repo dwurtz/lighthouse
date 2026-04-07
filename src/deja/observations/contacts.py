@@ -1,20 +1,28 @@
 """Contact resolution — maps phone numbers and display names to real people.
 
-Reads directly from macOS AddressBook SQLite database. No local contacts.json needed.
+Reads from ~/.deja/contacts_buffer.json, which is written by the Swift app
+from the macOS AddressBook SQLite database. This way only the Swift app
+needs Contacts permission; Python never touches the database directly.
+
 Cache is built on first use and lives in memory only.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import re
-import sqlite3
 from pathlib import Path
+
+from deja.config import DEJA_HOME
 
 log = logging.getLogger(__name__)
 
 _phone_index: dict[str, str] | None = None
 _name_set: set[str] | None = None
+
+# Buffer file written by the Swift app
+_CONTACTS_BUFFER = DEJA_HOME / "contacts_buffer.json"
 
 
 def _normalize_phone(phone: str) -> str:
@@ -23,42 +31,32 @@ def _normalize_phone(phone: str) -> str:
 
 
 def _build_index():
-    """Build phone→name index from macOS AddressBook SQLite."""
+    """Build phone->name index from the contacts buffer JSON."""
     global _phone_index, _name_set
     _phone_index = {}
     _name_set = set()
 
-    ab_dir = Path.home() / "Library" / "Application Support" / "AddressBook" / "Sources"
-    if not ab_dir.exists():
+    if not _CONTACTS_BUFFER.exists():
+        log.debug("Contacts buffer not found at %s — skipping", _CONTACTS_BUFFER)
         return
 
-    for db_path in ab_dir.glob("*/AddressBook-v22.abcddb"):
-        try:
-            conn = sqlite3.connect(str(db_path))
-            rows = conn.execute("""
-                SELECT
-                    COALESCE(r.ZFIRSTNAME, '') || ' ' || COALESCE(r.ZLASTNAME, '') as name,
-                    GROUP_CONCAT(DISTINCT p.ZFULLNUMBER) as phones
-                FROM ZABCDRECORD r
-                LEFT JOIN ZABCDPHONENUMBER p ON p.ZOWNER = r.Z_PK
-                WHERE r.ZFIRSTNAME IS NOT NULL
-                GROUP BY r.Z_PK
-            """).fetchall()
-            conn.close()
+    try:
+        data = json.loads(_CONTACTS_BUFFER.read_text())
+    except Exception:
+        log.debug("Failed to read contacts buffer: %s", _CONTACTS_BUFFER)
+        return
 
-            for name, phones_str in rows:
-                name = name.strip()
-                if not name:
-                    continue
-                _name_set.add(name.lower())
-                for phone in (phones_str or "").split(","):
-                    phone = phone.strip()
-                    if phone:
-                        normalized = _normalize_phone(phone)
-                        if normalized:
-                            _phone_index[normalized] = name
-        except Exception:
-            log.debug("Failed to read AddressBook DB: %s", db_path)
+    for entry in data:
+        name = (entry.get("name") or "").strip()
+        if not name:
+            continue
+        _name_set.add(name.lower())
+        for phone in (entry.get("phones") or "").split(","):
+            phone = phone.strip()
+            if phone:
+                normalized = _normalize_phone(phone)
+                if normalized:
+                    _phone_index[normalized] = name
 
     log.info("Loaded %d contacts, %d phone mappings", len(_name_set), len(_phone_index))
 

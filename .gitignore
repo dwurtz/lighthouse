@@ -23,7 +23,7 @@ menubar/*.dSYM/
 .DS_Store
 
 # Signed app bundle (rebuildable from source; committing breaks signatures)
-Lighthouse.app/
+Deja.app/
 
 # Legacy bundle name
 WorkAgent.app/

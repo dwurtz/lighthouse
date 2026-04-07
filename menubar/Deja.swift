@@ -1,6 +1,10 @@
 import SwiftUI
 import AppKit
 import Foundation
+import CoreGraphics
+import ImageIO
+import ScreenCaptureKit
+import SQLite3
 
 // MARK: - App Entry Point
 
@@ -968,7 +972,7 @@ struct SetupWizardView: View {
                     .foregroundColor(.white.opacity(0.9))
                 Spacer()
                 // Step indicator
-                Text("Step \(monitor.setupStep + 1) of 5")
+                Text("Step \(monitor.setupStep + 1) of 6")
                     .font(.system(size: 10))
                     .foregroundColor(.white.opacity(0.3))
             }
@@ -984,7 +988,8 @@ struct SetupWizardView: View {
                     case 1: apiKeyStep
                     case 2: googleAuthStep
                     case 3: identityStep
-                    case 4: doneStep
+                    case 4: permissionsStep
+                    case 5: doneStep
                     default: doneStep
                     }
                 }
@@ -1309,8 +1314,8 @@ struct SetupWizardView: View {
                     error = "Setup failed"
                     return
                 }
-                // Complete setup
-                completeSetup()
+                // Move to permissions step
+                monitor.setupStep = 4
             }
         }.resume()
     }
@@ -1322,12 +1327,154 @@ struct SetupWizardView: View {
         req.timeoutInterval = 10
         URLSession.shared.dataTask(with: req) { _, _, _ in
             DispatchQueue.main.async {
-                monitor.setupStep = 4
+                monitor.setupStep = 5
             }
         }.resume()
     }
 
-    // MARK: Step 4 — Done
+    // MARK: Step 4 — Permissions
+
+    @State private var screenRecordingGranted = false
+    @State private var fullDiskGranted = false
+    @State private var contactsGranted = false
+
+    var permissionsStep: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Grant permissions")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundColor(.white)
+            Text("Déjà needs a few macOS permissions to observe your screen and messages. Grant each one below.")
+                .font(.system(size: 12))
+                .foregroundColor(.white.opacity(0.5))
+
+            VStack(spacing: 12) {
+                permissionRow(
+                    icon: "rectangle.dashed.badge.record",
+                    title: "Screen Recording",
+                    description: "See what's on your screen to build context",
+                    granted: screenRecordingGranted,
+                    action: {
+                        // Open Screen Recording pane
+                        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") {
+                            NSWorkspace.shared.open(url)
+                        }
+                    }
+                )
+
+                permissionRow(
+                    icon: "lock.open.fill",
+                    title: "Full Disk Access",
+                    description: "Read iMessage and WhatsApp conversations",
+                    granted: fullDiskGranted,
+                    action: {
+                        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") {
+                            NSWorkspace.shared.open(url)
+                        }
+                    }
+                )
+
+                permissionRow(
+                    icon: "person.crop.circle",
+                    title: "Contacts",
+                    description: "Match phone numbers to names",
+                    granted: contactsGranted,
+                    action: {
+                        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Contacts") {
+                            NSWorkspace.shared.open(url)
+                        }
+                    }
+                )
+            }
+
+            HStack {
+                Button(action: { checkPermissions() }) {
+                    HStack(spacing: 5) {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 10))
+                        Text("Check again")
+                            .font(.system(size: 12))
+                    }
+                    .foregroundColor(.white.opacity(0.4))
+                }
+                .buttonStyle(.plain)
+
+                Spacer()
+
+                Button(action: {
+                    completeSetup()
+                }) {
+                    Text(screenRecordingGranted && fullDiskGranted ? "Continue" : "Skip for now")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(.black)
+                        .padding(.horizontal, 24)
+                        .padding(.vertical, 8)
+                        .background(Color.white)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .onAppear { checkPermissions() }
+    }
+
+    func permissionRow(icon: String, title: String, description: String, granted: Bool, action: @escaping () -> Void) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: granted ? "checkmark.circle.fill" : icon)
+                .font(.system(size: 16))
+                .foregroundColor(granted ? .green : .white.opacity(0.4))
+                .frame(width: 24)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(.white)
+                Text(description)
+                    .font(.system(size: 11))
+                    .foregroundColor(.white.opacity(0.35))
+            }
+
+            Spacer()
+
+            if !granted {
+                Button(action: action) {
+                    Text("Grant")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(.blue)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 5)
+                        .background(Color.blue.opacity(0.12))
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(Color.white.opacity(0.03))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(granted ? Color.green.opacity(0.2) : Color.white.opacity(0.06), lineWidth: 1)
+        )
+    }
+
+    func checkPermissions() {
+        // Screen Recording: try CGPreflightScreenCaptureAccess
+        screenRecordingGranted = CGPreflightScreenCaptureAccess()
+
+        // Full Disk Access: try reading iMessage database
+        fullDiskGranted = FileManager.default.isReadableFile(
+            atPath: NSHomeDirectory() + "/Library/Messages/chat.db"
+        )
+
+        // Contacts: try accessing AddressBook
+        do {
+            let abPath = NSHomeDirectory() + "/Library/Application Support/AddressBook/AddressBook-v22.abcddb"
+            contactsGranted = FileManager.default.isReadableFile(atPath: abPath)
+        }
+    }
+
+    // MARK: Step 5 — Done
 
     var doneStep: some View {
         VStack(spacing: 20) {
@@ -1341,11 +1488,6 @@ struct SetupWizardView: View {
             Text("Déjà is now watching your screen, messages, and calendar. Your wiki lives at ~/Deja Wiki — open it in Obsidian or any Markdown editor.")
                 .font(.system(size: 13))
                 .foregroundColor(.white.opacity(0.5))
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 20)
-            Text("Grant Screen Recording and Full Disk Access in System Settings → Privacy & Security for full functionality.")
-                .font(.system(size: 11))
-                .foregroundColor(.white.opacity(0.3))
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 20)
 
@@ -1752,6 +1894,9 @@ class MonitorState: ObservableObject {
     private var process: Process?
     private var webProcess: Process?
     private var statsTimer: Timer?
+    private var screenshotTimer: Timer?
+    private var dbReaderTimer: Timer?
+    private var lastContactsRefresh: Date = .distantPast
 
     func start() {
         // Check if first-launch setup is needed
@@ -1760,6 +1905,14 @@ class MonitorState: ObservableObject {
 
         // Always start web server (setup wizard needs it for API calls)
         startWeb()
+
+        // Start screenshot capture timer (runs regardless of setup state
+        // so the Python observer can read screenshots immediately)
+        startScreenshotCapture()
+
+        // Start database readers (iMessage, WhatsApp, Contacts)
+        // Runs regardless of setup state so buffers are ready when Python starts
+        startDatabaseReaders()
 
         if setupDone {
             startMonitor()
@@ -1773,6 +1926,90 @@ class MonitorState: ObservableObject {
             updateInsights()
             startMeetingPolling()
         }
+    }
+
+    // MARK: - Screenshot Capture
+
+    private func startScreenshotCapture() {
+        // Capture immediately, then every 6 seconds
+        Task { await captureScreenshot() }
+        screenshotTimer = Timer.scheduledTimer(withTimeInterval: 6.0, repeats: true) { [weak self] _ in
+            Task { await self?.captureScreenshot() }
+        }
+    }
+
+    private func captureScreenshot() async {
+        // Only capture if we have Screen Recording permission
+        guard CGPreflightScreenCaptureAccess() else { return }
+
+        // Use ScreenCaptureKit to capture the main display
+        let image: CGImage
+        do {
+            let content = try await SCShareableContent.excludingDesktopWindows(
+                false, onScreenWindowsOnly: true
+            )
+            guard let display = content.displays.first else { return }
+
+            let filter = SCContentFilter(display: display, excludingWindows: [])
+            let config = SCStreamConfiguration()
+            config.width = display.width * 2
+            config.height = display.height * 2
+            config.capturesAudio = false
+            config.showsCursor = false
+
+            image = try await SCScreenshotManager.captureImage(
+                contentFilter: filter, configuration: config
+            )
+        } catch {
+            return
+        }
+
+        let width = image.width
+        let height = image.height
+        if width < 100 || height < 100 { return }
+
+        let screenshotPath = Self.home + "/latest_screen.png"
+        let timestampPath = Self.home + "/latest_screen_ts.txt"
+        let tmpPath = screenshotPath + ".tmp"
+
+        // Ensure ~/.deja directory exists
+        try? FileManager.default.createDirectory(
+            atPath: Self.home,
+            withIntermediateDirectories: true
+        )
+
+        // Write PNG to a temp file, then atomically move into place
+        guard let dest = CGImageDestinationCreateWithURL(
+            URL(fileURLWithPath: tmpPath) as CFURL,
+            "public.png" as CFString,
+            1,
+            nil
+        ) else { return }
+
+        CGImageDestinationAddImage(dest, image, nil)
+        guard CGImageDestinationFinalize(dest) else {
+            try? FileManager.default.removeItem(atPath: tmpPath)
+            return
+        }
+
+        // Atomic move to avoid partial reads from Python
+        do {
+            if FileManager.default.fileExists(atPath: screenshotPath) {
+                _ = try FileManager.default.replaceItemAt(
+                    URL(fileURLWithPath: screenshotPath),
+                    withItemAt: URL(fileURLWithPath: tmpPath)
+                )
+            } else {
+                try FileManager.default.moveItem(atPath: tmpPath, toPath: screenshotPath)
+            }
+        } catch {
+            try? FileManager.default.removeItem(atPath: tmpPath)
+            return
+        }
+
+        // Write timestamp
+        let ts = String(format: "%.3f", Date().timeIntervalSince1970)
+        try? ts.write(toFile: timestampPath, atomically: true, encoding: .utf8)
     }
 
     func checkSetupStatus() {
@@ -1790,7 +2027,7 @@ class MonitorState: ObservableObject {
 
                 // Skip to the first incomplete step
                 if hasKey && gwsAuth && hasIdentity {
-                    self.setupStep = 4  // done screen
+                    self.setupStep = 5  // done screen
                 } else if hasKey && gwsAuth {
                     self.setupStep = 3  // identity
                 } else if hasKey {
@@ -1816,6 +2053,10 @@ class MonitorState: ObservableObject {
     func stop() {
         statsTimer?.invalidate()
         statsTimer = nil
+        screenshotTimer?.invalidate()
+        screenshotTimer = nil
+        dbReaderTimer?.invalidate()
+        dbReaderTimer = nil
         process?.terminate()
         process = nil
         webProcess?.terminate()
@@ -2275,6 +2516,10 @@ class MonitorState: ObservableObject {
         }
         env["PATH"] = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
         if env["GEMINI_API_KEY"] == nil, let key = readKeyFromEnv() { env["GEMINI_API_KEY"] = key }
+        // Tell macOS to associate child processes with this app for TCC.
+        // Without this, deja-backend and DejaRecorder appear as separate
+        // apps in System Settings, requiring 3 separate permission grants.
+        env["__CFBundleIdentifier"] = "com.deja.app"
         return env
     }
 
@@ -2400,6 +2645,251 @@ class MonitorState: ObservableObject {
             self.lastSignalISO = latestISO
             self.lastSignalSource = latestSource
             self.lastSignalPreview = latestPreview
+        }
+    }
+
+    // MARK: - Database Readers (iMessage, WhatsApp, Contacts)
+    //
+    // Read from macOS databases and write JSON buffers to ~/.deja/
+    // so Python observers don't need Full Disk Access.
+
+    private func startDatabaseReaders() {
+        // Read immediately, then every 15 seconds
+        readDatabases()
+        dbReaderTimer = Timer.scheduledTimer(withTimeInterval: 15.0, repeats: true) { [weak self] _ in
+            self?.readDatabases()
+        }
+    }
+
+    private func readDatabases() {
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            self?.readIMessages()
+            self?.readWhatsApp()
+            // Contacts only every 5 minutes
+            if let self = self, Date().timeIntervalSince(self.lastContactsRefresh) > 300 {
+                self.readContacts()
+                self.lastContactsRefresh = Date()
+            }
+        }
+    }
+
+    // Apple epoch: 2001-01-01 UTC = 978307200 seconds after Unix epoch
+    private static let appleEpochOffset: Double = 978307200
+
+    private func readIMessages() {
+        let dbPath = NSHomeDirectory() + "/Library/Messages/chat.db"
+        guard FileManager.default.fileExists(atPath: dbPath) else { return }
+
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return }
+        defer { sqlite3_close(db) }
+
+        // Cutoff: 5 minutes ago, in Apple nanoseconds
+        let cutoffUnix = Date().timeIntervalSince1970 - 300
+        let cutoffAppleNs = Int64((cutoffUnix - Self.appleEpochOffset) * 1_000_000_000)
+
+        let sql = """
+            SELECT m.text, m.date, m.is_from_me, h.id as handle_id
+            FROM message m
+            LEFT JOIN handle h ON m.handle_id = h.ROWID
+            WHERE m.text IS NOT NULL AND m.text != '' AND m.date > ?1
+            ORDER BY m.date DESC LIMIT 50
+            """
+
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_int64(stmt, 1, cutoffAppleNs)
+
+        var messages: [[String: Any]] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let text: String
+            if let cStr = sqlite3_column_text(stmt, 0) {
+                text = String(cString: cStr)
+            } else { continue }
+
+            let appleNs = sqlite3_column_int64(stmt, 1)
+            let unixTs = Double(appleNs) / 1_000_000_000.0 + Self.appleEpochOffset
+            let isFromMe = sqlite3_column_int(stmt, 2) == 1
+
+            let handleId: String
+            if let cStr = sqlite3_column_text(stmt, 3) {
+                handleId = String(cString: cStr)
+            } else {
+                handleId = "unknown"
+            }
+
+            let sender = isFromMe ? "me" : handleId
+
+            // Format datetime in local time
+            let date = Date(timeIntervalSince1970: unixTs)
+            let fmt = DateFormatter()
+            fmt.dateFormat = "yyyy-MM-dd HH:mm:ss"
+            let dt = fmt.string(from: date)
+
+            messages.append([
+                "text": String(text.prefix(500)),
+                "timestamp": unixTs,
+                "dt": dt,
+                "is_from_me": isFromMe,
+                "sender": sender,
+            ])
+        }
+
+        writeJSONBuffer(messages, to: "imessage_buffer.json")
+    }
+
+    private func readWhatsApp() {
+        let dbPath = NSHomeDirectory() + "/Library/Group Containers/group.net.whatsapp.WhatsApp.shared/ChatStorage.sqlite"
+        guard FileManager.default.fileExists(atPath: dbPath) else { return }
+
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return }
+        defer { sqlite3_close(db) }
+
+        // Cutoff: 5 minutes ago, in Apple epoch seconds
+        let cutoffUnix = Date().timeIntervalSince1970 - 300
+        let cutoffApple = cutoffUnix - Self.appleEpochOffset
+
+        let sql = """
+            SELECT ZWAMESSAGE.ZTEXT, ZWAMESSAGE.ZMESSAGEDATE, ZWAMESSAGE.ZISFROMME,
+                   ZWACHATSESSION.ZCONTACTJID
+            FROM ZWAMESSAGE
+            LEFT JOIN ZWACHATSESSION ON ZWAMESSAGE.ZCHATSESSION = ZWACHATSESSION.Z_PK
+            WHERE ZWAMESSAGE.ZTEXT IS NOT NULL AND ZWAMESSAGE.ZTEXT != '' AND ZWAMESSAGE.ZMESSAGEDATE > ?1
+            ORDER BY ZWAMESSAGE.ZMESSAGEDATE DESC LIMIT 50
+            """
+
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_double(stmt, 1, cutoffApple)
+
+        var messages: [[String: Any]] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let text: String
+            if let cStr = sqlite3_column_text(stmt, 0) {
+                text = String(cString: cStr)
+            } else { continue }
+
+            let appleSec = sqlite3_column_double(stmt, 1)
+            let unixTs = appleSec + Self.appleEpochOffset
+            let isFromMe = sqlite3_column_int(stmt, 2) == 1
+
+            let contactJid: String
+            if let cStr = sqlite3_column_text(stmt, 3) {
+                contactJid = String(cString: cStr)
+            } else {
+                contactJid = "unknown"
+            }
+
+            let sender = isFromMe ? "me" : contactJid
+
+            let date = Date(timeIntervalSince1970: unixTs)
+            let fmt = DateFormatter()
+            fmt.dateFormat = "yyyy-MM-dd HH:mm:ss"
+            let dt = fmt.string(from: date)
+
+            messages.append([
+                "text": String(text.prefix(500)),
+                "timestamp": unixTs,
+                "dt": dt,
+                "is_from_me": isFromMe,
+                "sender": sender,
+            ])
+        }
+
+        writeJSONBuffer(messages, to: "whatsapp_buffer.json")
+    }
+
+    private func readContacts() {
+        let abDir = NSHomeDirectory() + "/Library/Application Support/AddressBook/Sources"
+        guard FileManager.default.fileExists(atPath: abDir) else { return }
+
+        var contacts: [[String: Any]] = []
+
+        let fm = FileManager.default
+        guard let sources = try? fm.contentsOfDirectory(atPath: abDir) else { return }
+
+        for source in sources {
+            let dbPath = abDir + "/" + source + "/AddressBook-v22.abcddb"
+            guard fm.fileExists(atPath: dbPath) else { continue }
+
+            var db: OpaquePointer?
+            guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { continue }
+
+            let sql = """
+                SELECT
+                    COALESCE(r.ZFIRSTNAME, '') || ' ' || COALESCE(r.ZLASTNAME, '') as name,
+                    GROUP_CONCAT(DISTINCT p.ZFULLNUMBER) as phones
+                FROM ZABCDRECORD r
+                LEFT JOIN ZABCDPHONENUMBER p ON p.ZOWNER = r.Z_PK
+                WHERE r.ZFIRSTNAME IS NOT NULL
+                GROUP BY r.Z_PK
+                """
+
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+                sqlite3_close(db)
+                continue
+            }
+
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                let name: String
+                if let cStr = sqlite3_column_text(stmt, 0) {
+                    name = String(cString: cStr).trimmingCharacters(in: .whitespaces)
+                } else { continue }
+
+                if name.isEmpty { continue }
+
+                let phones: String
+                if let cStr = sqlite3_column_text(stmt, 1) {
+                    phones = String(cString: cStr)
+                } else {
+                    phones = ""
+                }
+
+                contacts.append([
+                    "name": name,
+                    "phones": phones,
+                ])
+            }
+
+            sqlite3_finalize(stmt)
+            sqlite3_close(db)
+        }
+
+        writeJSONBuffer(contacts, to: "contacts_buffer.json")
+    }
+
+    private func writeJSONBuffer(_ data: Any, to filename: String) {
+        let dirPath = Self.home
+        try? FileManager.default.createDirectory(
+            atPath: dirPath,
+            withIntermediateDirectories: true
+        )
+        let filePath = dirPath + "/" + filename
+        let tmpPath = filePath + ".tmp"
+
+        guard let jsonData = try? JSONSerialization.data(
+            withJSONObject: data,
+            options: [.sortedKeys]
+        ) else { return }
+
+        guard FileManager.default.createFile(atPath: tmpPath, contents: jsonData) else { return }
+
+        // Atomic rename
+        do {
+            if FileManager.default.fileExists(atPath: filePath) {
+                _ = try FileManager.default.replaceItemAt(
+                    URL(fileURLWithPath: filePath),
+                    withItemAt: URL(fileURLWithPath: tmpPath)
+                )
+            } else {
+                try FileManager.default.moveItem(atPath: tmpPath, toPath: filePath)
+            }
+        } catch {
+            try? FileManager.default.removeItem(atPath: tmpPath)
         }
     }
 

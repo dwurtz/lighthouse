@@ -94,13 +94,49 @@ def _log_action(action_type: str, summary: str) -> None:
 
 
 def _calendar_create(params: dict, reason: str) -> None:
-    """Create a Google Calendar event."""
+    """Create a Google Calendar event, skipping if a similar one already exists.
+
+    Checks for existing events with the same title in the same time window
+    to prevent duplicates from repeated integrate/reflect cycles.
+    """
     summary = params.get("summary", "")
     start = params.get("start", "")
     end = params.get("end", "")
     if not summary or not start or not end:
         log.warning("calendar_create: missing summary/start/end")
         return
+
+    # Dedup: check if an event with a similar title already exists near this time
+    try:
+        from datetime import datetime, timedelta
+        start_dt = datetime.fromisoformat(start)
+        # Search window: 1 hour before to 1 hour after the start time
+        search_min = (start_dt - timedelta(hours=1)).isoformat()
+        search_max = (start_dt + timedelta(hours=1)).isoformat()
+
+        r_check = _gws_run([
+            "calendar", "events", "list",
+            "--params", json.dumps({
+                "calendarId": "primary",
+                "timeMin": search_min,
+                "timeMax": search_max,
+                "singleEvents": True,
+                "maxResults": 10,
+            }),
+        ])
+        if r_check.returncode == 0:
+            existing = json.loads(r_check.stdout)
+            for event in existing.get("items", []):
+                existing_title = (event.get("summary") or "").lower().strip()
+                new_title = summary.lower().strip()
+                if existing_title == new_title:
+                    log.info(
+                        "calendar_create: skipping duplicate — '%s' already exists at %s",
+                        summary, start,
+                    )
+                    return
+    except Exception:
+        log.debug("calendar_create dedup check failed, proceeding", exc_info=True)
 
     event_body: dict = {
         "summary": summary,

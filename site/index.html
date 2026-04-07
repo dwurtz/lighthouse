@@ -6,210 +6,147 @@
 <title>Déjà — From chatbot to chief of staff</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Instrument+Serif:ital@0;1&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;1,300;1,400;1,500&family=DM+Mono:wght@300;400&family=Inter:wght@300;400;500&display=swap" rel="stylesheet">
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 
-:root {
-  --bg: #020208;
-  --bg2: #080812;
-  --bg3: #0e0e1a;
-  --border: rgba(255,255,255,0.06);
-  --border-b: rgba(255,255,255,0.1);
-  --text: #f0eef5;
-  --text2: rgba(255,255,255,0.55);
-  --text3: rgba(255,255,255,0.25);
-  --accent: #c4f04d;
-  --accent2: rgba(196,240,77,0.12);
-  --serif: 'Instrument Serif', Georgia, serif;
-  --sans: 'Inter', system-ui, sans-serif;
-  --mono: 'DM Mono', monospace;
-  --ease: cubic-bezier(0.16, 1, 0.3, 1);
+:root{
+  --bg:#050507;
+  --bg2:#0a0a0f;
+  --bg3:#101018;
+  --border:rgba(255,255,255,0.06);
+  --border-b:rgba(255,255,255,0.10);
+  --text:#ece8e1;
+  --text2:rgba(255,255,255,0.50);
+  --text3:rgba(255,255,255,0.22);
+  --warm:rgba(236,232,225,0.08);
+  --serif:'Cormorant Garamond',Georgia,serif;
+  --sans:'Inter',system-ui,sans-serif;
+  --mono:'DM Mono',monospace;
+  --ease:cubic-bezier(0.16,1,0.3,1);
 }
 
 html{scroll-behavior:smooth}
-
-body{
-  background:var(--bg);
-  color:var(--text);
-  font-family:var(--sans);
-  font-size:16px;
-  line-height:1.6;
-  overflow-x:hidden;
-  -webkit-font-smoothing:antialiased;
-}
+body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:16px;line-height:1.6;overflow-x:hidden;-webkit-font-smoothing:antialiased}
 
 /* Noise */
-body::after{
-  content:'';position:fixed;inset:0;
-  background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 512 512' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.025'/%3E%3C/svg%3E");
-  pointer-events:none;z-index:9999;
-}
+body::after{content:'';position:fixed;inset:0;background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 512 512' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");pointer-events:none;z-index:9999}
 
-/* Grid */
-.grid-bg{
-  position:fixed;inset:0;
-  background-image:
-    linear-gradient(rgba(255,255,255,0.07) 1px,transparent 1px),
-    linear-gradient(90deg,rgba(255,255,255,0.07) 1px,transparent 1px);
-  background-size:64px 64px;
-  mask-image:radial-gradient(ellipse 80% 70% at 50% 20%,black,transparent 70%);
-  pointer-events:none;z-index:0;
-}
-
-/* Dot canvas */
-#dots{position:fixed;inset:0;pointer-events:none;z-index:0}
+/* Topo background */
+.topo{position:fixed;inset:0;pointer-events:none;z-index:0;opacity:0.6}
+.topo svg{width:100%;height:100%}
 
 /* Layout */
-.w{max-width:1200px;margin:0 auto;padding:0 32px;position:relative;z-index:1}
-section{padding:160px 0}
+.w{max-width:1100px;margin:0 auto;padding:0 32px;position:relative;z-index:1}
+section{padding:140px 0}
 
 /* Reveal */
-.r{opacity:0;transform:translateY(24px);transition:opacity 0.8s var(--ease),transform 0.8s var(--ease)}
+.r{opacity:0;transform:translateY(20px);transition:opacity 0.9s var(--ease),transform 0.9s var(--ease)}
 .r.v{opacity:1;transform:translateY(0)}
 
 /* ─── Nav ─── */
-nav{position:fixed;top:0;left:0;right:0;z-index:100;padding:24px 0}
-nav::before{content:'';position:absolute;inset:0;background:linear-gradient(var(--bg) 60%,transparent);pointer-events:none}
+nav{position:fixed;top:0;left:0;right:0;z-index:100;padding:28px 0}
+nav::before{content:'';position:absolute;inset:0;background:linear-gradient(var(--bg) 50%,transparent);pointer-events:none}
 .nav-i{display:flex;align-items:center;justify-content:space-between;position:relative}
-.logo{display:flex;align-items:center;gap:10px;text-decoration:none;color:var(--text)}
-.logo svg{width:24px;height:24px}
-.logo svg circle{fill:none;stroke:var(--accent);stroke-width:2}
-.logo span{font-weight:600;font-size:15px;letter-spacing:-0.03em}
+.logo{display:flex;align-items:center;gap:12px;text-decoration:none;color:var(--text)}
+.logo canvas{width:28px;height:28px}
+.logo span{font-family:var(--serif);font-weight:400;font-size:20px;letter-spacing:0.01em}
 .nav-l{display:flex;gap:36px;list-style:none}
-.nav-l a{color:var(--text2);text-decoration:none;font-size:13px;font-weight:500;transition:color 0.2s}
+.nav-l a{color:var(--text2);text-decoration:none;font-size:13px;font-weight:400;letter-spacing:0.02em;transition:color 0.2s}
 .nav-l a:hover{color:var(--text)}
 
 /* ─── Hero ─── */
-.hero{min-height:100vh;display:flex;align-items:center;padding:100px 0 80px;text-align:center}
+.hero{min-height:100vh;display:flex;align-items:center;padding:120px 0 80px;text-align:center}
 .hero .w{display:flex;flex-direction:column;align-items:center}
 
-.tag{
-  font-family:var(--mono);font-size:11px;letter-spacing:0.12em;text-transform:uppercase;
-  color:var(--accent);padding:8px 16px;border:1px solid var(--accent2);border-radius:100px;
-  margin-bottom:48px;display:inline-flex;align-items:center;gap:8px;
-}
-.tag::before{content:'';width:5px;height:5px;background:var(--accent);border-radius:50%;animation:pulse 2s ease infinite}
-@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.2}}
+.hero-ring{width:80px;height:80px;margin-bottom:48px}
 
 .hero h1{
   font-family:var(--serif);
-  font-size:clamp(52px,8vw,100px);
-  line-height:0.95;
-  letter-spacing:-0.04em;
-  font-weight:400;
-  max-width:800px;
-  margin-bottom:32px;
+  font-size:clamp(48px,7.5vw,96px);
+  line-height:1.0;
+  letter-spacing:-0.02em;
+  font-weight:300;
+  max-width:750px;
+  margin-bottom:36px;
 }
-.hero h1 em{font-style:italic;color:var(--accent)}
+.hero h1 em{font-style:italic;font-weight:400}
 
-.hero p{font-size:19px;color:var(--text2);max-width:500px;line-height:1.7;font-weight:300;margin-bottom:48px}
+.hero-sub{font-size:18px;color:var(--text2);max-width:460px;line-height:1.8;font-weight:300;margin-bottom:52px}
 
-.cta{display:flex;gap:16px;flex-wrap:wrap;justify-content:center;margin-bottom:56px}
-.btn{
-  padding:14px 32px;font-size:14px;font-weight:600;border-radius:10px;
-  text-decoration:none;transition:all 0.25s var(--ease);letter-spacing:-0.01em;
-}
-.btn-p{background:var(--accent);color:var(--bg)}
-.btn-p:hover{transform:translateY(-2px);box-shadow:0 8px 40px rgba(196,240,77,0.3)}
+.cta{display:flex;gap:16px;flex-wrap:wrap;justify-content:center;margin-bottom:52px}
+.btn{padding:14px 36px;font-size:14px;font-weight:500;border-radius:100px;text-decoration:none;transition:all 0.3s var(--ease);letter-spacing:0.01em}
+.btn-p{background:var(--text);color:var(--bg)}
+.btn-p:hover{transform:translateY(-2px);box-shadow:0 12px 40px rgba(236,232,225,0.15)}
 .btn-s{background:transparent;color:var(--text2);border:1px solid var(--border-b)}
 .btn-s:hover{border-color:var(--text2);color:var(--text)}
 
-.logos{display:flex;align-items:center;justify-content:center;gap:40px;flex-wrap:wrap}
-.logos span{display:flex;align-items:center;gap:8px;color:var(--text3);font-size:13px;font-weight:500;transition:color 0.2s}
-.logos span:hover{color:var(--text2)}
-.logos .d{width:24px;height:24px;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;flex-shrink:0}
+.compat{font-size:13px;color:var(--text3);font-weight:400;letter-spacing:0.02em}
+.compat strong{color:var(--text2);font-weight:500}
 
 /* ─── Divider ─── */
-.div-line{height:1px;background:var(--border);position:relative}
-.div-line::after{
-  content:'';position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
-  width:200px;height:1px;background:linear-gradient(90deg,transparent,var(--accent),transparent);opacity:0.4;
-}
+.div-line{height:1px;background:var(--border)}
 
 /* ─── Features ─── */
 .feat{text-align:center}
-.feat .label{font-family:var(--mono);font-size:11px;letter-spacing:0.12em;text-transform:uppercase;color:var(--accent);margin-bottom:20px}
-.feat h2{font-family:var(--serif);font-size:clamp(36px,5vw,56px);font-weight:400;margin-bottom:80px}
+.feat .label{font-family:var(--mono);font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:var(--text3);margin-bottom:24px}
+.feat h2{font-family:var(--serif);font-size:clamp(36px,5vw,52px);font-weight:300;margin-bottom:80px;letter-spacing:-0.01em}
 
 .cards{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--border);border-radius:20px;overflow:hidden;border:1px solid var(--border)}
-
-.card{
-  background:var(--bg2);padding:48px 36px;text-align:left;
-  transition:background 0.4s;
-}
+.card{background:var(--bg2);padding:48px 36px;text-align:left;transition:background 0.4s}
 .card:hover{background:var(--bg3)}
-
-.card .tag-sm{
-  font-family:var(--mono);font-size:11px;color:var(--accent);
-  letter-spacing:0.08em;text-transform:uppercase;margin-bottom:20px;
-}
-.card h3{font-size:19px;font-weight:600;letter-spacing:-0.02em;margin-bottom:12px;line-height:1.3}
-.card p{color:var(--text2);font-size:14px;line-height:1.7;font-weight:400}
+.card .label-sm{font-family:var(--mono);font-size:10px;color:var(--text3);letter-spacing:0.12em;text-transform:uppercase;margin-bottom:20px}
+.card h3{font-family:var(--serif);font-size:22px;font-weight:400;letter-spacing:-0.01em;margin-bottom:14px;line-height:1.3}
+.card p{color:var(--text2);font-size:14px;line-height:1.7;font-weight:300}
 
 /* ─── Steps ─── */
 .steps{text-align:center}
-.steps .label{font-family:var(--mono);font-size:11px;letter-spacing:0.12em;text-transform:uppercase;color:var(--accent);margin-bottom:20px}
-.steps h2{font-family:var(--serif);font-size:clamp(36px,5vw,56px);font-weight:400;margin-bottom:80px}
-
+.steps .label{font-family:var(--mono);font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:var(--text3);margin-bottom:24px}
+.steps h2{font-family:var(--serif);font-size:clamp(36px,5vw,52px);font-weight:300;margin-bottom:80px}
 .step-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:64px}
 .step{text-align:center}
-.step .num{font-family:var(--serif);font-size:72px;font-style:italic;color:var(--accent);opacity:0.3;line-height:1;margin-bottom:20px}
-.step h4{font-size:17px;font-weight:600;margin-bottom:10px;letter-spacing:-0.01em}
-.step p{font-size:14px;color:var(--text2);line-height:1.6;max-width:260px;margin:0 auto}
+.step .num{font-family:var(--serif);font-size:64px;font-weight:300;font-style:italic;color:var(--text3);line-height:1;margin-bottom:20px}
+.step h4{font-family:var(--serif);font-size:20px;font-weight:400;margin-bottom:12px}
+.step p{font-size:14px;color:var(--text2);line-height:1.7;max-width:260px;margin:0 auto;font-weight:300}
 
 /* ─── Install ─── */
 .inst{text-align:center}
-.inst h2{font-family:var(--serif);font-size:clamp(40px,6vw,64px);font-weight:400;margin-bottom:20px}
-.inst h2 em{font-style:italic;color:var(--accent)}
-.inst>div>p{color:var(--text2);font-size:17px;margin-bottom:48px}
-.code-block{
-  background:var(--bg2);border:1px solid var(--border-b);border-radius:16px;
-  padding:36px 44px;font-family:var(--mono);font-size:15px;text-align:left;
-  max-width:560px;margin:0 auto 48px;line-height:2.2;color:var(--text2);
-  position:relative;overflow:hidden;
-}
-.code-block::after{content:'';position:absolute;bottom:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,var(--accent),transparent);opacity:0.5}
-.code-block .p{color:var(--accent)}
-.code-block .c{color:var(--text3)}
+.inst h2{font-family:var(--serif);font-size:clamp(40px,6vw,60px);font-weight:300;margin-bottom:20px}
+.inst h2 em{font-style:italic;font-weight:400}
+.inst>div>p{color:var(--text2);font-size:16px;margin-bottom:48px;font-weight:300}
 
 /* ─── Footer ─── */
 footer{border-top:1px solid var(--border);padding:48px 0}
 .foot{display:flex;justify-content:space-between;align-items:center}
-.foot-l{display:flex;align-items:center;gap:10px}
-.foot-l svg{width:18px;height:18px}
-.foot-l svg circle{fill:none;stroke:var(--text3);stroke-width:2}
-.foot-t{font-size:13px;color:var(--text3)}
-footer a{color:var(--text3);text-decoration:none;font-size:13px;transition:color 0.2s}
-footer a:hover{color:var(--accent)}
+.foot-l{display:flex;align-items:center;gap:12px}
+.foot-l canvas{width:16px;height:16px}
+.foot-l span{font-family:var(--serif);font-size:14px;color:var(--text3)}
+.foot-r{font-size:12px;color:var(--text3);font-weight:300}
 
-/* ─── Responsive ─── */
+/* Responsive */
 @media(max-width:768px){
   section{padding:100px 0}
-  .hero h1{font-size:44px}
+  .hero h1{font-size:40px}
   .cards{grid-template-columns:1fr}
   .step-grid{grid-template-columns:1fr;gap:48px}
   .nav-l{display:none}
-  .logos{gap:20px}
-  .code-block{padding:24px;font-size:13px}
+  .compat{font-size:12px}
 }
 </style>
 </head>
 <body>
 
-<div class="grid-bg"></div>
-<canvas id="dots"></canvas>
+<div class="topo"><svg id="topo"></svg></div>
 
 <nav>
   <div class="w nav-i">
     <a href="#" class="logo">
-      <svg viewBox="0 0 28 28"><circle cx="11" cy="14" r="9" opacity="0.35"/><circle cx="17" cy="14" r="9"/></svg>
-      <span>Déjà</span>
+      <canvas id="logo-ring" width="56" height="56"></canvas>
+      <span>déjà</span>
     </a>
     <ul class="nav-l">
       <li><a href="#features">Features</a></li>
       <li><a href="#how">How it works</a></li>
-      <li><a href="#install">Install</a></li>
       <li><a href="#install">Download</a></li>
     </ul>
   </div>
@@ -217,15 +154,15 @@ footer a:hover{color:var(--accent)}
 
 <section class="hero">
   <div class="w">
-    <div class="tag r">Free · Open Source · macOS</div>
-    <h1 class="r" style="transition-delay:0.1s">From chatbot<br>to <em>chief of staff</em></h1>
-    <p class="r" style="transition-delay:0.2s">Déjà connects your email, calendar, messages, and meetings to the AI you already use. Install once — every conversation gets smarter.</p>
-    <div class="cta r" style="transition-delay:0.3s">
-      <a href="#install" class="btn btn-p">Get started →</a>
+    <canvas class="hero-ring r" id="hero-ring" width="160" height="160"></canvas>
+    <h1 class="r" style="transition-delay:0.15s">From chatbot<br>to <em>chief of staff</em></h1>
+    <p class="hero-sub r" style="transition-delay:0.25s">Déjà connects your email, calendar, messages, and meetings to the AI you already use. Install once — every conversation gets smarter.</p>
+    <div class="cta r" style="transition-delay:0.35s">
+      <a href="#install" class="btn btn-p">Download for Mac</a>
       <a href="#features" class="btn btn-s">Learn more</a>
     </div>
-    <div class="logos r" style="transition-delay:0.4s">
-      Works with <span>Claude</span> · <span>Cursor</span> · <span>Windsurf</span> · <span>ChatGPT</span> · <span>Copilot</span> · <span>any MCP client</span>
+    <div class="compat r" style="transition-delay:0.45s">
+      Works with <strong>Claude</strong> · <strong>Cursor</strong> · <strong>Windsurf</strong> · <strong>ChatGPT</strong> · <strong>Copilot</strong>
     </div>
   </div>
 </section>
@@ -235,35 +172,35 @@ footer a:hover{color:var(--accent)}
 <section class="feat" id="features">
   <div class="w">
     <div class="label r">What becomes possible</div>
-    <h2 class="r">Your AI, with <em style="font-family:var(--serif);font-style:italic;color:var(--accent)">full context</em></h2>
+    <h2 class="r">Your AI, with <em style="font-style:italic">full context</em></h2>
     <div class="cards r" style="transition-delay:0.1s">
       <div class="card">
-        <div class="tag-sm">People</div>
+        <div class="label-sm">People</div>
         <h3>Knows everyone you know</h3>
         <p>Living profiles for every contact — built from email, messages, and meetings. Always current.</p>
       </div>
       <div class="card">
-        <div class="tag-sm">Projects</div>
+        <div class="label-sm">Projects</div>
         <h3>Tracks what you're working on</h3>
         <p>Every project updates itself as information flows in. What's on track, what's stalled, who's waiting.</p>
       </div>
       <div class="card">
-        <div class="tag-sm">Meetings</div>
+        <div class="label-sm">Meetings</div>
         <h3>Was in the room with you</h3>
         <p>Calendar, notes, and transcripts — linked to the right people and projects automatically.</p>
       </div>
       <div class="card">
-        <div class="tag-sm">Commitments</div>
+        <div class="label-sm">Commitments</div>
         <h3>Nothing falls through</h3>
         <p>Tracks promises across email, chat, and meetings. Surfaces what you owe — drafts the follow-ups.</p>
       </div>
       <div class="card">
-        <div class="tag-sm">Day one</div>
+        <div class="label-sm">Day one</div>
         <h3>Useful in five minutes</h3>
         <p>Reads your last 30 days on first launch. By the time you open Claude, it already knows your world.</p>
       </div>
       <div class="card">
-        <div class="tag-sm">Open source</div>
+        <div class="label-sm">Open source</div>
         <h3>Your data, your control</h3>
         <p>Your wiki lives as plain files on your Mac. Fully open source — read the code, audit every prompt, run your own models.</p>
       </div>
@@ -304,7 +241,7 @@ footer a:hover{color:var(--accent)}
     <h2 class="r">Try it in <em>sixty seconds</em></h2>
     <p class="r">Free, open source, runs entirely on your Mac.</p>
     <div class="r" style="transition-delay:0.1s">
-      <a href="#" class="btn btn-p">Download for Mac →</a>
+      <a href="#" class="btn btn-p">Download for Mac</a>
     </div>
   </div>
 </section>
@@ -312,156 +249,131 @@ footer a:hover{color:var(--accent)}
 <footer>
   <div class="w foot">
     <div class="foot-l">
-      <svg viewBox="0 0 28 28"><circle cx="11" cy="14" r="7" opacity="0.35"/><circle cx="17" cy="14" r="7"/></svg>
-      <span class="foot-t">Déjà · Open Source</span>
+      <canvas id="footer-ring" width="32" height="32"></canvas>
+      <span>déjà</span>
     </div>
-    <span class="foot-t">macOS · Free · Open Source</span>
+    <span class="foot-r">Free · Open Source · macOS</span>
   </div>
 </footer>
 
 <script>
-// Grid dots — navigate the grid endlessly, avoiding each other
-(function(){
-  const c=document.getElementById('dots');
-  const ctx=c.getContext('2d');
-  const GRID=64;
-  const COUNT=25;
-  const ACCENT=[196,240,77];
-
-  let W,H,cols,rows;
+// ─── Animated dot ring ───
+// A ring of dots that drift organically, breathing and reforming.
+// Used for logo (nav), hero mark, and footer.
+function dotRing(canvas,radius,count,dotSize,speed){
+  const ctx=canvas.getContext('2d');
+  const cx=canvas.width/2,cy=canvas.height/2;
   const dots=[];
-
-  const DX=[1,0,-1,0];
-  const DY=[0,1,0,-1];
-
-  function resize(){
-    W=c.width=window.innerWidth;
-    H=c.height=window.innerHeight;
-    cols=Math.ceil(W/GRID)+1;
-    rows=Math.ceil(H/GRID)+1;
+  for(let i=0;i<count;i++){
+    const angle=(Math.PI*2/count)*i;
+    dots.push({
+      baseAngle:angle,
+      angleOffset:0,
+      radiusOffset:0,
+      phase:Math.random()*Math.PI*2,
+      freq:0.3+Math.random()*0.4,
+      ampA:0.08+Math.random()*0.12,
+      ampR:0.15+Math.random()*0.2,
+    });
   }
-
-  function tooClose(gx,gy,skip){
-    for(let i=0;i<dots.length;i++){
-      if(i===skip)continue;
-      const o=dots[i];
-      // check both current cell and target cell
-      const dx=Math.abs(o.tgx-gx);
-      const dy=Math.abs(o.tgy-gy);
-      if(dx+dy<=2)return true;
-    }
-    return false;
-  }
-
-  function pickDir(d,idx){
-    // never reverse — filter out the opposite of current dir
-    const reverse=(d.dir+2)%4;
-    const options=[];
-
-    for(let nd=0;nd<4;nd++){
-      if(nd===reverse)continue;
-      const nx=d.tgx+DX[nd];
-      const ny=d.tgy+DY[nd];
-      // soft wrap — allow going off edge, we'll wrap coords
-      const wx=((nx%cols)+cols)%cols;
-      const wy=((ny%rows)+rows)%rows;
-      if(tooClose(wx,wy,idx))continue;
-      // weight forward heavier for smoother paths
-      const w=nd===d.dir?6:2;
-      for(let k=0;k<w;k++)options.push(nd);
-    }
-
-    if(options.length>0){
-      return options[Math.floor(Math.random()*options.length)];
-    }
-    // all forward/side blocked — allow reverse as last resort
-    return reverse;
-  }
-
-  function init(){
-    resize();
-    for(let i=0;i<COUNT;i++){
-      const gx=Math.floor(Math.random()*cols);
-      const gy=Math.floor(Math.random()*rows);
-      const dir=Math.floor(Math.random()*4);
-      const speed=0.3+Math.random()*0.4; // varied speeds
-      dots.push({
-        gx, gy,         // current grid cell (where we came from)
-        tgx:gx+DX[dir], // target grid cell (where we're heading)
-        tgy:gy+DY[dir],
-        dir,
-        t:0,             // 0→1 interpolation between gx,gy → tgx,tgy
-        speed:speed/GRID,
-        opacity:0.2+Math.random()*0.3,
-        size:1.5+Math.random()*1,
-      });
-    }
-  }
-
-  function tick(){
-    for(let i=0;i<dots.length;i++){
-      const d=dots[i];
-      d.t+=d.speed;
-
-      if(d.t>=1){
-        // arrived — snap to target, pick new direction
-        d.gx=((d.tgx%cols)+cols)%cols;
-        d.gy=((d.tgy%rows)+rows)%rows;
-        d.t=0;
-        d.dir=pickDir(d,i);
-        d.tgx=d.gx+DX[d.dir];
-        d.tgy=d.gy+DY[d.dir];
-      }
-    }
-  }
-
+  let t=0;
   function draw(){
-    ctx.clearRect(0,0,W,H);
-    tick();
-
-    for(let i=0;i<dots.length;i++){
-      const d=dots[i];
-      // smooth interpolation with slight ease
-      const t=d.t*d.t*(3-2*d.t); // smoothstep
-      const wx=((d.gx%cols)+cols)%cols;
-      const wy=((d.gy%rows)+rows)%rows;
-      const x=(wx+DX[d.dir]*t)*GRID;
-      const y=(wy+DY[d.dir]*t)*GRID;
-
-      // dot
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    t+=speed;
+    for(const d of dots){
+      d.angleOffset=Math.sin(t*d.freq+d.phase)*d.ampA;
+      d.radiusOffset=Math.sin(t*d.freq*1.3+d.phase+1)*d.ampR*radius;
+      const a=d.baseAngle+d.angleOffset;
+      const r=radius+d.radiusOffset;
+      const x=cx+Math.cos(a)*r;
+      const y=cy+Math.sin(a)*r;
+      // dot with soft edge
+      const grad=ctx.createRadialGradient(x,y,0,x,y,dotSize*2);
+      grad.addColorStop(0,'rgba(236,232,225,0.7)');
+      grad.addColorStop(1,'rgba(236,232,225,0)');
       ctx.beginPath();
-      ctx.arc(x,y,d.size,0,Math.PI*2);
-      ctx.fillStyle=`rgba(${ACCENT[0]},${ACCENT[1]},${ACCENT[2]},${d.opacity})`;
+      ctx.arc(x,y,dotSize*2,0,Math.PI*2);
+      ctx.fillStyle=grad;
       ctx.fill();
-
-      // glow
+      // crisp center
       ctx.beginPath();
-      ctx.arc(x,y,d.size*5,0,Math.PI*2);
-      ctx.fillStyle=`rgba(${ACCENT[0]},${ACCENT[1]},${ACCENT[2]},${d.opacity*0.1})`;
+      ctx.arc(x,y,dotSize,0,Math.PI*2);
+      ctx.fillStyle='rgba(236,232,225,0.9)';
       ctx.fill();
-
-      // fading trail — 3 segments behind
-      for(let s=1;s<=3;s++){
-        const tt=Math.max(0,t-s*0.25);
-        const tx=(wx+DX[d.dir]*tt)*GRID;
-        const ty=(wy+DY[d.dir]*tt)*GRID;
-        const fade=d.opacity*(1-s*0.3);
-        if(fade<=0)continue;
-        ctx.beginPath();
-        ctx.arc(tx,ty,d.size*0.6,0,Math.PI*2);
-        ctx.fillStyle=`rgba(${ACCENT[0]},${ACCENT[1]},${ACCENT[2]},${fade*0.4})`;
-        ctx.fill();
-      }
     }
     requestAnimationFrame(draw);
   }
-
-  window.addEventListener('resize',resize);
-  init();
   draw();
+}
+
+// Init rings at different sizes
+dotRing(document.getElementById('logo-ring'),16,14,1.2,0.012);
+dotRing(document.getElementById('hero-ring'),52,20,2,0.008);
+dotRing(document.getElementById('footer-ring'),10,10,0.8,0.01);
+
+// ─── Topo contour lines ───
+(function(){
+  const svg=document.getElementById('topo');
+  const NS='http://www.w3.org/2000/svg';
+  let W,H,t=0;
+
+  const SEED=Math.random()*1000;
+  const P=new Uint8Array(512);
+  for(let i=0;i<256;i++)P[i]=i;
+  for(let i=255;i>0;i--){const j=Math.floor((SEED+i*2654435761)%256);[P[i],P[j]]=[P[j],P[i]]}
+  for(let i=0;i<256;i++)P[i+256]=P[i];
+
+  function fade(t){return t*t*t*(t*(t*6-15)+10)}
+  function lerp(a,b,t){return a+t*(b-a)}
+  function grad(h,x,y){const v=h&3;return(v===0?x+y:v===1?-x+y:v===2?x-y:-x-y)}
+  function noise(x,y){
+    const X=Math.floor(x)&255,Y=Math.floor(y)&255;
+    const xf=x-Math.floor(x),yf=y-Math.floor(y);
+    const u=fade(xf),v=fade(yf);
+    const aa=P[P[X]+Y],ab=P[P[X]+Y+1],ba=P[P[X+1]+Y],bb=P[P[X+1]+Y+1];
+    return lerp(lerp(grad(aa,xf,yf),grad(ba,xf-1,yf),u),lerp(grad(ab,xf,yf-1),grad(bb,xf-1,yf-1),u),v);
+  }
+  function fbm(x,y,oct){let v=0,amp=1,freq=1,max=0;for(let i=0;i<oct;i++){v+=noise(x*freq,y*freq)*amp;max+=amp;amp*=0.5;freq*=2}return v/max}
+
+  function contour(threshold,res,time){
+    const cols=Math.ceil(W/res)+1,rows=Math.ceil(H/res)+1;
+    const field=[];
+    for(let j=0;j<rows;j++){field[j]=[];for(let i=0;i<cols;i++)field[j][i]=fbm(i*0.06+time*0.3,j*0.06+time*0.15,4)}
+    const segs=[];
+    for(let j=0;j<rows-1;j++){for(let i=0;i<cols-1;i++){
+      const tl=field[j][i]>=threshold?1:0,tr=field[j][i+1]>=threshold?1:0,br=field[j+1][i+1]>=threshold?1:0,bl=field[j+1][i]>=threshold?1:0;
+      const idx=tl*8+tr*4+br*2+bl;if(idx===0||idx===15)continue;
+      const x=i*res,y=j*res;
+      function interp(v1,v2,a,b){const t=(threshold-v1)/(v2-v1);return[a[0]+t*(b[0]-a[0]),a[1]+t*(b[1]-a[1])]}
+      const T=interp(field[j][i],field[j][i+1],[x,y],[x+res,y]);
+      const R=interp(field[j][i+1],field[j+1][i+1],[x+res,y],[x+res,y+res]);
+      const B=interp(field[j+1][i],field[j+1][i+1],[x,y+res],[x+res,y+res]);
+      const L=interp(field[j][i],field[j+1][i],[x,y],[x,y+res]);
+      const cases={1:[L,B],2:[B,R],3:[L,R],4:[T,R],5:[T,L,B,R],6:[T,B],7:[T,L],8:[T,L],9:[T,B],10:[T,R,B,L],11:[T,R],12:[L,R],13:[B,R],14:[L,B]};
+      const c=cases[idx];if(c){if(c.length===4){segs.push([c[0],c[1]]);segs.push([c[2],c[3]])}else segs.push([c[0],c[1]])}
+    }}
+    return segs;
+  }
+
+  function render(){
+    W=window.innerWidth;H=window.innerHeight;
+    svg.setAttribute('viewBox',`0 0 ${W} ${H}`);
+    const res=24,levels=10;let paths='';
+    for(let l=0;l<levels;l++){
+      const threshold=-0.5+l*(1.0/levels);
+      const segs=contour(threshold,res,t);if(!segs.length)continue;
+      let d='';for(const s of segs)d+=`M${s[0][0].toFixed(1)},${s[0][1].toFixed(1)}L${s[1][0].toFixed(1)},${s[1][1].toFixed(1)}`;
+      const opacity=0.025+0.015*Math.sin(l*0.7+t*2);
+      paths+=`<path d="${d}" fill="none" stroke="rgba(236,232,225,${opacity.toFixed(4)})" stroke-width="0.6"/>`;
+    }
+    svg.innerHTML=paths;
+  }
+  function loop(){t+=0.003;render();requestAnimationFrame(loop)}
+  window.addEventListener('resize',()=>render());
+  loop();
 })();
 
-// Reveal
+// ─── Reveal ───
 const els=document.querySelectorAll('.r');
 const obs=new IntersectionObserver(e=>{e.forEach(x=>{if(x.isIntersecting)x.target.classList.add('v')})},{threshold:0.1,rootMargin:'0px 0px -40px 0px'});
 els.forEach(e=>obs.observe(e));
