@@ -40,6 +40,10 @@ from lighthouse.prompts import load as load_prompt
 
 app = FastAPI(title="lighthouse", version="0.2.0")
 
+# First-launch setup wizard endpoints
+from lighthouse.setup_api import router as setup_router
+app.include_router(setup_router)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],

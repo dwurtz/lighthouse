@@ -32,11 +32,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
-        MonitorState.ensureMenuBarVisible()
         monitor.start()
         setupPopover()
         setupStatusItem()
         startMicStatusPolling()
+
+        // Auto-open popover on first launch. Poll until the web server
+        // is ready, then check what's already configured and skip steps.
+        if monitor.setupNeeded {
+            pollForWebServerThenShowWizard()
+        }
 
         // Show floating pill when a meeting is about to start
         NotificationCenter.default.addObserver(
@@ -95,6 +100,41 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func handleMeetingDismissed() {
         dismissMeetingPill()
+    }
+
+    private func pollForWebServerThenShowWizard(attempts: Int = 0) {
+        guard let url = URL(string: "http://localhost:5055/api/setup/status") else { return }
+        var req = URLRequest(url: url)
+        req.timeoutInterval = 2
+
+        URLSession.shared.dataTask(with: req) { [weak self] data, _, error in
+            guard let self = self else { return }
+
+            if error != nil || data == nil {
+                // Server not ready yet — retry up to 15 times (30 seconds)
+                if attempts < 15 {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                        self.pollForWebServerThenShowWizard(attempts: attempts + 1)
+                    }
+                }
+                return
+            }
+
+            // Server is up — check status and show wizard
+            DispatchQueue.main.async {
+                self.monitor.checkSetupStatus()
+
+                // Give the status check a moment to update setupStep
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    guard let button = self.statusItem?.button else { return }
+                    if !self.popover.isShown {
+                        self.popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+                        NSApp.activate(ignoringOtherApps: true)
+                        self.popover.contentViewController?.view.window?.makeKey()
+                    }
+                }
+            }
+        }.resume()
     }
 
     var notificationPopover: NSPopover?
@@ -309,9 +349,15 @@ struct PopoverContentView: View {
     @ObservedObject var monitor: MonitorState
 
     var body: some View {
-        content
-            .frame(width: 420, height: 600)
-            .background(Color.black)
+        Group {
+            if monitor.setupNeeded {
+                SetupWizardView(monitor: monitor)
+            } else {
+                content
+            }
+        }
+        .frame(width: 420, height: 600)
+        .background(Color.black)
     }
 
     var content: some View {
@@ -896,6 +942,431 @@ func formatTimestamp(_ iso: String, relative: Bool = false) -> String {
     return df.string(from: d)
 }
 
+// MARK: - Setup Wizard
+//
+// First-launch wizard shown in the popover instead of Chat+Activity.
+// Five steps: API key, Google auth, identity, permissions, done.
+
+struct SetupWizardView: View {
+    @ObservedObject var monitor: MonitorState
+    @State private var apiKey: String = ""
+    @State private var userName: String = ""
+    @State private var userEmail: String = ""
+    @State private var loading: Bool = false
+    @State private var error: String = ""
+    @State private var gwsEmail: String = ""
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Header
+            HStack {
+                Image(systemName: "lighthouse.fill")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.9))
+                Text("Lighthouse")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.9))
+                Spacer()
+                // Step indicator
+                Text("Step \(monitor.setupStep + 1) of 5")
+                    .font(.system(size: 10))
+                    .foregroundColor(.white.opacity(0.3))
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+
+            Divider().background(Color.white.opacity(0.1))
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    switch monitor.setupStep {
+                    case 0: welcomeStep
+                    case 1: apiKeyStep
+                    case 2: googleAuthStep
+                    case 3: identityStep
+                    case 4: doneStep
+                    default: doneStep
+                    }
+                }
+                .padding(20)
+            }
+        }
+    }
+
+    // MARK: Step 0 — Welcome
+
+    var welcomeStep: some View {
+        VStack(spacing: 20) {
+            Spacer().frame(height: 40)
+            Image(systemName: "lighthouse.fill")
+                .font(.system(size: 48))
+                .foregroundColor(.white.opacity(0.6))
+            Text("Welcome to Lighthouse")
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundColor(.white)
+            Text("A personal AI agent for your Mac. It observes your digital life and maintains a living wiki about the people, projects, and events that matter to you.")
+                .font(.system(size: 13))
+                .foregroundColor(.white.opacity(0.5))
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 20)
+            Spacer().frame(height: 20)
+            Button(action: { monitor.setupStep = 1 }) {
+                Text("Get Started")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.black)
+                    .padding(.horizontal, 32)
+                    .padding(.vertical, 10)
+                    .background(Color.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+            }
+            .buttonStyle(.plain)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    // MARK: Step 1 — API Key
+
+    var apiKeyStep: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Connect to Gemini")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundColor(.white)
+            Text("Lighthouse uses Google's Gemini AI to understand your screen, messages, and meetings. Get a free API key from Google AI Studio.")
+                .font(.system(size: 12))
+                .foregroundColor(.white.opacity(0.5))
+
+            Button(action: {
+                if let url = URL(string: "https://aistudio.google.com/app/apikey") {
+                    NSWorkspace.shared.open(url)
+                }
+            }) {
+                HStack(spacing: 6) {
+                    Image(systemName: "arrow.up.right.square")
+                        .font(.system(size: 11))
+                    Text("Open Google AI Studio")
+                        .font(.system(size: 12, weight: .medium))
+                }
+                .foregroundColor(.blue)
+            }
+            .buttonStyle(.plain)
+
+            SecureField("Paste your API key here", text: $apiKey)
+                .textFieldStyle(.plain)
+                .font(.system(size: 12, design: .monospaced))
+                .foregroundColor(.white)
+                .padding(10)
+                .background(Color.white.opacity(0.06))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.1)))
+
+            if !error.isEmpty {
+                Text(error)
+                    .font(.system(size: 11))
+                    .foregroundColor(.red)
+            }
+
+            HStack {
+                Spacer()
+                if loading {
+                    ProgressView().scaleEffect(0.7)
+                } else {
+                    Button(action: { submitApiKey() }) {
+                        Text("Continue")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(.black)
+                            .padding(.horizontal, 24)
+                            .padding(.vertical, 8)
+                            .background(apiKey.isEmpty ? Color.gray : Color.white)
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(apiKey.isEmpty)
+                }
+            }
+        }
+    }
+
+    func submitApiKey() {
+        loading = true
+        error = ""
+        guard let url = URL(string: "http://localhost:5055/api/setup/api-key") else { return }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try? JSONSerialization.data(withJSONObject: ["key": apiKey])
+        req.timeoutInterval = 15
+
+        URLSession.shared.dataTask(with: req) { data, _, err in
+            DispatchQueue.main.async {
+                loading = false
+                if let err = err {
+                    error = err.localizedDescription
+                    return
+                }
+                guard let data = data,
+                      let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let ok = obj["ok"] as? Bool else {
+                    error = "Unexpected response"
+                    return
+                }
+                if ok {
+                    monitor.setupStep = 2
+                } else {
+                    error = obj["error"] as? String ?? "Invalid key"
+                }
+            }
+        }.resume()
+    }
+
+    // MARK: Step 2 — Google Workspace
+
+    var googleAuthStep: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Connect Google Workspace")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundColor(.white)
+            Text("Lighthouse reads your Gmail, Calendar, and Drive to keep your wiki up to date. This opens Google's sign-in page in your browser.")
+                .font(.system(size: 12))
+                .foregroundColor(.white.opacity(0.5))
+
+            if !gwsEmail.isEmpty {
+                HStack(spacing: 8) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundColor(.green)
+                    Text("Connected as \(gwsEmail)")
+                        .font(.system(size: 12))
+                        .foregroundColor(.green)
+                }
+            }
+
+            if !error.isEmpty {
+                Text(error)
+                    .font(.system(size: 11))
+                    .foregroundColor(.red)
+            }
+
+            HStack {
+                if !gwsEmail.isEmpty {
+                    Spacer()
+                    Button(action: { monitor.setupStep = 3 }) {
+                        Text("Continue")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(.black)
+                            .padding(.horizontal, 24)
+                            .padding(.vertical, 8)
+                            .background(Color.white)
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                    }
+                    .buttonStyle(.plain)
+                } else if loading {
+                    Text("Waiting for sign-in...")
+                        .font(.system(size: 12))
+                        .foregroundColor(.white.opacity(0.4))
+                    Spacer()
+                    ProgressView().scaleEffect(0.7)
+                } else {
+                    Button(action: { startGwsAuth() }) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "globe")
+                                .font(.system(size: 11))
+                            Text("Connect Google Account")
+                                .font(.system(size: 13, weight: .semibold))
+                        }
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 8)
+                        .background(Color.blue.opacity(0.4))
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                    }
+                    .buttonStyle(.plain)
+
+                    Spacer()
+
+                    Button(action: { monitor.setupStep = 3 }) {
+                        Text("Skip for now")
+                            .font(.system(size: 12))
+                            .foregroundColor(.white.opacity(0.3))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    func startGwsAuth() {
+        loading = true
+        error = ""
+        guard let url = URL(string: "http://localhost:5055/api/setup/gws-auth") else { return }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.timeoutInterval = 120
+
+        URLSession.shared.dataTask(with: req) { data, _, err in
+            DispatchQueue.main.async {
+                loading = false
+                if let err = err {
+                    error = err.localizedDescription
+                    return
+                }
+                guard let data = data,
+                      let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let ok = obj["ok"] as? Bool else {
+                    error = "Unexpected response"
+                    return
+                }
+                if ok {
+                    gwsEmail = obj["email"] as? String ?? "Connected"
+                    if gwsEmail.isEmpty { gwsEmail = "Connected" }
+                } else {
+                    error = obj["error"] as? String ?? "Auth failed"
+                }
+            }
+        }.resume()
+    }
+
+    // MARK: Step 3 — Identity
+
+    var identityStep: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("About you")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundColor(.white)
+            Text("Lighthouse needs to know who you are so it can distinguish your messages from everyone else's.")
+                .font(.system(size: 12))
+                .foregroundColor(.white.opacity(0.5))
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Full name")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.white.opacity(0.4))
+                TextField("David Wurtz", text: $userName)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 13))
+                    .foregroundColor(.white)
+                    .padding(10)
+                    .background(Color.white.opacity(0.06))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+
+                Text("Email")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.white.opacity(0.4))
+                TextField("you@example.com", text: $userEmail)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 13))
+                    .foregroundColor(.white)
+                    .padding(10)
+                    .background(Color.white.opacity(0.06))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+            }
+
+            if !error.isEmpty {
+                Text(error)
+                    .font(.system(size: 11))
+                    .foregroundColor(.red)
+            }
+
+            HStack {
+                Spacer()
+                if loading {
+                    ProgressView().scaleEffect(0.7)
+                } else {
+                    Button(action: { submitIdentity() }) {
+                        Text("Continue")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(.black)
+                            .padding(.horizontal, 24)
+                            .padding(.vertical, 8)
+                            .background(userName.isEmpty || userEmail.isEmpty ? Color.gray : Color.white)
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(userName.isEmpty || userEmail.isEmpty)
+                }
+            }
+        }
+    }
+
+    func submitIdentity() {
+        loading = true
+        error = ""
+        guard let url = URL(string: "http://localhost:5055/api/setup/identity") else { return }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try? JSONSerialization.data(withJSONObject: [
+            "name": userName,
+            "email": userEmail,
+        ])
+        req.timeoutInterval = 15
+
+        URLSession.shared.dataTask(with: req) { data, _, err in
+            DispatchQueue.main.async {
+                loading = false
+                if let err = err { error = err.localizedDescription; return }
+                guard let data = data,
+                      let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let ok = obj["ok"] as? Bool, ok else {
+                    error = "Setup failed"
+                    return
+                }
+                // Complete setup
+                completeSetup()
+            }
+        }.resume()
+    }
+
+    func completeSetup() {
+        guard let url = URL(string: "http://localhost:5055/api/setup/complete") else { return }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.timeoutInterval = 10
+        URLSession.shared.dataTask(with: req) { _, _, _ in
+            DispatchQueue.main.async {
+                monitor.setupStep = 4
+            }
+        }.resume()
+    }
+
+    // MARK: Step 4 — Done
+
+    var doneStep: some View {
+        VStack(spacing: 20) {
+            Spacer().frame(height: 30)
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 48))
+                .foregroundColor(.green)
+            Text("You're all set")
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundColor(.white)
+            Text("Lighthouse is now watching your screen, messages, and calendar. Your wiki lives at ~/Lighthouse — open it in Obsidian or any Markdown editor.")
+                .font(.system(size: 13))
+                .foregroundColor(.white.opacity(0.5))
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 20)
+            Text("Grant Screen Recording and Full Disk Access in System Settings → Privacy & Security for full functionality.")
+                .font(.system(size: 11))
+                .foregroundColor(.white.opacity(0.3))
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 20)
+
+            Button(action: {
+                monitor.completeSetup()
+            }) {
+                Text("Start Lighthouse")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.black)
+                    .padding(.horizontal, 32)
+                    .padding(.vertical, 10)
+                    .background(Color.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+            }
+            .buttonStyle(.plain)
+        }
+        .frame(maxWidth: .infinity)
+    }
+}
+
+
 // MARK: - Floating Meeting Pill
 //
 // A small floating widget that appears on screen when a calendar meeting
@@ -1146,9 +1617,15 @@ class MeetingRecorder {
     var onAutoStop: (() -> Void)?
 
     private static var recorderPath: String {
-        // Lives next to Lighthouse.swift in the menubar directory
-        let projectDir = NSHomeDirectory() + "/projects/workagents/workagent"
-        return projectDir + "/menubar/LighthouseRecorder"
+        // Bundled inside the app, next to the main executable
+        let bundled = Bundle.main.executableURL!
+            .deletingLastPathComponent()
+            .appendingPathComponent("LighthouseRecorder").path
+        if FileManager.default.fileExists(atPath: bundled) {
+            return bundled
+        }
+        // Dev fallback
+        return NSHomeDirectory() + "/projects/workagents/workagent/menubar/LighthouseRecorder"
     }
 
     func startRecording(sessionId: String, outputDirPath: String) {
@@ -1223,7 +1700,9 @@ class MonitorState: ObservableObject {
     @Published var showContactPicker: Bool = false
     @Published var activeTab: NotchTab = .chat
     @Published var isRecording: Bool = false
-    @Published var micBusy: Bool = false  // true during the stop→transcribe round-trip
+    @Published var micBusy: Bool = false
+    @Published var setupNeeded: Bool = false
+    @Published var setupStep: Int = 0
 
     // Meeting recording state
     @Published var meetingAvailable: Bool = false
@@ -1241,9 +1720,33 @@ class MonitorState: ObservableObject {
     private let meetingRecorder = MeetingRecorder()
 
     static let home = NSHomeDirectory() + "/.lighthouse"
-    // The Python package was renamed workagent → lighthouse in place; the
-    // project directory on disk is unchanged.
-    static let pythonPath = NSHomeDirectory() + "/projects/workagents/workagent/venv/bin/python3"
+
+    // The frozen Python backend lives inside the app bundle.
+    // Falls back to the dev venv path if the bundled binary doesn't exist
+    // (for development without PyInstaller).
+    static var backendPath: String {
+        // onedir mode: lighthouse-backend/lighthouse-backend inside the app bundle
+        let macosDir = Bundle.main.executableURL!.deletingLastPathComponent()
+        let onedir = macosDir.appendingPathComponent("lighthouse-backend/lighthouse-backend").path
+        if FileManager.default.fileExists(atPath: onedir) {
+            return onedir
+        }
+        // onefile fallback
+        let onefile = macosDir.appendingPathComponent("lighthouse-backend").path
+        if FileManager.default.fileExists(atPath: onefile) {
+            return onefile
+        }
+        // Dev fallback
+        return NSHomeDirectory() + "/projects/workagents/workagent/venv/bin/python3"
+    }
+
+    static var usesFrozenBackend: Bool {
+        let macosDir = Bundle.main.executableURL!.deletingLastPathComponent()
+        let onedir = macosDir.appendingPathComponent("lighthouse-backend/lighthouse-backend").path
+        let onefile = macosDir.appendingPathComponent("lighthouse-backend").path
+        return FileManager.default.fileExists(atPath: onedir) || FileManager.default.fileExists(atPath: onefile)
+    }
+
     static let projectDir = NSHomeDirectory() + "/projects/workagents/workagent"
 
     private var process: Process?
@@ -1251,16 +1754,62 @@ class MonitorState: ObservableObject {
     private var statsTimer: Timer?
 
     func start() {
-        startMonitor()
+        // Check if first-launch setup is needed
+        let setupDone = FileManager.default.fileExists(atPath: Self.home + "/setup_done")
+        setupNeeded = !setupDone
+
+        // Always start web server (setup wizard needs it for API calls)
         startWeb()
+
+        if setupDone {
+            startMonitor()
+            statsTimer = Timer.scheduledTimer(withTimeInterval: 10.0, repeats: true) { [weak self] _ in
+                self?.updateStats()
+                self?.updateRecentSignals()
+                self?.updateInsights()
+            }
+            updateStats()
+            updateRecentSignals()
+            updateInsights()
+            startMeetingPolling()
+        }
+    }
+
+    func checkSetupStatus() {
+        // Ask the backend what's already configured and skip completed steps
+        guard let url = URL(string: "http://localhost:5055/api/setup/status") else { return }
+        var req = URLRequest(url: url)
+        req.timeoutInterval = 5
+        URLSession.shared.dataTask(with: req) { [weak self] data, _, _ in
+            guard let self = self, let data = data,
+                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+            DispatchQueue.main.async {
+                let hasKey = obj["has_api_key"] as? Bool ?? false
+                let gwsAuth = obj["gws_authenticated"] as? Bool ?? false
+                let hasIdentity = obj["has_identity"] as? Bool ?? false
+
+                // Skip to the first incomplete step
+                if hasKey && gwsAuth && hasIdentity {
+                    self.setupStep = 4  // done screen
+                } else if hasKey && gwsAuth {
+                    self.setupStep = 3  // identity
+                } else if hasKey {
+                    self.setupStep = 2  // google auth
+                } else {
+                    self.setupStep = 0  // welcome
+                }
+            }
+        }.resume()
+    }
+
+    func completeSetup() {
+        setupNeeded = false
+        startMonitor()
         statsTimer = Timer.scheduledTimer(withTimeInterval: 10.0, repeats: true) { [weak self] _ in
             self?.updateStats()
             self?.updateRecentSignals()
             self?.updateInsights()
         }
-        updateStats()
-        updateRecentSignals()
-        updateInsights()
         startMeetingPolling()
     }
 
@@ -1681,9 +2230,16 @@ class MonitorState: ObservableObject {
     private func startMonitor() {
         guard process == nil || !process!.isRunning else { return }
         let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: Self.pythonPath)
-        proc.arguments = ["-m", "lighthouse", "monitor"]
-        proc.currentDirectoryURL = URL(fileURLWithPath: Self.projectDir)
+        if Self.usesFrozenBackend {
+            // Frozen binary — single executable, no Python needed
+            proc.executableURL = URL(fileURLWithPath: Self.backendPath)
+            proc.arguments = ["monitor"]
+        } else {
+            // Dev mode — use venv Python
+            proc.executableURL = URL(fileURLWithPath: Self.backendPath)
+            proc.arguments = ["-m", "lighthouse", "monitor"]
+            proc.currentDirectoryURL = URL(fileURLWithPath: Self.projectDir)
+        }
         proc.environment = makeEnv()
         proc.standardOutput = FileHandle.nullDevice
         proc.standardError = FileHandle.nullDevice
@@ -1697,9 +2253,14 @@ class MonitorState: ObservableObject {
     func startWeb() {
         guard webProcess == nil || !webProcess!.isRunning else { return }
         let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: Self.pythonPath)
-        proc.arguments = ["-m", "lighthouse", "web"]
-        proc.currentDirectoryURL = URL(fileURLWithPath: Self.projectDir)
+        if Self.usesFrozenBackend {
+            proc.executableURL = URL(fileURLWithPath: Self.backendPath)
+            proc.arguments = ["web"]
+        } else {
+            proc.executableURL = URL(fileURLWithPath: Self.backendPath)
+            proc.arguments = ["-m", "lighthouse", "web"]
+            proc.currentDirectoryURL = URL(fileURLWithPath: Self.projectDir)
+        }
         proc.environment = makeEnv()
         proc.standardOutput = FileHandle.nullDevice
         proc.standardError = FileHandle.nullDevice
@@ -1709,8 +2270,10 @@ class MonitorState: ObservableObject {
 
     private func makeEnv() -> [String: String] {
         var env = ProcessInfo.processInfo.environment
-        env["PYTHONPATH"] = Self.projectDir + "/src"
-        env["PATH"] = Self.projectDir + "/venv/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+        if !Self.usesFrozenBackend {
+            env["PYTHONPATH"] = Self.projectDir + "/src"
+        }
+        env["PATH"] = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
         if env["GEMINI_API_KEY"] == nil, let key = readKeyFromEnv() { env["GEMINI_API_KEY"] = key }
         return env
     }
@@ -1854,12 +2417,4 @@ class MonitorState: ObservableObject {
         return nil
     }
 
-    static func ensureMenuBarVisible() {
-        let ud = UserDefaults(suiteName: "com.apple.controlcenter")
-        for i in 0...15 { ud?.set(true, forKey: "NSStatusItem Visible Item-\(i)") }
-        ud?.synchronize()
-        DispatchQueue.global().asyncAfter(deadline: .now() + 1.0) {
-            let task = Process(); task.executableURL = URL(fileURLWithPath: "/usr/bin/killall"); task.arguments = ["ControlCenter"]; try? task.run()
-        }
-    }
 }
