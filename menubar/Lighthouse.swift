@@ -51,6 +51,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             name: .meetingDismissed,
             object: nil
         )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(showNotificationBubble),
+            name: .agentNotification,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(dismissNotificationBubble),
+            name: .notificationDismissed,
+            object: nil
+        )
     }
 
     var meetingPillPopover: NSPopover?
@@ -83,6 +95,31 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func handleMeetingDismissed() {
         dismissMeetingPill()
+    }
+
+    var notificationPopover: NSPopover?
+
+    @objc private func showNotificationBubble() {
+        guard notificationPopover == nil || !(notificationPopover!.isShown) else { return }
+        guard let button = statusItem?.button else { return }
+
+        let view = NotificationBubbleView(monitor: monitor, onDismiss: { [weak self] in
+            self?.dismissNotificationBubble()
+        })
+        .background(Color.black)
+
+        let pop = NSPopover()
+        pop.behavior = .semitransient
+        pop.animates = true
+        pop.contentSize = NSSize(width: 320, height: 60)
+        pop.contentViewController = NSHostingController(rootView: view)
+        pop.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        notificationPopover = pop
+    }
+
+    @objc private func dismissNotificationBubble() {
+        notificationPopover?.close()
+        notificationPopover = nil
     }
 
     // MARK: Popover setup
@@ -291,6 +328,18 @@ struct PopoverContentView: View {
                 HStack(spacing: 10) {
                     // Take notes button. During recording
                     // shows elapsed time. Captures system audio + mic.
+                    if monitor.meetingProcessing {
+                        HStack(spacing: 5) {
+                            ProgressView()
+                                .scaleEffect(0.5)
+                                .frame(width: 12, height: 12)
+                            Text("Generating...")
+                                .font(.system(size: 11, weight: .medium))
+                        }
+                        .foregroundColor(.white.opacity(0.4))
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 4)
+                    } else {
                     Button(action: { monitor.toggleRecording() }) {
                         HStack(spacing: 5) {
                             Image(systemName: monitor.meetingRecording ? "stop.circle.fill" : "mic.fill")
@@ -320,6 +369,7 @@ struct PopoverContentView: View {
                         .clipShape(Capsule())
                     }
                     .buttonStyle(.plain)
+                    }
 
                     Circle()
                         .fill(monitor.running ? .green : .red)
@@ -902,23 +952,41 @@ struct MeetingPillView: View {
                 Spacer()
 
                 if monitor.meetingRecording {
-                    Button(action: {
-                        monitor.stopMeetingRecording()
-                        onDismiss()
-                    }) {
-                        HStack(spacing: 5) {
-                            Image(systemName: "stop.fill")
+                    // Pause — stops recording but doesn't process yet
+                    Button(action: { monitor.pauseMeetingRecording() }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: monitor.meetingPaused ? "play.fill" : "pause.fill")
                                 .font(.system(size: 9))
-                            Text("Stop")
-                                .font(.system(size: 12, weight: .semibold))
+                            Text(monitor.meetingPaused ? "Resume" : "Pause")
+                                .font(.system(size: 11, weight: .medium))
                         }
-                        .foregroundColor(.red)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 7)
-                        .background(Color.red.opacity(0.12))
+                        .foregroundColor(.white.opacity(0.6))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(Color.white.opacity(0.06))
                         .overlay(
                             RoundedRectangle(cornerRadius: 8)
-                                .stroke(Color.red.opacity(0.3), lineWidth: 1)
+                                .stroke(Color.white.opacity(0.12), lineWidth: 1)
+                        )
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                    }
+                    .buttonStyle(.plain)
+
+                    // End meeting — stops recording and processes
+                    Button(action: { monitor.stopMeetingRecording() }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "stop.fill")
+                                .font(.system(size: 9))
+                            Text("End")
+                                .font(.system(size: 11, weight: .medium))
+                        }
+                        .foregroundColor(.red)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(Color.red.opacity(0.1))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(Color.red.opacity(0.25), lineWidth: 1)
                         )
                         .clipShape(RoundedRectangle(cornerRadius: 8))
                     }
@@ -990,9 +1058,50 @@ struct MeetingPillView: View {
 }
 
 
+// MARK: - Agent Notification Bubble
+
+struct NotificationBubbleView: View {
+    @ObservedObject var monitor: MonitorState
+    var onDismiss: () -> Void
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "bell.fill")
+                .font(.system(size: 11))
+                .foregroundColor(.yellow.opacity(0.8))
+            VStack(alignment: .leading, spacing: 2) {
+                if monitor.notificationTitle != "Lighthouse" {
+                    Text(monitor.notificationTitle)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(.white)
+                        .lineLimit(1)
+                }
+                Text(monitor.notificationMessage)
+                    .font(.system(size: 12))
+                    .foregroundColor(.white.opacity(0.75))
+                    .lineLimit(3)
+            }
+            Spacer()
+            Button(action: { onDismiss() }) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundColor(.white.opacity(0.25))
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .frame(width: 320)
+        .background(Color.black)
+    }
+}
+
+
 extension Notification.Name {
     static let meetingDetected = Notification.Name("lighthouseMeetingDetected")
     static let meetingDismissed = Notification.Name("lighthouseMeetingDismissed")
+    static let agentNotification = Notification.Name("lighthouseAgentNotification")
+    static let notificationDismissed = Notification.Name("lighthouseNotificationDismissed")
 }
 
 func formatDuration(_ seconds: TimeInterval) -> String {
@@ -1032,7 +1141,7 @@ struct SignalInfo: Identifiable {
 
 class MeetingRecorder {
     private var process: Process?
-    private var sessionDir: String = ""
+    var sessionDir: String = ""
     var isRecording: Bool = false
     var onAutoStop: (() -> Void)?
 
@@ -1122,6 +1231,7 @@ class MonitorState: ObservableObject {
     @Published var meetingAttendees: [String] = []
     @Published var meetingRecording: Bool = false
     @Published var meetingLinked: Bool = false   // linked to a calendar event
+    @Published var meetingPaused: Bool = false   // recording paused but not ended
     @Published var meetingElapsed: TimeInterval = 0
     @Published var meetingSessionId: String = ""
     @Published var meetingNotes: String = ""  // scratchpad during recording
@@ -1204,10 +1314,40 @@ class MonitorState: ObservableObject {
 
     // MARK: - Meeting recording
 
+    // MARK: - Notifications from agent
+    @Published var notificationTitle: String = ""
+    @Published var notificationMessage: String = ""
+    @Published var showNotification: Bool = false
+
+    func pollNotifications() {
+        let path = Self.home + "/notification.json"
+        guard FileManager.default.fileExists(atPath: path),
+              let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let message = obj["message"] as? String, !message.isEmpty else { return }
+
+        // Remove the file so we don't show it again
+        try? FileManager.default.removeItem(atPath: path)
+
+        DispatchQueue.main.async {
+            self.notificationTitle = obj["title"] as? String ?? "Lighthouse"
+            self.notificationMessage = message
+            self.showNotification = true
+            NotificationCenter.default.post(name: .agentNotification, object: nil)
+
+            // Auto-dismiss after 10 seconds
+            DispatchQueue.main.asyncAfter(deadline: .now() + 10) {
+                self.showNotification = false
+                NotificationCenter.default.post(name: .notificationDismissed, object: nil)
+            }
+        }
+    }
+
     func startMeetingPolling() {
-        // Poll for meeting prompts every 5 seconds alongside mic status
+        // Poll for meeting prompts + notifications every 5 seconds
         Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
             self?.refreshMeetingPrompt()
+            self?.pollNotifications()
             if self?.meetingRecording == true {
                 self?.refreshMeetingStatus()
             }
@@ -1355,6 +1495,20 @@ class MonitorState: ObservableObject {
 
     @Published var meetingProcessing: Bool = false  // true while generating event page
 
+    func pauseMeetingRecording() {
+        if meetingPaused {
+            // Resume — restart the recorder
+            if let dir = meetingRecorder.sessionDir as String?, !dir.isEmpty {
+                meetingRecorder.startRecording(sessionId: meetingSessionId, outputDirPath: dir)
+            }
+            meetingPaused = false
+        } else {
+            // Pause — stop the recorder but don't process
+            meetingRecorder.stopRecording()
+            meetingPaused = true
+        }
+    }
+
     func stopMeetingRecording() {
         guard meetingRecording else { return }
 
@@ -1364,7 +1518,11 @@ class MonitorState: ObservableObject {
         meetingTimer?.invalidate()
         meetingTimer = nil
         meetingRecording = false
+        meetingPaused = false
         meetingProcessing = true  // shows "Generating notes..." in pill
+
+        // Show the processing pill
+        NotificationCenter.default.post(name: .meetingDetected, object: nil)
 
         // Stop recorder + wait for merge + tell Python — all on background thread
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in

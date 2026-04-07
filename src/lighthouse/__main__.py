@@ -215,7 +215,7 @@ def _run_configure() -> None:
     print()
 
     # --- 1. Gemini API key (stored in macOS Keychain) ---
-    print("[1/4] Gemini API key")
+    print("[1/5] Gemini API key")
     existing = get_api_key()
     source = api_key_source()
     if existing:
@@ -241,7 +241,7 @@ def _run_configure() -> None:
     print()
 
     # --- 2. Wiki layout + default prompts ---
-    print("[2/4] Wiki layout")
+    print("[2/5] Wiki layout")
     print(f"  wiki lives at: {WIKI_DIR}")
     WIKI_DIR.mkdir(parents=True, exist_ok=True)
     (WIKI_DIR / "people").mkdir(exist_ok=True)
@@ -276,7 +276,7 @@ def _run_configure() -> None:
     print()
 
     # --- 3. Self-page (identity) ---
-    print("[3/4] Identity self-page")
+    print("[3/5] Identity self-page")
     from lighthouse.identity import load_user
     user = load_user()
     if not user.is_generic:
@@ -305,8 +305,15 @@ def _run_configure() -> None:
                 print(f"  created {self_path.relative_to(WIKI_DIR.parent)}")
     print()
 
-    # --- 4. Health check ---
-    print("[4/4] Health check")
+    # --- 4. MCP auto-install ---
+    print("[4/5] MCP server configuration")
+    from lighthouse.mcp_install import install_on_all, print_install_report
+    mcp_results = install_on_all()
+    print_install_report(mcp_results, indent="  ")
+    print()
+
+    # --- 5. Health check ---
+    print("[5/5] Health check")
     _run_health(indent="  ")
     print()
     print("=" * 60)
@@ -316,7 +323,8 @@ def _run_configure() -> None:
     print("     - Full Disk Access → Lighthouse.app + python3")
     print("     - Screen & Audio Recording → Lighthouse.app")
     print("     - Contacts → Lighthouse.app")
-    print("  2. Start the agent:")
+    print("  2. Restart any AI clients that were just configured (Claude, Cursor, etc.)")
+    print("  3. Start the agent:")
     print("     python -m lighthouse monitor           # headless CLI")
     print("     open Lighthouse.app                     # menu-bar app (if built)")
     print()

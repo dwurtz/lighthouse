@@ -21,7 +21,6 @@ from lighthouse.observations.screenshot import capture_screenshot_if_changed
 from lighthouse.observations.tasks import collect_pending_tasks
 from lighthouse.observations.types import Observation
 from lighthouse.observations.whatsapp import collect_whatsapp
-from lighthouse.observations.granola import collect_recent_granola
 from lighthouse.observations.meet import collect_recent_transcripts
 
 log = logging.getLogger(__name__)
@@ -134,13 +133,6 @@ class Observer:
                 raw.extend(collect_pending_tasks())
             except Exception:
                 log.exception("Tasks collector error")
-
-        # Granola meeting notes — every 5th cycle (reads local JSON cache)
-        if self._tasks_counter == 0:  # piggyback on tasks counter
-            try:
-                raw.extend(collect_recent_granola())
-            except Exception:
-                log.exception("Granola collector error")
 
         # Meet transcripts — every 5th cycle (Drive API query)
         if self._email_counter == 0:  # piggyback on email counter

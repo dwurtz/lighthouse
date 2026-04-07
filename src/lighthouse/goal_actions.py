@@ -234,19 +234,27 @@ def _complete_task(params: dict, reason: str) -> None:
 
 
 def _notify(params: dict, reason: str) -> None:
-    """Show a macOS notification banner."""
+    """Show a notification bubble from the tray icon.
+
+    Writes to ~/.lighthouse/notification.json which the Swift app
+    polls and displays as a mini popover from the menu bar icon.
+    """
     title = params.get("title", "Lighthouse")
     message = params.get("message", "")
     if not message:
         log.warning("notify: missing message")
         return
 
-    script = f'display notification "{message}" with title "{title}"'
-    subprocess.run(
-        ["osascript", "-e", script],
-        capture_output=True,
-        timeout=5,
-    )
+    import json
+    from lighthouse.config import LIGHTHOUSE_HOME
+
+    notif_path = LIGHTHOUSE_HOME / "notification.json"
+    notif_path.write_text(json.dumps({
+        "title": title,
+        "message": message,
+        "timestamp": datetime.now().isoformat(),
+    }))
+
     log.info("notify: '%s' — %s", message[:80], reason)
     _log_action("notify", message[:80])
 
