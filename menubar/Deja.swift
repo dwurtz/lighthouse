@@ -1351,10 +1351,9 @@ struct SetupWizardView: View {
                 permissionRow(
                     icon: "rectangle.dashed.badge.record",
                     title: "Screen Recording",
-                    description: "See what's on your screen to build context",
+                    description: "Tap +, find Deja in Applications, toggle on",
                     granted: screenRecordingGranted,
                     action: {
-                        // Open Screen Recording pane
                         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") {
                             NSWorkspace.shared.open(url)
                         }
@@ -1364,7 +1363,7 @@ struct SetupWizardView: View {
                 permissionRow(
                     icon: "lock.open.fill",
                     title: "Full Disk Access",
-                    description: "Read iMessage and WhatsApp conversations",
+                    description: "Tap +, find Deja in Applications, toggle on",
                     granted: fullDiskGranted,
                     action: {
                         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") {
@@ -1376,7 +1375,7 @@ struct SetupWizardView: View {
                 permissionRow(
                     icon: "person.crop.circle",
                     title: "Contacts",
-                    description: "Match phone numbers to names",
+                    description: "Tap +, find Deja in Applications, toggle on",
                     granted: contactsGranted,
                     action: {
                         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Contacts") {
@@ -1414,7 +1413,12 @@ struct SetupWizardView: View {
                 .buttonStyle(.plain)
             }
         }
-        .onAppear { checkPermissions() }
+        .onAppear {
+            checkPermissions()
+            // Start the screenshot timer so the first capture triggers
+            // the macOS Screen Recording prompt
+            monitor.startScreenshotCapture()
+        }
     }
 
     func permissionRow(icon: String, title: String, description: String, granted: Bool, action: @escaping () -> Void) -> some View {
@@ -1745,6 +1749,13 @@ struct SignalInfo: Identifiable {
     }
 }
 
+// MARK: - Screen Capture Delegate (minimal, for triggering TCC prompt)
+
+class ScreenCaptureDelegate: NSObject, SCStreamOutput {
+    static let shared = ScreenCaptureDelegate()
+    func stream(_ stream: SCStream, didOutputSampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {}
+}
+
 // MARK: - Meeting Recorder (spawns DejaRecorder helper)
 //
 // The actual ScreenCaptureKit capture runs in a SEPARATE binary
@@ -1930,86 +1941,67 @@ class MonitorState: ObservableObject {
 
     // MARK: - Screenshot Capture
 
-    private func startScreenshotCapture() {
+    func startScreenshotCapture() {
+        guard screenshotTimer == nil else { return }
+
+        // Trigger the Screen Recording TCC prompt by calling SCShareableContent.
+        // This is what triggered the "would like to record" prompt before.
+        // Only runs once — after that, screencapture CLI handles captures.
+        Task {
+            _ = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
+        }
+
         // Capture immediately, then every 6 seconds
-        Task { await captureScreenshot() }
+        captureScreenshot()
         screenshotTimer = Timer.scheduledTimer(withTimeInterval: 6.0, repeats: true) { [weak self] _ in
-            Task { await self?.captureScreenshot() }
+            self?.captureScreenshot()
         }
     }
 
-    private func captureScreenshot() async {
-        // Only capture if we have Screen Recording permission
-        guard CGPreflightScreenCaptureAccess() else { return }
+    private var screenCaptureAttempted = false
 
-        // Use ScreenCaptureKit to capture the main display
-        let image: CGImage
-        do {
-            let content = try await SCShareableContent.excludingDesktopWindows(
-                false, onScreenWindowsOnly: true
-            )
-            guard let display = content.displays.first else { return }
-
-            let filter = SCContentFilter(display: display, excludingWindows: [])
-            let config = SCStreamConfiguration()
-            config.width = display.width * 2
-            config.height = display.height * 2
-            config.capturesAudio = false
-            config.showsCursor = false
-
-            image = try await SCScreenshotManager.captureImage(
-                contentFilter: filter, configuration: config
-            )
-        } catch {
-            return
-        }
-
-        let width = image.width
-        let height = image.height
-        if width < 100 || height < 100 { return }
-
-        let screenshotPath = Self.home + "/latest_screen.png"
-        let timestampPath = Self.home + "/latest_screen_ts.txt"
-        let tmpPath = screenshotPath + ".tmp"
-
-        // Ensure ~/.deja directory exists
-        try? FileManager.default.createDirectory(
-            atPath: Self.home,
-            withIntermediateDirectories: true
-        )
-
-        // Write PNG to a temp file, then atomically move into place
-        guard let dest = CGImageDestinationCreateWithURL(
-            URL(fileURLWithPath: tmpPath) as CFURL,
-            "public.png" as CFString,
-            1,
-            nil
-        ) else { return }
-
-        CGImageDestinationAddImage(dest, image, nil)
-        guard CGImageDestinationFinalize(dest) else {
-            try? FileManager.default.removeItem(atPath: tmpPath)
-            return
-        }
-
-        // Atomic move to avoid partial reads from Python
-        do {
-            if FileManager.default.fileExists(atPath: screenshotPath) {
-                _ = try FileManager.default.replaceItemAt(
-                    URL(fileURLWithPath: screenshotPath),
-                    withItemAt: URL(fileURLWithPath: tmpPath)
-                )
-            } else {
-                try FileManager.default.moveItem(atPath: tmpPath, toPath: screenshotPath)
+    private func captureScreenshot() {
+        // Run on background thread — screencapture blocks until done
+        DispatchQueue.global(qos: .utility).async { [self] in
+            // First attempt triggers the macOS "would like to record" prompt.
+            // After that, pre-check to avoid re-prompting every 6 seconds.
+            if screenCaptureAttempted {
+                guard CGPreflightScreenCaptureAccess() else { return }
             }
-        } catch {
-            try? FileManager.default.removeItem(atPath: tmpPath)
-            return
-        }
+            screenCaptureAttempted = true
 
-        // Write timestamp
-        let ts = String(format: "%.3f", Date().timeIntervalSince1970)
-        try? ts.write(toFile: timestampPath, atomically: true, encoding: .utf8)
+            let screenshotPath = Self.home + "/latest_screen.png"
+            let timestampPath = Self.home + "/latest_screen_ts.txt"
+
+            // Ensure ~/.deja directory exists
+            try? FileManager.default.createDirectory(
+                atPath: Self.home,
+                withIntermediateDirectories: true
+            )
+
+            // Use screencapture CLI — this triggers the macOS TCC prompt
+            // on first run, which ScreenCaptureKit does NOT do.
+            let proc = Process()
+            proc.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+            proc.arguments = ["-x", "-C", screenshotPath]
+            proc.standardOutput = FileHandle.nullDevice
+            proc.standardError = FileHandle.nullDevice
+            do {
+                try proc.run()
+                proc.waitUntilExit()
+            } catch {
+                return
+            }
+
+            // Check if capture succeeded (permission denied = empty/tiny file)
+            guard FileManager.default.fileExists(atPath: screenshotPath),
+                  (try? FileManager.default.attributesOfItem(atPath: screenshotPath)[.size] as? Int) ?? 0 > 1024
+            else { return }
+
+            // Write timestamp
+            let ts = String(format: "%.3f", Date().timeIntervalSince1970)
+            try? ts.write(toFile: timestampPath, atomically: true, encoding: .utf8)
+        }
     }
 
     func checkSetupStatus() {
@@ -2025,9 +2017,13 @@ class MonitorState: ObservableObject {
                 let gwsAuth = obj["gws_authenticated"] as? Bool ?? false
                 let hasIdentity = obj["has_identity"] as? Bool ?? false
 
-                // Skip to the first incomplete step
-                if hasKey && gwsAuth && hasIdentity {
+                // Skip to the first incomplete step — always show
+                // permissions step if Screen Recording isn't granted
+                let hasScreenRecording = CGPreflightScreenCaptureAccess()
+                if hasKey && gwsAuth && hasIdentity && hasScreenRecording {
                     self.setupStep = 5  // done screen
+                } else if hasKey && gwsAuth && hasIdentity {
+                    self.setupStep = 4  // permissions
                 } else if hasKey && gwsAuth {
                     self.setupStep = 3  // identity
                 } else if hasKey {
