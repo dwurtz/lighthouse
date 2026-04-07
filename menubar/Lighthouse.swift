@@ -37,6 +37,52 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         setupPopover()
         setupStatusItem()
         startMicStatusPolling()
+
+        // Show floating pill when a meeting is about to start
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(showMeetingPrompt),
+            name: .meetingDetected,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleMeetingDismissed),
+            name: .meetingDismissed,
+            object: nil
+        )
+    }
+
+    var meetingPillPopover: NSPopover?
+
+    @objc private func showMeetingPrompt() {
+        // Show a mini popover from the tray icon — same style as the main app
+        guard meetingPillPopover == nil || !(meetingPillPopover!.isShown) else { return }
+        guard let button = statusItem?.button else { return }
+
+        let pillView = MeetingPillView(monitor: monitor, onDismiss: { [weak self] in
+            self?.dismissMeetingPill()
+        })
+        .frame(width: 340)
+        .background(Color.black)
+
+        let pill = NSPopover()
+        pill.behavior = .semitransient  // stays until user clicks away or dismisses
+        pill.animates = true
+        pill.contentSize = NSSize(width: 340, height: 56)
+        pill.contentViewController = NSHostingController(rootView: pillView)
+        pill.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+
+        meetingPillPopover = pill
+    }
+
+    func dismissMeetingPill() {
+        meetingPillPopover?.close()
+        meetingPillPopover = nil
+    }
+
+    @objc private func handleMeetingDismissed() {
+        dismissMeetingPill()
     }
 
     // MARK: Popover setup
@@ -145,34 +191,26 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func refreshMicStatus() {
-        let previous = monitor.isRecording
-        monitor.refreshMicStatus()
-        // After the request round-trips, update our cached flag and icon
-        // on the next main-thread tick.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
-            guard let self = self else { return }
-            let now = self.monitor.isRecording
-            if now != previous || now != self.isRecording {
-                self.applyMicState(recording: now)
+        let previous = isRecording
+        let now = monitor.meetingRecording
+        if now != previous {
+            applyMicState(recording: now)
+        }
+        // Always re-assert the icon — ScreenCaptureKit's recording indicator
+        // can cause macOS to drop our status item icon during capture.
+        if let button = statusItem?.button, button.image == nil {
+            if let img = loadPreferredIcon() {
+                img.isTemplate = true
+                button.image = img
             }
         }
     }
 
     private func applyMicState(recording: Bool) {
         self.isRecording = recording
-        self.micToggleItem.title = recording ? "Stop Listening" : "Start Listening"
-
-        // Swap the menu bar icon so there's visible feedback while recording.
-        guard let button = self.statusItem.button else { return }
-        if recording {
-            if let img = NSImage(systemSymbolName: "mic.fill", accessibilityDescription: "Recording") {
-                img.isTemplate = true
-                button.image = img
-            }
-        } else if let img = loadPreferredIcon() {
-            img.isTemplate = true
-            button.image = img
-        }
+        self.micToggleItem.title = recording ? "Stop Recording" : "Take Notes"
+        // Icon stays the same — the popover shows recording state via the red timer.
+        // Swapping the icon caused macOS to reposition the status item.
     }
 
     @objc private func toggleMic() {
@@ -251,33 +289,37 @@ struct PopoverContentView: View {
                     .foregroundColor(.white.opacity(0.9))
                 Spacer()
                 HStack(spacing: 10) {
-                    // Mic toggle — primary action in the header
-                    Button(action: { monitor.toggleMic() }) {
+                    // Take notes button. During recording
+                    // shows elapsed time. Captures system audio + mic.
+                    Button(action: { monitor.toggleRecording() }) {
                         HStack(spacing: 5) {
-                            Image(systemName: monitor.isRecording ? "stop.circle.fill" : "mic.fill")
+                            Image(systemName: monitor.meetingRecording ? "stop.circle.fill" : "mic.fill")
                                 .font(.system(size: 11, weight: .semibold))
-                            Text(monitor.isRecording ? "Stop" : "Listen")
-                                .font(.system(size: 11, weight: .medium))
+                            if monitor.meetingRecording {
+                                Text(formatDuration(monitor.meetingElapsed))
+                                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                            } else {
+                                Text("Take notes")
+                                    .font(.system(size: 11, weight: .medium))
+                            }
                         }
-                        .foregroundColor(monitor.isRecording ? .red : .white.opacity(0.85))
+                        .foregroundColor(monitor.meetingRecording ? .red : .white.opacity(0.85))
                         .padding(.horizontal, 9)
                         .padding(.vertical, 4)
                         .background(
-                            monitor.isRecording
+                            monitor.meetingRecording
                                 ? Color.red.opacity(0.15)
                                 : Color.white.opacity(0.08)
                         )
                         .overlay(
                             Capsule().stroke(
-                                monitor.isRecording ? Color.red.opacity(0.4) : Color.white.opacity(0.15),
+                                monitor.meetingRecording ? Color.red.opacity(0.4) : Color.white.opacity(0.15),
                                 lineWidth: 1
                             )
                         )
                         .clipShape(Capsule())
                     }
                     .buttonStyle(.plain)
-                    .disabled(monitor.micBusy)
-                    .opacity(monitor.micBusy ? 0.5 : 1.0)
 
                     Circle()
                         .fill(monitor.running ? .green : .red)
@@ -295,6 +337,82 @@ struct PopoverContentView: View {
             .background(Color.black)
 
             Divider().background(Color.white.opacity(0.1))
+
+            // Meeting prompt banner — shows when a calendar meeting is
+            // imminent/active and we're not recording yet
+            if monitor.meetingAvailable && !monitor.meetingRecording {
+                HStack(spacing: 10) {
+                    Image(systemName: "calendar")
+                        .font(.system(size: 12))
+                        .foregroundColor(.orange)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(monitor.meetingTitle)
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(.white)
+                            .lineLimit(1)
+                        if !monitor.meetingAttendees.isEmpty {
+                            Text(monitor.meetingAttendees.prefix(3).joined(separator: ", "))
+                                .font(.system(size: 9))
+                                .foregroundColor(.white.opacity(0.4))
+                                .lineLimit(1)
+                        }
+                    }
+                    Spacer()
+                    Button(action: { monitor.startMeetingRecording() }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "mic.fill")
+                                .font(.system(size: 9))
+                            Text("Take notes")
+                                .font(.system(size: 11, weight: .semibold))
+                        }
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(Color.orange.opacity(0.25))
+                        .overlay(Capsule().stroke(Color.orange.opacity(0.5), lineWidth: 1))
+                        .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .background(Color.orange.opacity(0.06))
+            }
+
+            // Meeting context banner — shows when recording and linked
+            // to a calendar event. User can disconnect to keep recording
+            // without the meeting context.
+            if monitor.meetingRecording && monitor.meetingLinked {
+                HStack(spacing: 8) {
+                    Image(systemName: "link")
+                        .font(.system(size: 9))
+                        .foregroundColor(.green.opacity(0.7))
+                    Text(monitor.meetingTitle)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(.white.opacity(0.7))
+                        .lineLimit(1)
+                    if !monitor.meetingAttendees.isEmpty {
+                        Text("· " + monitor.meetingAttendees.prefix(2).joined(separator: ", "))
+                            .font(.system(size: 10))
+                            .foregroundColor(.white.opacity(0.35))
+                            .lineLimit(1)
+                    }
+                    Spacer()
+                    Button(action: { monitor.unlinkMeeting() }) {
+                        Text("Unlink")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundColor(.white.opacity(0.4))
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .overlay(Capsule().stroke(Color.white.opacity(0.15), lineWidth: 1))
+                            .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 6)
+                .background(Color.green.opacity(0.05))
+            }
 
             // Tab content
             VStack(spacing: 0) {
@@ -728,6 +846,161 @@ func formatTimestamp(_ iso: String, relative: Bool = false) -> String {
     return df.string(from: d)
 }
 
+// MARK: - Floating Meeting Pill
+//
+// A small floating widget that appears on screen when a calendar meeting
+// is imminent. Shows meeting title + time, with a "Take notes" button.
+// During recording, shows elapsed time + Stop.
+
+struct MeetingPillView: View {
+    @ObservedObject var monitor: MonitorState
+    var onDismiss: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Processing state — shown after recording stops while AI generates the page
+            if monitor.meetingProcessing {
+                HStack(spacing: 10) {
+                    ProgressView()
+                        .scaleEffect(0.6)
+                        .frame(width: 16, height: 16)
+                    Text("Generating notes...")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.white.opacity(0.6))
+                    Spacer()
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 14)
+            }
+
+            if !monitor.meetingProcessing {
+            // Header bar
+            HStack(spacing: 12) {
+                // Color accent bar
+                RoundedRectangle(cornerRadius: 2)
+                    .fill(monitor.meetingRecording ? Color.red : Color.cyan)
+                    .frame(width: 3, height: 32)
+
+                // Meeting info
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(monitor.meetingTitle.isEmpty ? "Call" : monitor.meetingTitle)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(.white)
+                        .lineLimit(1)
+                    if monitor.meetingRecording {
+                        Text("Recording · \(formatDuration(monitor.meetingElapsed))")
+                            .font(.system(size: 11))
+                            .foregroundColor(.red.opacity(0.8))
+                    } else {
+                        Text(monitor.meetingTimeRange)
+                            .font(.system(size: 11))
+                            .foregroundColor(.white.opacity(0.4))
+                            .lineLimit(1)
+                    }
+                }
+
+                Spacer()
+
+                if monitor.meetingRecording {
+                    Button(action: {
+                        monitor.stopMeetingRecording()
+                        onDismiss()
+                    }) {
+                        HStack(spacing: 5) {
+                            Image(systemName: "stop.fill")
+                                .font(.system(size: 9))
+                            Text("Stop")
+                                .font(.system(size: 12, weight: .semibold))
+                        }
+                        .foregroundColor(.red)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 7)
+                        .background(Color.red.opacity(0.12))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(Color.red.opacity(0.3), lineWidth: 1)
+                        )
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    Button(action: { monitor.startMeetingRecording() }) {
+                        HStack(spacing: 5) {
+                            Image(systemName: "mic.fill")
+                                .font(.system(size: 10))
+                            Text("Take notes")
+                                .font(.system(size: 12, weight: .semibold))
+                        }
+                        .foregroundColor(.white.opacity(0.9))
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 7)
+                        .background(Color.white.opacity(0.08))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                        )
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                    }
+                    .buttonStyle(.plain)
+
+                    Button(action: { onDismiss() }) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundColor(.white.opacity(0.25))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+
+            // Scratchpad — visible during recording
+            if monitor.meetingRecording {
+                Divider().background(Color.white.opacity(0.08))
+                ZStack(alignment: .topLeading) {
+                    if monitor.meetingNotes.isEmpty {
+                        Text("Jot notes here...")
+                            .font(.system(size: 12))
+                            .foregroundColor(.white.opacity(0.2))
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 8)
+                    }
+                    TextEditor(text: $monitor.meetingNotes)
+                        .font(.system(size: 12))
+                        .foregroundColor(.white.opacity(0.85))
+                        .scrollContentBackground(.hidden)
+                        .background(Color.clear)
+                        .frame(minHeight: 80, maxHeight: 200)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+            }
+            } // end if !meetingProcessing
+        }
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color(white: 0.12))
+                .shadow(color: .black.opacity(0.5), radius: 20, y: 5)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Color.white.opacity(0.08), lineWidth: 1)
+        )
+    }
+}
+
+
+extension Notification.Name {
+    static let meetingDetected = Notification.Name("lighthouseMeetingDetected")
+    static let meetingDismissed = Notification.Name("lighthouseMeetingDismissed")
+}
+
+func formatDuration(_ seconds: TimeInterval) -> String {
+    let mins = Int(seconds) / 60
+    let secs = Int(seconds) % 60
+    return String(format: "%d:%02d", mins, secs)
+}
+
 struct SignalInfo: Identifiable {
     let id = UUID()
     let source: String
@@ -750,6 +1023,79 @@ struct SignalInfo: Identifiable {
     }
 }
 
+// MARK: - Meeting Recorder (spawns LighthouseRecorder helper)
+//
+// The actual ScreenCaptureKit capture runs in a SEPARATE binary
+// (LighthouseRecorder) so that importing the framework doesn't
+// trigger TCC Screen Recording prompts on every app launch.
+// The helper is only spawned when the user clicks Record.
+
+class MeetingRecorder {
+    private var process: Process?
+    private var sessionDir: String = ""
+    var isRecording: Bool = false
+    var onAutoStop: (() -> Void)?
+
+    private static var recorderPath: String {
+        // Lives next to Lighthouse.swift in the menubar directory
+        let projectDir = NSHomeDirectory() + "/projects/workagents/workagent"
+        return projectDir + "/menubar/LighthouseRecorder"
+    }
+
+    func startRecording(sessionId: String, outputDirPath: String) {
+        guard !isRecording else { return }
+        self.sessionDir = outputDirPath
+
+        // Spawn the recorder on a background queue so it doesn't
+        // interfere with the main thread / menu bar status item.
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let proc = Process()
+            proc.executableURL = URL(fileURLWithPath: Self.recorderPath)
+            proc.arguments = [outputDirPath]
+            proc.standardOutput = FileHandle.nullDevice
+            proc.standardError = FileHandle.nullDevice
+
+            proc.terminationHandler = { [weak self] process in
+                NSLog("lighthouse: recorder exited with code \(process.terminationStatus)")
+                DispatchQueue.main.async {
+                    if self?.isRecording == true {
+                        self?.isRecording = false
+                        self?.onAutoStop?()
+                    }
+                }
+            }
+
+            do {
+                try proc.run()
+                DispatchQueue.main.async {
+                    self?.process = proc
+                    self?.isRecording = true
+                }
+                NSLog("lighthouse: recorder started (pid \(proc.processIdentifier), session: \(sessionId))")
+            } catch {
+                NSLog("lighthouse: recorder spawn failed: \(error)")
+            }
+        }
+    }
+
+    func stopRecording() {
+        guard isRecording, let proc = process else { return }
+        isRecording = false
+
+        // Write .stop sentinel — the recorder polls for this
+        let stopFile = URL(fileURLWithPath: sessionDir).appendingPathComponent(".stop")
+        FileManager.default.createFile(atPath: stopFile.path, contents: nil)
+
+        // Wait for the recorder to exit (it merges mic audio on shutdown).
+        // Block up to 10 seconds — the merge is typically < 2 seconds.
+        proc.waitUntilExit()
+
+        process = nil
+        NSLog("lighthouse: recorder exited (merge complete)")
+    }
+}
+
+
 // MARK: - Monitor State
 
 class MonitorState: ObservableObject {
@@ -769,6 +1115,20 @@ class MonitorState: ObservableObject {
     @Published var activeTab: NotchTab = .chat
     @Published var isRecording: Bool = false
     @Published var micBusy: Bool = false  // true during the stop→transcribe round-trip
+
+    // Meeting recording state
+    @Published var meetingAvailable: Bool = false
+    @Published var meetingTitle: String = ""
+    @Published var meetingAttendees: [String] = []
+    @Published var meetingRecording: Bool = false
+    @Published var meetingLinked: Bool = false   // linked to a calendar event
+    @Published var meetingElapsed: TimeInterval = 0
+    @Published var meetingSessionId: String = ""
+    @Published var meetingNotes: String = ""  // scratchpad during recording
+    @Published var meetingTimeRange: String = ""  // e.g. "5:54 PM - 6:10 PM"
+    private var meetingStartTime: Date?
+    private var meetingTimer: Timer?
+    private let meetingRecorder = MeetingRecorder()
 
     static let home = NSHomeDirectory() + "/.lighthouse"
     // The Python package was renamed workagent → lighthouse in place; the
@@ -791,6 +1151,7 @@ class MonitorState: ObservableObject {
         updateStats()
         updateRecentSignals()
         updateInsights()
+        startMeetingPolling()
     }
 
     func stop() {
@@ -815,47 +1176,257 @@ class MonitorState: ObservableObject {
         }
     }
 
-    // MARK: - Microphone (push-to-record)
+    // MARK: - Unified recording (ScreenCaptureKit — system audio + mic)
+    //
+    // One button handles both voice notes and meeting recording.
+    // Always captures system audio + mic via ScreenCaptureKit so both
+    // sides of any call are recorded. Python decides post-processing:
+    //   < 2 min → voice note → transcribe → chat
+    //   >= 2 min or calendar event → meeting → chunked transcribe → wiki event
 
+    func toggleRecording() {
+        if meetingRecording {
+            stopMeetingRecording()
+        } else {
+            startMeetingRecording()
+        }
+    }
+
+    // Legacy mic status — keep for compatibility but recording now
+    // goes through ScreenCaptureKit via MeetingRecorder
     func refreshMicStatus() {
-        guard let url = URL(string: "http://localhost:5055/api/mic/status") else { return }
+        // No-op: recording state is tracked locally via meetingRecording
+    }
+
+    func toggleMic() {
+        toggleRecording()
+    }
+
+    // MARK: - Meeting recording
+
+    func startMeetingPolling() {
+        // Poll for meeting prompts every 5 seconds alongside mic status
+        Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
+            self?.refreshMeetingPrompt()
+            if self?.meetingRecording == true {
+                self?.refreshMeetingStatus()
+            }
+        }
+
+        // Set up auto-stop callback
+        meetingRecorder.onAutoStop = { [weak self] in
+            self?.stopMeetingRecording()
+        }
+    }
+
+    private var lastPromptedEventId: String = ""
+    private var recordedEventIds: Set<String> = []  // don't re-prompt for recorded meetings
+
+    func refreshMeetingPrompt() {
+        guard !meetingRecording else { return }
+        guard let url = URL(string: "http://localhost:5055/api/meeting/prompt") else { return }
         var req = URLRequest(url: url)
         req.timeoutInterval = 2
         URLSession.shared.dataTask(with: req) { [weak self] data, _, _ in
             guard let self = self, let data = data,
                   let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let recording = obj["recording"] as? Bool else { return }
+                  let available = obj["available"] as? Bool else { return }
             DispatchQueue.main.async {
-                if self.isRecording != recording {
-                    self.isRecording = recording
+                let wasAvailable = self.meetingAvailable
+                self.meetingAvailable = available
+                if available {
+                    self.meetingTitle = obj["title"] as? String ?? "Meeting"
+                    let attendees = obj["attendees"] as? [[String: String]] ?? []
+                    self.meetingAttendees = attendees.map { $0["name"] ?? $0["email"] ?? "" }
+
+                    // Build time range string
+                    let startISO = obj["start"] as? String ?? ""
+                    let endISO = obj["end"] as? String ?? ""
+                    self.meetingTimeRange = Self.formatTimeRange(start: startISO, end: endISO)
+
+                    // Auto-show pill when a NEW meeting is detected
+                    // Skip if we already recorded for this event
+                    let eventId = obj["event_id"] as? String ?? ""
+                    if (!wasAvailable || eventId != self.lastPromptedEventId)
+                        && !eventId.isEmpty
+                        && !self.recordedEventIds.contains(eventId) {
+                        self.lastPromptedEventId = eventId
+                        NotificationCenter.default.post(name: .meetingDetected, object: nil)
+                    }
+                } else {
+                    self.meetingTitle = ""
+                    self.meetingAttendees = []
+                    // Dismiss floating pill if meeting is no longer active
+                    if !self.meetingRecording {
+                        NotificationCenter.default.post(name: .meetingDismissed, object: nil)
+                    }
                 }
             }
         }.resume()
     }
 
-    func toggleMic() {
-        let endpoint = isRecording ? "stop" : "start"
-        guard let url = URL(string: "http://localhost:5055/api/mic/\(endpoint)") else { return }
+    func refreshMeetingStatus() {
+        guard let url = URL(string: "http://localhost:5055/api/meeting/status") else { return }
         var req = URLRequest(url: url)
-        req.httpMethod = "POST"
-        req.timeoutInterval = 60
-        DispatchQueue.main.async { self.micBusy = true }
-        URLSession.shared.dataTask(with: req) { [weak self] data, _, error in
-            guard let self = self else { return }
+        req.timeoutInterval = 2
+        URLSession.shared.dataTask(with: req) { [weak self] data, _, _ in
+            guard let self = self, let data = data,
+                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
             DispatchQueue.main.async {
-                self.micBusy = false
-                self.refreshMicStatus()
-            }
-            if let error = error {
-                NSLog("lighthouse: mic toggle failed: %@", error.localizedDescription)
-                return
-            }
-            if let data = data,
-               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let transcript = obj["transcript"] as? String, !transcript.isEmpty {
-                NSLog("lighthouse: transcribed: %@", transcript)
+                if let elapsed = obj["elapsed_sec"] as? Int {
+                    self.meetingElapsed = TimeInterval(elapsed)
+                }
             }
         }.resume()
+    }
+
+    func startMeetingRecording() {
+        guard !meetingRecording else { return }
+
+        // Tell Python to start the session
+        guard let url = URL(string: "http://localhost:5055/api/meeting/start") else { return }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        // Use calendar meeting info if available
+        let title = meetingTitle.isEmpty ? "" : meetingTitle
+        let attendees = meetingAttendees.isEmpty ? [] : meetingAttendees
+        meetingLinked = !title.isEmpty
+        meetingNotes = ""  // clear scratchpad
+
+        // Remember this event so we don't re-prompt after recording
+        if let eventId = lastPromptedEventId as String?, !eventId.isEmpty {
+            recordedEventIds.insert(eventId)
+        }
+
+        let body: [String: Any] = [
+            "title": title,
+            "attendees": attendees.map { ["name": $0] },
+        ]
+        req.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        req.timeoutInterval = 10
+
+        URLSession.shared.dataTask(with: req) { [weak self] data, _, error in
+            guard let self = self else { return }
+            if let error = error {
+                NSLog("lighthouse: meeting start failed: \(error)")
+                return
+            }
+            guard let data = data,
+                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let sessionId = obj["session_id"] as? String,
+                  let sessionDir = obj["session_dir"] as? String else { return }
+
+            DispatchQueue.main.async {
+                self.meetingRecording = true
+                self.meetingSessionId = sessionId
+                self.meetingStartTime = Date()
+                self.meetingElapsed = 0
+
+                // Start audio capture via ScreenCaptureKit
+                self.meetingRecorder.startRecording(sessionId: sessionId, outputDirPath: sessionDir)
+
+                // Start elapsed time counter
+                self.meetingTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+                    guard let self = self, let start = self.meetingStartTime else { return }
+                    self.meetingElapsed = Date().timeIntervalSince(start)
+                }
+
+                NSLog("lighthouse: meeting recording started in Swift: \(sessionId)")
+            }
+        }.resume()
+    }
+
+    func unlinkMeeting() {
+        // Disconnect from calendar event but keep recording.
+        // The event page will be titled by AI based on transcript content.
+        meetingLinked = false
+        meetingTitle = ""
+        meetingAttendees = []
+
+        // Tell Python to clear the calendar metadata
+        guard let url = URL(string: "http://localhost:5055/api/meeting/unlink") else { return }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.timeoutInterval = 5
+        URLSession.shared.dataTask(with: req) { _, _, _ in }.resume()
+    }
+
+    @Published var meetingProcessing: Bool = false  // true while generating event page
+
+    func stopMeetingRecording() {
+        guard meetingRecording else { return }
+
+        let notes = meetingNotes  // capture before clearing
+
+        // Update UI — show processing state
+        meetingTimer?.invalidate()
+        meetingTimer = nil
+        meetingRecording = false
+        meetingProcessing = true  // shows "Generating notes..." in pill
+
+        // Stop recorder + wait for merge + tell Python — all on background thread
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            self?.meetingRecorder.stopRecording()
+
+            // Send notes along with the stop request
+            guard let url = URL(string: "http://localhost:5055/api/meeting/stop") else { return }
+            var req = URLRequest(url: url)
+            req.httpMethod = "POST"
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            req.httpBody = try? JSONSerialization.data(withJSONObject: ["notes": notes])
+            req.timeoutInterval = 300
+
+            URLSession.shared.dataTask(with: req) { data, _, error in
+                DispatchQueue.main.async {
+                    self?.meetingProcessing = false
+                    self?.meetingAvailable = false
+                    self?.meetingSessionId = ""
+                    self?.meetingStartTime = nil
+                    self?.meetingElapsed = 0
+                    self?.meetingNotes = ""
+                    NotificationCenter.default.post(name: .meetingDismissed, object: nil)
+                }
+
+                if let error = error {
+                    NSLog("lighthouse: meeting stop failed: \(error)")
+                    return
+                }
+                if let data = data,
+                   let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                    NSLog("lighthouse: meeting processed: \(obj)")
+
+                    if let slug = obj["slug"] as? String, !slug.isEmpty {
+                        let vaultName = "Lighthouse"
+                        let encodedPath = "events/\(slug)".addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? slug
+                        if let obsidianURL = URL(string: "obsidian://open?vault=\(vaultName)&file=\(encodedPath)") {
+                            DispatchQueue.main.async {
+                                NSWorkspace.shared.open(obsidianURL)
+                            }
+                        }
+                    }
+                }
+            }.resume()
+        }
+    }
+
+    static func formatTimeRange(start: String, end: String) -> String {
+        let df = DateFormatter()
+        df.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
+        let outFmt = DateFormatter()
+        outFmt.dateFormat = "h:mm a"
+
+        func parse(_ iso: String) -> Date? {
+            // Strip timezone offset for parsing
+            let clean = String(iso.prefix(19))
+            return df.date(from: clean)
+        }
+
+        guard let s = parse(start), let e = parse(end) else {
+            return ""
+        }
+        return "\(outFmt.string(from: s)) - \(outFmt.string(from: e))"
     }
 
     func searchContacts(_ query: String) {

@@ -215,10 +215,21 @@ class AgentLoop:
         except Exception:
             log.exception("first-run onboarding check failed")
 
+        # Meeting coordinator — polls calendar for active/imminent meetings
+        # and writes a prompt file that Swift reads to show recording banner.
+        try:
+            from lighthouse.meeting_coordinator import meeting_poll_loop
+            meeting_task = asyncio.create_task(meeting_poll_loop())
+        except Exception:
+            log.exception("meeting_poll_loop failed to start")
+            meeting_task = None
+
         tasks = [
             asyncio.create_task(self._signal_loop()),
             asyncio.create_task(self._analysis_loop()),
         ]
+        if meeting_task:
+            tasks.append(meeting_task)
 
         try:
             await asyncio.gather(*tasks)

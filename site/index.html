@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Context Engine — Your life, organized by AI</title>
+<title>Déjà — Your AI already knows</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,300;0,400;0,500;1,400&family=Instrument+Serif:ital@0;1&family=Manrope:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
@@ -764,18 +764,16 @@ footer a:hover { color: var(--accent); }
   <div class="container nav-inner">
     <a href="#" class="logo">
       <svg class="logo-arcs" viewBox="0 0 28 28">
-        <path d="M16 3 A11 11 0 0 0 16 25" />
-        <path d="M16 7.5 A6.5 6.5 0 0 0 16 20.5" />
-        <path d="M16 11.5 A2.5 2.5 0 0 0 16 16.5" />
-        <path d="M13 11 L9 14 L13 17" />
+        <circle cx="12" cy="14" r="9" opacity="0.4"/>
+        <circle cx="16" cy="14" r="9"/>
       </svg>
-      <span class="logo-text">Context Engine</span>
+      <span class="logo-text">Déjà</span>
     </a>
     <ul class="nav-links">
       <li><a href="#features">Features</a></li>
       <li><a href="#how">How it works</a></li>
       <li><a href="#install">Install</a></li>
-      <li><a href="https://github.com/dwurtz/lighthouse">GitHub ↗</a></li>
+      <li><a href="https://github.com/dwurtz/deja">GitHub ↗</a></li>
     </ul>
   </div>
 </nav>
@@ -784,11 +782,11 @@ footer a:hover { color: var(--accent); }
 <section class="hero">
   <div class="container">
     <div class="hero-badge reveal">Open Source · macOS · Runs Locally</div>
-    <h1 class="reveal" style="transition-delay: 0.1s">A personal AI that actually <em>knows&nbsp;you</em></h1>
-    <p class="hero-sub reveal" style="transition-delay: 0.2s">Context Engine watches your digital life — email, messages, meetings, calendar — and builds a living wiki of everyone you know and everything you're working on. Installs as an MCP server on Claude, Cursor, Windsurf, and more.</p>
+    <h1 class="reveal" style="transition-delay: 0.1s">Your AI already <em>knows</em></h1>
+    <p class="hero-sub reveal" style="transition-delay: 0.2s">Déjà watches your digital life — email, messages, meetings, calendar — and builds a living personal wiki. When you ask your AI about a person, a project, or what happened yesterday, it already has the answer.</p>
     <div class="hero-cta reveal" style="transition-delay: 0.3s">
       <a href="#install" class="btn-primary">Install in 60 seconds →</a>
-      <a href="https://github.com/dwurtz/lighthouse" class="btn-secondary">View on GitHub</a>
+      <a href="https://github.com/dwurtz/deja" class="btn-secondary">View on GitHub</a>
     </div>
   </div>
 </section>
@@ -799,8 +797,8 @@ footer a:hover { color: var(--accent); }
     <div class="problem-grid">
       <div class="reveal">
         <div class="problem-label">the problem</div>
-        <h2>Your context is scattered across ten&nbsp;apps</h2>
-        <p>Who you talked to last week. What you committed to in that email. The meeting notes you never wrote up. The project that quietly stalled. It's all there — spread across Gmail, iMessage, WhatsApp, Granola, Google Calendar, and a dozen browser tabs. Context Engine watches all of it and writes the summary you'd never get around to writing yourself.</p>
+        <h2>You know this. You've seen this&nbsp;before.</h2>
+        <p>The name you can't place. The commitment buried in last week's email. The meeting notes you never wrote up. The project that quietly stalled. It's all there — scattered across Gmail, iMessage, WhatsApp, Granola, Google Calendar, and a dozen tabs. Déjà watches all of it and remembers so you don't have&nbsp;to.</p>
       </div>
       <div class="terminal-mock reveal" style="transition-delay: 0.15s">
         <div class="terminal-bar">
@@ -809,17 +807,17 @@ footer a:hover { color: var(--accent); }
           <div class="terminal-dot"></div>
         </div>
         <div class="terminal-body">
-          <div><span class="comment">// What Context Engine writes while you work:</span></div>
+          <div><span class="comment">// What Déjà writes while you work:</span></div>
           <br>
-          <div><span class="key">people/</span><span class="string">amanda-peffer</span>.md</div>
-          <div>Amanda works at Blade & Rose. She shared a</div>
-          <div>screenshot of sales data in Slack yesterday</div>
-          <div>and asked about the revenue-impacting change.</div>
+          <div><span class="key">people/</span><span class="string">sarah-chen</span>.md</div>
+          <div>Sarah runs product at Acme. She shared Q2</div>
+          <div>revenue numbers in Slack yesterday and flagged</div>
+          <div>a pricing change that's hurting conversion.</div>
           <br>
-          <div><span class="key">projects/</span><span class="string">palo-alto-relocation</span>.md</div>
-          <div>David starts at Google April 20. Dominique</div>
-          <div>found an Atherton rental at $16k/mo. Temporary</div>
-          <div>housing still undecided (Google vs. Airbnb).</div>
+          <div><span class="key">projects/</span><span class="string">seattle-relocation</span>.md</div>
+          <div>Start date is April 20. Partner found a rental</div>
+          <div>in Capitol Hill at $4.2k/mo. Still deciding</div>
+          <div>between corporate housing and Airbnb.</div>
         </div>
       </div>
     </div>
@@ -830,7 +828,7 @@ footer a:hover { color: var(--accent); }
 <section class="features" id="features">
   <div class="container">
     <div class="features-label reveal">what it does</div>
-    <h2 class="reveal">Your life, continuously&nbsp;organized</h2>
+    <h2 class="reveal">Your life, continuously&nbsp;remembered</h2>
     <div class="feature-cards reveal" style="transition-delay: 0.1s">
       <div class="feature-card">
         <div class="feature-fn">personal wiki</div>
@@ -843,9 +841,9 @@ footer a:hover { color: var(--accent); }
         <p>Email threads, iMessage and WhatsApp conversations, Google Meet transcripts, Granola meeting notes, calendar events, browser activity, screenshots. All collected silently, processed locally.</p>
       </div>
       <div class="feature-card">
-        <div class="feature-fn">meeting intelligence</div>
-        <h3>Meetings become wiki pages</h3>
-        <p>Calendar is the source of truth for what happened. Granola and Meet attach the notes. Every meeting automatically updates the right people and project pages — even ones with no notes taken.</p>
+        <div class="feature-fn">meeting recording</div>
+        <h3>Replaces Granola. Zero cost.</h3>
+        <p>A floating pill appears before each meeting. Click "Take notes" — ScreenCaptureKit captures both sides of the call, you jot notes in a scratchpad, and AI generates a wiki event page with summary, action items, your notes, and cleaned-up transcript. Works for any call, not just calendar events.</p>
       </div>
       <div class="feature-card">
         <div class="feature-fn">contact enrichment</div>
@@ -853,9 +851,9 @@ footer a:hover { color: var(--accent); }
         <p>Cross-references macOS Contacts, Gmail headers, and message handles to populate every person's page with real contact info. No manual data entry.</p>
       </div>
       <div class="feature-card">
-        <div class="feature-fn">onboarding</div>
+        <div class="feature-fn">instant onboarding</div>
         <h3>30 days of context on first run</h3>
-        <p>Don't start from an empty wiki. On first launch, Context Engine ingests your last month of sent email, messages, meetings, and notes — and builds a complete picture of your life in minutes.</p>
+        <p>Don't start from an empty wiki. On first launch, Déjà ingests your last month of sent email, messages, meetings, and notes — and builds a complete picture of your life in minutes.</p>
       </div>
       <div class="feature-card">
         <div class="feature-fn">MCP + Obsidian</div>
@@ -869,8 +867,8 @@ footer a:hover { color: var(--accent); }
 <!-- How it works -->
 <section class="how" id="how">
   <div class="container">
-    <div class="how-label reveal">architecture</div>
-    <h2 class="reveal">Observe. Integrate. Reflect.</h2>
+    <div class="how-label reveal">how it works</div>
+    <h2 class="reveal">Observe. Remember. Serve.</h2>
     <div class="pipeline reveal" style="transition-delay: 0.1s">
       <div class="pipe-step">
         <div class="pipe-icon">👁</div>
@@ -885,14 +883,14 @@ footer a:hover { color: var(--accent); }
       <div class="pipe-step">
         <div class="pipe-icon">🔮</div>
         <h4>Reflect</h4>
-        <p>Three times a day, a deeper pass reads the whole wiki, cleans up stale facts, enriches contacts, links entities, and writes notes about what stands&nbsp;out.</p>
+        <p>Three times a day, a deeper pass reads the whole wiki, cleans up stale facts, enriches contacts, and surfaces what stands&nbsp;out.</p>
       </div>
       <div class="pipe-step">
         <div class="pipe-icon" style="border-color: var(--accent);">
-          <svg width="20" height="20" viewBox="0 0 28 28"><path d="M14 4 A10 10 0 0 0 14 24" fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-linecap="round"/><path d="M14 8 A6 6 0 0 0 14 20" fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-linecap="round"/></svg>
+          <svg class="logo-arcs" width="20" height="20" viewBox="0 0 28 28"><circle cx="12" cy="14" r="7" opacity="0.4"/><circle cx="16" cy="14" r="7"/></svg>
         </div>
         <h4>Serve</h4>
-        <p>Browse your wiki in Obsidian. Query it via MCP from Claude or any AI. Search it from the command line. It's plain markdown files — yours&nbsp;forever.</p>
+        <p>Browse your wiki in Obsidian. Query it via MCP from any AI. Search from the command line. Plain markdown files — yours&nbsp;forever.</p>
       </div>
     </div>
   </div>
@@ -905,26 +903,25 @@ footer a:hover { color: var(--accent); }
     <h2 class="reveal">A wiki that writes itself</h2>
     <p class="reveal">Every person page, project page, and relationship link is created and maintained automatically from your real activity:</p>
     <div class="response-block reveal" style="transition-delay: 0.1s">
-      <div class="response-header"><span class="dot"></span> ~/Lighthouse/people/amanda-peffer.md</div>
+      <div class="response-header"><span class="dot"></span> ~/Deja/people/sarah-chen.md</div>
       <div class="response-body">
 <span class="section-head">---</span>
-<span class="key">emails</span>: [amanda@bladeandrose.co.uk]
-<span class="key">keywords</span>: [shopify, e-commerce, blade-and-rose]
+<span class="key">emails</span>: [sarah@acme.com]
+<span class="key">keywords</span>: [product, pricing, acme]
 <span class="section-head">---</span>
 
-<span class="section-head"># Amanda Peffer</span>
+<span class="section-head"># Sarah Chen</span>
 
-Amanda works at Blade & Rose (bladeandrose.co.uk)
-and is David's primary stakeholder on the
-<span class="wiki-link">[[ship-new-blade-rose-theme]]</span> project.
-Her husband <span class="wiki-link">[[jon-peffer]]</span> is part of the
-same Slack DM thread. Recently, Amanda shared a
-screenshot of product sales data and asked about the
-business logic behind a revenue-impacting theme change.
+Sarah is the Head of Product at Acme and the primary
+stakeholder on the <span class="wiki-link">[[pricing-overhaul]]</span>
+project. Her colleague <span class="wiki-link">[[james-liu]]</span> runs
+engineering on the same initiative. Sarah recently
+flagged that the new pricing tiers are hurting mid-market
+conversion and wants to revisit the rollout timeline.
 
 <span class="section-head"># Related</span>
 
-<span class="wiki-link">[[jon-peffer]]</span> · <span class="wiki-link">[[tom-thurlow]]</span> · <span class="wiki-link">[[ship-new-blade-rose-theme]]</span>
+<span class="wiki-link">[[james-liu]]</span> · <span class="wiki-link">[[pricing-overhaul]]</span> · <span class="wiki-link">[[acme-q2-planning]]</span>
       </div>
     </div>
   </div>
@@ -935,7 +932,7 @@ business logic behind a revenue-impacting theme change.
   <div class="container">
     <div class="works-with-label reveal">works with</div>
     <h2 class="reveal">Installs on the AI you already&nbsp;use</h2>
-    <p class="reveal">Context Engine runs as an MCP server. Connect it once — every conversation gets your full personal context automatically.</p>
+    <p class="reveal">Déjà runs as an MCP server. Connect it once — every conversation gets your full personal context automatically.</p>
     <div class="logo-bar reveal" style="transition-delay: 0.1s">
       <span class="logo-bar-item">
         <span class="logo-dot" style="background: #d97706; color: #fff; border-radius: 50%;">C</span>
@@ -971,7 +968,7 @@ business logic behind a revenue-impacting theme change.
       </span>
     </div>
     <div class="works-with-note reveal" style="transition-delay: 0.15s">
-      Any MCP-compatible client works. Context Engine auto-configures itself during setup.
+      Any MCP-compatible client works. Déjà auto-configures itself during setup.
     </div>
   </div>
 </section>
@@ -980,11 +977,11 @@ business logic behind a revenue-impacting theme change.
 <section class="install" id="install">
   <div class="container">
     <h2 class="reveal">Up and running in <em>sixty seconds</em></h2>
-    <p class="reveal">Clone, configure, launch. Context Engine onboards itself from your last 30 days of activity.</p>
+    <p class="reveal">Clone, configure, launch. Déjà onboards itself from your last 30 days of activity.</p>
     <div class="install-code reveal" style="transition-delay: 0.1s">
       <span class="comment"># install</span><br>
-      <span class="prompt">$</span> git clone https://github.com/dwurtz/lighthouse<br>
-      <span class="prompt">$</span> cd lighthouse && python -m lighthouse configure<br>
+      <span class="prompt">$</span> git clone https://github.com/dwurtz/deja<br>
+      <span class="prompt">$</span> cd deja && python -m deja configure<br>
       <br>
       <span class="comment"># configure walks you through:</span><br>
       <span class="comment"># → API key (stored in macOS Keychain)</span><br>
@@ -993,13 +990,13 @@ business logic behind a revenue-impacting theme change.
       <span class="comment"># → health check</span><br>
       <br>
       <span class="comment"># start the agent</span><br>
-      <span class="prompt">$</span> python -m lighthouse monitor<br>
+      <span class="prompt">$</span> python -m deja monitor<br>
       <br>
       <span class="comment"># your wiki populates in minutes.</span><br>
-      <span class="comment"># open ~/Lighthouse/ in Obsidian to browse.</span>
+      <span class="comment"># open ~/Deja/ in Obsidian to browse.</span>
     </div>
     <div class="reveal" style="transition-delay: 0.2s">
-      <a href="https://github.com/dwurtz/lighthouse" class="btn-primary">View on GitHub →</a>
+      <a href="https://github.com/dwurtz/deja" class="btn-primary">View on GitHub →</a>
     </div>
   </div>
 </section>
@@ -1009,12 +1006,12 @@ business logic behind a revenue-impacting theme change.
   <div class="container footer-inner">
     <div class="footer-left">
       <svg class="logo-arcs" viewBox="0 0 28 28" width="20" height="20">
-        <path d="M14 4 A10 10 0 0 0 14 24" fill="none" stroke="var(--text-muted)" stroke-width="2.5" stroke-linecap="round"/>
-        <path d="M14 8 A6 6 0 0 0 14 20" fill="none" stroke="var(--text-muted)" stroke-width="2.5" stroke-linecap="round"/>
+        <circle cx="12" cy="14" r="7" opacity="0.4"/>
+        <circle cx="16" cy="14" r="7"/>
       </svg>
-      <span class="footer-text">Context Engine · Open Source · Runs Locally</span>
+      <span class="footer-text">Déjà · Open Source · Runs Locally</span>
     </div>
-    <a href="https://github.com/dwurtz/lighthouse">github.com/dwurtz/lighthouse</a>
+    <a href="https://github.com/dwurtz/deja">github.com/dwurtz/deja</a>
   </div>
 </footer>
 

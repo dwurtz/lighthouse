@@ -53,7 +53,7 @@ appends new entries to `observations.jsonl`. Sources:
 | Google Tasks | `observations/tasks.py` | every 5th cycle |
 | Granola notes | `observations/granola.py` | every 5th cycle |
 | Meet transcripts | `observations/meet.py` | every 5th cycle |
-| Microphone | via web API (`/api/mic/start`) | user-initiated |
+| Meeting recording | `meeting_transcribe.py` + `LighthouseRecorder` | user-initiated |
 
 No LLM calls happen at this tier except for screenshots: `VISION_MODEL`
 (default: `gemini-2.5-flash`) generates a wiki-grounded description of
@@ -162,6 +162,40 @@ Root-level files:
 | `log.md` | Human-readable activity log (every mutation, health check, action) |
 | `index.md` | Auto-generated catalog of all pages (rebuilt after every write) |
 | `prompts/` | All LLM prompt templates -- edit live in Obsidian |
+
+
+## Meeting Recording
+
+Lighthouse replaces Granola with native meeting recording. No paid
+subscriptions, no third-party services -- just local audio capture,
+Gemini transcription, and wiki event pages.
+
+**How it works:**
+
+1. One minute before a Google Calendar meeting with attendees, a
+   floating pill drops from the menu bar showing the meeting title,
+   time, and a **Take notes** button.
+2. Click **Take notes** -- the pill expands with a scratchpad for
+   jotting notes during the meeting. A separate `LighthouseRecorder`
+   process captures system audio (both sides of the call via
+   ScreenCaptureKit) and microphone (your voice via ffmpeg).
+3. Audio is written as 5-minute WAV chunks to
+   `~/.lighthouse/meeting_audio/<session>/`. Chunks are transcribed
+   progressively during the meeting via Gemini Flash.
+4. Click **Stop** (or 5 minutes of silence triggers auto-stop) --
+   the pill shows "Generating notes..." while Gemini Pro creates the
+   event page: AI-generated title, summary with key decisions and
+   action items, your scratchpad notes (verbatim), and a cleaned-up
+   transcript with speaker labels in a collapsible block.
+5. Obsidian opens the event page automatically.
+
+**Works without a calendar event too.** Click **Take notes** in the
+menu bar header anytime -- phone calls, in-person conversations,
+anything. The AI generates the title from the transcript content.
+
+Files: `menubar/LighthouseRecorder.swift` (ScreenCaptureKit audio
+capture), `meeting_transcribe.py` (transcription + wiki page
+creation), `meeting_coordinator.py` (calendar-aware pill trigger).
 
 
 ## Goals

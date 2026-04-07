@@ -11,6 +11,10 @@ Endpoints:
   - POST /api/mic/stop        — end session, transcribe via Gemini native
                                 audio, emit as a source="microphone" signal
   - GET  /api/mic/status      — {recording, started_at, auto_stop_at}
+  - POST /api/meeting/start   — begin meeting recording session
+  - POST /api/meeting/stop    — end meeting, trigger transcription + wiki
+  - GET  /api/meeting/status  — current meeting recording state
+  - GET  /api/meeting/prompt  — check if a recordable meeting is available
 
 Everything else the Swift notch reads comes straight from disk
 (observations.jsonl, integrations.jsonl, wiki pages) — no HTTP involved.
@@ -139,10 +143,20 @@ def get_status() -> dict:
         age = (datetime.now(timezone.utc) - last_dt).total_seconds()
         monitor_running = age < 120
 
+    # Screen Recording permission check — used by the popover to warn
+    # the user if screenshots are disabled.
+    screen_recording = True
+    try:
+        from lighthouse.observations.screenshot import screen_recording_granted
+        screen_recording = screen_recording_granted()
+    except Exception:
+        pass
+
     return {
         "monitor_running": monitor_running,
         "last_signal_time": last_signal_time,
         "last_analysis_time": last_analysis_time,
+        "screen_recording": screen_recording,
     }
 
 
@@ -665,6 +679,224 @@ def mic_status() -> dict:
     return {
         "recording": _mic_state["process"] is not None,
         "started_at": _mic_state.get("started_at"),
+    }
+
+
+# ---------------------------------------------------------------------------
+# POST /api/meeting/start     — begin meeting recording
+# POST /api/meeting/stop      — end meeting, transcribe + wiki
+# GET  /api/meeting/status    — current meeting state
+# GET  /api/meeting/prompt    — check for recordable meeting
+#
+# Design: the Swift app uses ScreenCaptureKit to capture system audio +
+# mic (both sides of a call). It writes 5-minute WAV chunks to
+# ~/.lighthouse/meeting_audio/<session-id>/. Python handles transcription
+# and wiki processing. Swift calls these endpoints to coordinate.
+#
+# Auto-stop: Swift detects 5 minutes of silence and calls /api/meeting/stop.
+# No calendar-based auto-stop — meetings run over constantly.
+# ---------------------------------------------------------------------------
+
+from lighthouse.meeting_transcribe import (
+    MEETING_AUDIO_DIR,
+    process_completed_meeting,
+    transcribe_meeting_rolling,
+)
+
+_meeting_state: dict = {
+    "recording": False,
+    "session_id": None,
+    "metadata": None,
+    "started_at": None,
+    "transcripts": [],
+    "chunks_transcribed": 0,
+    "rolling_task": None,  # asyncio.Task for progressive transcription
+}
+
+
+@app.get("/api/meeting/prompt")
+def meeting_prompt() -> dict:
+    """Check if a recordable meeting is available.
+
+    Swift polls this every 3s. Returns meeting info if a calendar event
+    with attendees is active/imminent, empty dict otherwise.
+    """
+    from lighthouse.meeting_coordinator import MEETING_PROMPT_PATH
+
+    try:
+        if MEETING_PROMPT_PATH.exists():
+            data = json.loads(MEETING_PROMPT_PATH.read_text())
+            return {"available": True, **data}
+    except (json.JSONDecodeError, OSError):
+        pass
+    return {"available": False}
+
+
+@app.post("/api/meeting/start")
+async def meeting_start(body: dict) -> dict:
+    """Begin a recording session.
+
+    Body: { event_id?, title, attendees: [{name, email}] }
+
+    Works for both calendar meetings and ad-hoc calls. Creates the
+    session directory and starts rolling transcription. The actual
+    audio recording is done by Swift using ScreenCaptureKit (system
+    audio + mic — both sides of any call).
+
+    Post-processing is smart: short recordings (< 2 min) are treated
+    as voice notes → chat. Longer recordings or those with a calendar
+    event get full meeting treatment → wiki event page.
+    """
+    if _meeting_state["recording"]:
+        return {
+            "recording": True,
+            "reason": "already recording",
+            "session_id": _meeting_state["session_id"],
+        }
+
+    session_id = f"meeting-{int(time.time())}"
+    session_dir = MEETING_AUDIO_DIR / session_id
+    session_dir.mkdir(parents=True, exist_ok=True)
+
+    started_at = datetime.now(timezone.utc).isoformat()
+
+    metadata = {
+        "event_id": body.get("event_id", ""),
+        "title": body.get("title", "Meeting"),
+        "attendees": body.get("attendees", []),
+        "started_at": started_at,
+    }
+
+    # Write metadata to session dir for reference
+    (session_dir / "metadata.json").write_text(json.dumps(metadata, indent=2))
+
+    _meeting_state["recording"] = True
+    _meeting_state["session_id"] = session_id
+    _meeting_state["metadata"] = metadata
+    _meeting_state["started_at"] = started_at
+    _meeting_state["transcripts"] = []
+    _meeting_state["chunks_transcribed"] = 0
+
+    # Start rolling transcription in background
+    _meeting_state["rolling_task"] = asyncio.create_task(
+        transcribe_meeting_rolling(session_dir, _meeting_state)
+    )
+
+    # Clear the meeting prompt since we're now recording
+    from lighthouse.meeting_coordinator import clear_meeting_prompt
+    clear_meeting_prompt()
+
+    # Write shared state file for Swift to read
+    from lighthouse.meeting_coordinator import write_meeting_state
+    write_meeting_state({
+        "recording": True,
+        "session_id": session_id,
+        "title": metadata["title"],
+        "started_at": started_at,
+    })
+
+    import logging
+    logging.getLogger("lighthouse.meeting").info(
+        "Meeting recording started: %s (session %s)", metadata["title"], session_id
+    )
+
+    return {
+        "recording": True,
+        "session_id": session_id,
+        "session_dir": str(session_dir),
+        "started_at": started_at,
+    }
+
+
+@app.post("/api/meeting/unlink")
+async def meeting_unlink() -> dict:
+    """Disconnect from calendar event but keep recording.
+    Clears meeting metadata so the event page title will be AI-generated."""
+    if _meeting_state["metadata"]:
+        _meeting_state["metadata"]["event_id"] = ""
+        _meeting_state["metadata"]["title"] = ""
+        _meeting_state["metadata"]["attendees"] = []
+    return {"unlinked": True}
+
+
+@app.post("/api/meeting/stop")
+async def meeting_stop(body: dict = None) -> dict:
+    """End the recording and create a wiki event page.
+
+    Every recording becomes an event — no voice-note distinction.
+    AI generates the title and summary from the transcript content.
+    If linked to a calendar event, attendees and context are included.
+    User's scratchpad notes are included unaltered.
+    """
+    if not _meeting_state["recording"]:
+        return {"recording": False, "reason": "no active session"}
+
+    session_id = _meeting_state["session_id"]
+    session_dir = MEETING_AUDIO_DIR / session_id
+
+    # Capture user's scratchpad notes
+    user_notes = ""
+    if body and isinstance(body, dict):
+        user_notes = body.get("notes", "")
+    if user_notes and _meeting_state.get("metadata"):
+        _meeting_state["metadata"]["user_notes"] = user_notes
+
+    import logging
+    meeting_log = logging.getLogger("lighthouse.meeting")
+    meeting_log.info("Recording stopped: %s", session_id)
+
+    # Cancel rolling transcription task
+    task = _meeting_state.get("rolling_task")
+    if task and not task.done():
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+    # Always create an event page
+    result = await process_completed_meeting(session_dir, _meeting_state)
+
+    # Clear state
+    _meeting_state["recording"] = False
+    _meeting_state["session_id"] = None
+    _meeting_state["metadata"] = None
+    _meeting_state["started_at"] = None
+    _meeting_state["transcripts"] = []
+    _meeting_state["chunks_transcribed"] = 0
+    _meeting_state["rolling_task"] = None
+
+    from lighthouse.meeting_coordinator import clear_meeting_state
+    clear_meeting_state()
+
+    return {
+        "recording": False,
+        "session_id": session_id,
+        **result,
+    }
+
+
+@app.get("/api/meeting/status")
+def meeting_status() -> dict:
+    """Current meeting recording state."""
+    if not _meeting_state["recording"]:
+        return {"recording": False}
+
+    elapsed = 0
+    if _meeting_state["started_at"]:
+        try:
+            start = datetime.fromisoformat(_meeting_state["started_at"])
+            elapsed = int((datetime.now(timezone.utc) - start).total_seconds())
+        except Exception:
+            pass
+
+    return {
+        "recording": True,
+        "session_id": _meeting_state["session_id"],
+        "title": (_meeting_state.get("metadata") or {}).get("title", ""),
+        "started_at": _meeting_state["started_at"],
+        "elapsed_sec": elapsed,
+        "chunks_transcribed": _meeting_state["chunks_transcribed"],
     }
 
 
