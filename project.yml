@@ -16,10 +16,15 @@ targets:
     platform: macOS
     sources:
       - path: menubar/Sources
-    resources:
       - path: Resources/AppIcon.icns
+        type: file
+        buildPhase: resources
       - path: Resources/tray-icon.png
+        type: file
+        buildPhase: resources
       - path: Resources/client_secret.json
+        type: file
+        buildPhase: resources
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.deja.app

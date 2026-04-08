@@ -169,59 +169,25 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: Status item setup
 
-    // Load the custom icon from a stable path OUTSIDE the app
-    // bundle (~/.deja/icon.png). This is critical for macOS TCC
-    // stability: modifying files inside Contents/Resources/ changes the
-    // bundle's sealed-resources hash and therefore its CDHash, which
-    // invalidates user-granted permissions like Screen Recording.
-    //
-    // By reading the icon from an external path, the app binary is never
-    // touched when the icon changes — users can drop a new PNG into
-    // ~/.deja/icon.png and restart the app, and macOS still sees
-    // the same signed bundle.
-    //
-    // Falls back to ~/.deja/icon@2x.png for retina, then to a chain
-    // of SF Symbols if the user-provided files don't exist.
-    private static let fallbackSymbolNames = [
-        "rays",                    // radial beam pattern
-        "flashlight.on.fill",      // literal beam of light
-        "location.north.fill",     // navigation beacon
-        "sparkles",                // last-resort generic
-    ]
-
-    private var iconPath: URL {
-        let home = FileManager.default.homeDirectoryForCurrentUser
-        return home.appendingPathComponent(".deja/icon.png")
-    }
-
-    private func loadPreferredIcon() -> NSImage? {
-        // 1. User-provided icon at ~/.deja/icon.png
-        if FileManager.default.fileExists(atPath: iconPath.path),
-           let img = NSImage(contentsOf: iconPath) {
-            img.isTemplate = false  // macOS auto-colors for light/dark menu bar
-            img.size = NSSize(width: 22, height: 22)
-            return img
-        }
-        // 2. Bundled icon in app Resources
-        if let resourcePath = Bundle.main.resourcePath {
-            let bundledIcon = URL(fileURLWithPath: resourcePath).appendingPathComponent("tray-icon.png")
-            if let img = NSImage(contentsOf: bundledIcon) {
-                img.isTemplate = false
-                img.size = NSSize(width: 22, height: 22)
-                return img
-            }
-        }
-        // 3. Text fallback
-        return nil
-    }
-
     private func setupStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = statusItem.button {
-            if let img = loadPreferredIcon() {
-                button.image = img
+            // Load tray icon from the app bundle. No fallback — if
+            // this fails, the icon is missing from the build and we
+            // need to know about it immediately.
+            if let resourcePath = Bundle.main.resourcePath {
+                let iconURL = URL(fileURLWithPath: resourcePath).appendingPathComponent("tray-icon.png")
+                if let img = NSImage(contentsOf: iconURL) {
+                    img.isTemplate = false
+                    img.size = NSSize(width: 22, height: 22)
+                    button.image = img
+                } else {
+                    NSLog("deja: ERROR — tray-icon.png not found in app bundle at \(iconURL.path)")
+                    button.title = "Déjà"
+                }
             } else {
-                button.title = "✦"
+                NSLog("deja: ERROR — no resourcePath in bundle")
+                button.title = "Déjà"
             }
             button.toolTip = "Déjà"
             button.target = self
@@ -269,11 +235,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if now != previous {
             applyMicState(recording: now)
         }
-        // Always re-assert the icon — ScreenCaptureKit's recording indicator
-        // can cause macOS to drop our status item icon during capture.
+        // Re-assert the icon if macOS dropped it (can happen during capture).
         if let button = statusItem?.button, button.image == nil {
-            if let img = loadPreferredIcon() {
-                button.image = img
+            if let resourcePath = Bundle.main.resourcePath {
+                let iconURL = URL(fileURLWithPath: resourcePath).appendingPathComponent("tray-icon.png")
+                if let img = NSImage(contentsOf: iconURL) {
+                    img.isTemplate = false
+                    img.size = NSSize(width: 22, height: 22)
+                    button.image = img
+                }
             }
         }
     }

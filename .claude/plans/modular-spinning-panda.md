@@ -1,0 +1,1 @@
+Plan moved to ~/.claude/plans/
