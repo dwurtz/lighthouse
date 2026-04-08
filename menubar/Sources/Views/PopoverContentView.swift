@@ -10,8 +10,9 @@ struct PopoverContentView: View {
         Group {
             if monitor.setupNeeded {
                 SetupWizardView(monitor: monitor)
-            } else if !monitor.missingPermissions.isEmpty {
-                // Block the app until all permissions are granted
+            } else if !monitor.hasScreenRecording {
+                // Only block on Screen Recording — it's essential.
+                // Full Disk Access is optional (shown in Settings).
                 PermissionsBlockerView(monitor: monitor)
             } else {
                 content

@@ -39,19 +39,6 @@ struct PermissionsBlockerView: View {
                     )
                 }
 
-                if !monitor.hasFullDiskAccess {
-                    permissionBlockerRow(
-                        icon: "lock.open.fill",
-                        title: "Full Disk Access",
-                        description: "Tap +, find Deja in Applications, toggle on",
-                        action: {
-                            if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") {
-                                NSWorkspace.shared.open(url)
-                            }
-                        }
-                    )
-                }
-
                 Button(action: { monitor.checkRuntimePermissions() }) {
                     HStack(spacing: 5) {
                         Image(systemName: "arrow.clockwise")
