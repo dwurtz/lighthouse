@@ -467,12 +467,12 @@ function dotRing(canvas,radius,count,dotSize,speed){
     const slot=labelEls.find(l=>l.life<=0);
     if(slot){
       slot.dotIdx=idx;
-      slot.life=100;
+      slot.life=300;
       slot.el.textContent=d.label;
       slot.el.classList.add('on');
     }
 
-    setTimeout(fireEvent,400+Math.random()*800);
+    setTimeout(fireEvent,1500+Math.random()*2000);
   }
   setTimeout(fireEvent,600);
 

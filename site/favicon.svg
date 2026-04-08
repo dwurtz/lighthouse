@@ -1,6 +1,8 @@
-<svg viewBox="4380 5200 500 900" xmlns="http://www.w3.org/2000/svg">
-<rect x="4380" y="5200" width="500" height="900" fill="#050507" rx="80"/>
-<g transform="translate(0,12000) scale(1,-1)" fill="#ffffff">
-<path d="M4524 6666 c5 -47 18 -57 93 -72 416 -82 402 -753 -18 -824 -71 -12 -79 -19 -79 -74 0 -59 1 -59 85 -45 506 84 610 789 151 1017 -145 72 -241 71 -232 -2z"/>
+<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+<rect width="100" height="100" rx="20" fill="#050507"/>
+<svg x="15" y="5" width="70" height="90" viewBox="4400 5250 550 1250">
+<g transform="translate(0,12000) scale(1,-1)">
+<path d="M4524 6666 c5 -47 18 -57 93 -72 416 -82 402 -753 -18 -824 -71 -12 -79 -19 -79 -74 0 -59 1 -59 85 -45 506 84 610 789 151 1017 -145 72 -241 71 -232 -2z" fill="#ffffff"/>
 </g>
+</svg>
 </svg>
