@@ -2,8 +2,8 @@ name: Build & Release DMG
 
 on:
   push:
-    tags:
-      - 'v*'
+    branches: [main]
+    tags: ['v*']
 
 jobs:
   build:
@@ -14,22 +14,22 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.13'
+          python-version: '3.14'
 
       - name: Install Python dependencies
         run: |
           python -m venv venv
-          ./venv/bin/pip install -e .
-          ./venv/bin/pip install pyinstaller
+          source venv/bin/activate
+          pip install -e .
 
-      - name: Freeze Python backend (PyInstaller)
-        run: ./venv/bin/pyinstaller deja.spec
-
-      - name: Compile Swift (Deja + DejaRecorder)
+      - name: Compile Swift menubar app
         run: |
           xcrun swiftc -parse-as-library \
-            -framework SwiftUI -framework AppKit \
-            -o menubar/Deja menubar/Deja.swift
+            -framework SwiftUI -framework AppKit -framework ServiceManagement \
+            -o menubar/Deja menubar/Sources/**/*.swift
+
+      - name: Compile DejaRecorder
+        run: |
           xcrun swiftc \
             -framework Foundation -framework ScreenCaptureKit \
             -framework AVFoundation -framework CoreMedia \
@@ -37,9 +37,17 @@ jobs:
 
       - name: Assemble app bundle
         run: |
+          mkdir -p Deja.app/Contents/MacOS
+          mkdir -p Deja.app/Contents/Resources
           cp menubar/Deja Deja.app/Contents/MacOS/Deja
-          rm -rf Deja.app/Contents/MacOS/deja-backend
-          cp -R dist/deja-backend Deja.app/Contents/MacOS/deja-backend
+          cp menubar/DejaRecorder Deja.app/Contents/MacOS/DejaRecorder
+
+          # Resources
+          cp Resources/tray-icon.png Deja.app/Contents/Resources/
+          cp Resources/AppIcon.icns Deja.app/Contents/Resources/
+
+          # Bundle Python environment
+          bash menubar/bundle-python.sh
 
       - name: Ad-hoc codesign
         run: codesign --force --sign - --deep Deja.app
@@ -51,7 +59,14 @@ jobs:
             -ov -format UDZO \
             Deja.dmg
 
-      - name: Upload DMG to Release
+      - name: Upload DMG as artifact (every push)
+        uses: actions/upload-artifact@v4
+        with:
+          name: Deja.dmg
+          path: Deja.dmg
+
+      - name: Create GitHub Release (tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           files: Deja.dmg
