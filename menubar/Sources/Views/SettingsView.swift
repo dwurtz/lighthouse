@@ -80,8 +80,8 @@ struct SettingsView: View {
 
                         permissionRow(
                             icon: "bubble.left.and.bubble.right",
-                            title: "Message Access",
-                            description: "Read iMessage and WhatsApp conversations",
+                            title: "iMessage & WhatsApp",
+                            description: "Connect your messages to build people wiki pages",
                             granted: monitor.hasFullDiskAccess,
                             settingsURL: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"
                         )

@@ -126,37 +126,8 @@ struct PopoverContentView: View {
                 .background(Color.green.opacity(0.06))
             }
 
-            // Missing permissions warning — always visible until resolved
-            if !monitor.missingPermissions.isEmpty {
-                HStack(spacing: 8) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.system(size: 11))
-                        .foregroundColor(.orange)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Missing: \(monitor.missingPermissions.joined(separator: ", "))")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundColor(.orange)
-                        Text("Tap to fix in System Settings")
-                            .font(.system(size: 9))
-                            .foregroundColor(.orange.opacity(0.5))
-                    }
-                    Spacer()
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
-                .background(Color.orange.opacity(0.08))
-                .onTapGesture {
-                    if !monitor.hasScreenRecording {
-                        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") {
-                            NSWorkspace.shared.open(url)
-                        }
-                    } else if !monitor.hasFullDiskAccess {
-                        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") {
-                            NSWorkspace.shared.open(url)
-                        }
-                    }
-                }
-            }
+            // Permission warnings removed from main view.
+            // Users can check and grant permissions in Settings.
 
             // Meeting prompt banner — shows when a calendar meeting is
             // imminent/active and we're not recording yet
