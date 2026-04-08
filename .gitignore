@@ -17,7 +17,10 @@ dist/
 secrets/
 
 # macOS / Swift build artifacts
+menubar/Deja
+menubar/DejaRecorder
 menubar/Lighthouse
+menubar/LighthouseRecorder
 menubar/*.o
 menubar/*.dSYM/
 .DS_Store

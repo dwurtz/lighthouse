@@ -219,7 +219,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = statusItem.button {
             if let img = loadPreferredIcon() {
-                img.isTemplate = false
                 button.image = img
             } else {
                 button.title = "✦"
@@ -274,7 +273,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // can cause macOS to drop our status item icon during capture.
         if let button = statusItem?.button, button.image == nil {
             if let img = loadPreferredIcon() {
-                img.isTemplate = false
                 button.image = img
             }
         }
