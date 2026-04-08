@@ -106,20 +106,17 @@ nav.scrolled{background:rgba(5,5,7,0.95);padding:14px 0;border-bottom-color:var(
   .event-ring-wrap{max-width:320px}
 }
 
-/* Scroll nav — up and down chevrons */
-.scroll-up,.scroll-down{
-  position:fixed;left:50%;transform:translateX(-50%);
-  z-index:150;cursor:pointer;
-  opacity:0.3;transition:opacity 0.3s;
+/* Scroll chevrons — embedded in each slide */
+.chev{
+  position:absolute;left:50%;transform:translateX(-50%);
+  cursor:pointer;opacity:0.2;transition:opacity 0.3s;
 }
-.scroll-up:hover,.scroll-down:hover{opacity:0.6}
-.scroll-up.hidden,.scroll-down.hidden{opacity:0;pointer-events:none}
-.scroll-up{top:80px;animation:bob-up 2.5s ease infinite}
-.scroll-down{bottom:32px;animation:bob-down 2.5s ease infinite}
-.scroll-up svg,.scroll-down svg{width:20px;height:20px}
-.scroll-up svg path,.scroll-down svg path{stroke:var(--text);stroke-width:1.5;fill:none;stroke-linecap:round;stroke-linejoin:round}
-@keyframes bob-down{0%,100%{transform:translateX(-50%) translateY(0)}50%{transform:translateX(-50%) translateY(6px)}}
-@keyframes bob-up{0%,100%{transform:translateX(-50%) translateY(0)}50%{transform:translateX(-50%) translateY(-6px)}}
+.chev:hover{opacity:0.5}
+.chev-up{top:24px}
+.chev-down{bottom:24px;animation:bob 2.5s ease infinite}
+.chev svg{width:20px;height:20px}
+.chev svg path{stroke:var(--text);stroke-width:1.5;fill:none;stroke-linecap:round;stroke-linejoin:round}
+@keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(6px)}}
 
 /* ─── Divider ─── */
 .div-line{height:1px;background:var(--border)}
@@ -209,9 +206,11 @@ footer{border-top:1px solid var(--border);padding:48px 0}
       </div>
     </div>
   </div>
+  <a class="chev chev-down" data-dir="down"><svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></a>
 </section>
 
 <section class="feat" id="features">
+  <a class="chev chev-up" data-dir="up"><svg viewBox="0 0 24 24"><path d="M6 15l6-6 6 6"/></svg></a>
   <div class="w">
     <div class="label r">What becomes possible</div>
     <h2 class="r">Your AI, with <em style="font-style:italic">full context</em></h2>
@@ -248,10 +247,11 @@ footer{border-top:1px solid var(--border);padding:48px 0}
       </div>
     </div>
   </div>
+  <a class="chev chev-down" data-dir="down"><svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></a>
 </section>
 
-
 <section class="steps" id="how">
+  <a class="chev chev-up" data-dir="up"><svg viewBox="0 0 24 24"><path d="M6 15l6-6 6 6"/></svg></a>
   <div class="w">
     <div class="label r">How it works</div>
     <h2 class="r">Three steps. No ongoing effort.</h2>
@@ -273,10 +273,11 @@ footer{border-top:1px solid var(--border);padding:48px 0}
       </div>
     </div>
   </div>
+  <a class="chev chev-down" data-dir="down"><svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></a>
 </section>
 
-
 <section class="inst" id="install">
+  <a class="chev chev-up" data-dir="up"><svg viewBox="0 0 24 24"><path d="M6 15l6-6 6 6"/></svg></a>
   <div class="w">
     <h2 class="r">Try it in <em>sixty seconds</em></h2>
     <p class="r">Runs entirely on your Mac.</p>
@@ -295,12 +296,6 @@ footer{border-top:1px solid var(--border);padding:48px 0}
   </div>
 </footer>
 
-<div class="scroll-up" id="scroll-up">
-  <svg viewBox="0 0 24 24"><path d="M6 15l6-6 6 6"/></svg>
-</div>
-<div class="scroll-down" id="scroll-down">
-  <svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
-</div>
 
 <script>
 // ─── Animated dot ring ───
@@ -632,46 +627,23 @@ function dotRing(canvas,radius,count,dotSize,speed){
   loop();
 })();
 
-// ─── Nav scroll state + chevrons ───
+// ─── Nav scroll state ───
 const nav=document.querySelector('nav');
-const upBtn=document.getElementById('scroll-up');
-const downBtn=document.getElementById('scroll-down');
-const sections=Array.from(document.querySelectorAll('section'));
-
-function currentIndex(){
-  const y=window.scrollY+window.innerHeight/2;
-  for(let i=sections.length-1;i>=0;i--){
-    if(sections[i].offsetTop<=y)return i;
-  }
-  return 0;
-}
-
-downBtn.addEventListener('click',()=>{
-  const i=currentIndex();
-  if(i<sections.length-1)sections[i+1].scrollIntoView({behavior:'smooth'});
-});
-
-upBtn.addEventListener('click',()=>{
-  const i=currentIndex();
-  if(i>0)sections[i-1].scrollIntoView({behavior:'smooth'});
-});
-
 window.addEventListener('scroll',()=>{
   if(window.scrollY>80)nav.classList.add('scrolled');
   else nav.classList.remove('scrolled');
-
-  const i=currentIndex();
-  // Hide up on first slide
-  if(i===0)upBtn.classList.add('hidden');
-  else upBtn.classList.remove('hidden');
-  // Hide down on last slide
-  const nearBottom=window.scrollY+window.innerHeight>=document.body.scrollHeight-100;
-  if(nearBottom)downBtn.classList.add('hidden');
-  else downBtn.classList.remove('hidden');
 },{passive:true});
 
-// Initial state
-upBtn.classList.add('hidden');
+// ─── Chevron clicks ───
+const sections=Array.from(document.querySelectorAll('section'));
+document.querySelectorAll('.chev').forEach(ch=>{
+  ch.addEventListener('click',()=>{
+    const sec=ch.closest('section');
+    const i=sections.indexOf(sec);
+    if(ch.dataset.dir==='down'&&i<sections.length-1)sections[i+1].scrollIntoView({behavior:'smooth'});
+    if(ch.dataset.dir==='up'&&i>0)sections[i-1].scrollIntoView({behavior:'smooth'});
+  });
+});
 
 // ─── Reveal ───
 const els=document.querySelectorAll('.r');
