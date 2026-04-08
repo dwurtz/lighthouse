@@ -1,0 +1,57 @@
+name: Build & Release DMG
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install Python dependencies
+        run: |
+          python -m venv venv
+          ./venv/bin/pip install -e .
+          ./venv/bin/pip install pyinstaller
+
+      - name: Freeze Python backend (PyInstaller)
+        run: ./venv/bin/pyinstaller deja.spec
+
+      - name: Compile Swift (Deja + DejaRecorder)
+        run: |
+          xcrun swiftc -parse-as-library \
+            -framework SwiftUI -framework AppKit \
+            -o menubar/Deja menubar/Deja.swift
+          xcrun swiftc \
+            -framework Foundation -framework ScreenCaptureKit \
+            -framework AVFoundation -framework CoreMedia \
+            -o menubar/DejaRecorder menubar/DejaRecorder.swift
+
+      - name: Assemble app bundle
+        run: |
+          cp menubar/Deja Deja.app/Contents/MacOS/Deja
+          rm -rf Deja.app/Contents/MacOS/deja-backend
+          cp -R dist/deja-backend Deja.app/Contents/MacOS/deja-backend
+
+      - name: Ad-hoc codesign
+        run: codesign --force --sign - --deep Deja.app
+
+      - name: Create DMG
+        run: |
+          hdiutil create -volname "Deja" \
+            -srcfolder Deja.app \
+            -ov -format UDZO \
+            Deja.dmg
+
+      - name: Upload DMG to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: Deja.dmg
