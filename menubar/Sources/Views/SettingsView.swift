@@ -1,4 +1,6 @@
 import SwiftUI
+import AppKit
+import CoreGraphics
 import ServiceManagement
 
 // MARK: - Settings View
@@ -19,63 +21,137 @@ struct SettingsView: View {
 
             Divider().background(Color.white.opacity(0.1))
 
-            VStack(alignment: .leading, spacing: 16) {
-                // General section
-                Text("General")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundColor(.white.opacity(0.4))
-                    .textCase(.uppercase)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    // General
+                    VStack(alignment: .leading, spacing: 16) {
+                        Text("General")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(.white.opacity(0.4))
+                            .textCase(.uppercase)
 
-                Toggle(isOn: Binding(
-                    get: { monitor.launchAtLogin },
-                    set: { monitor.setLaunchAtLogin($0) }
-                )) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Launch Déjà at login")
-                            .font(.system(size: 13))
-                            .foregroundColor(.white)
-                        Text("Automatically start when you log in to your Mac")
-                            .font(.system(size: 11))
-                            .foregroundColor(.white.opacity(0.35))
+                        Toggle(isOn: Binding(
+                            get: { monitor.launchAtLogin },
+                            set: { monitor.setLaunchAtLogin($0) }
+                        )) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Launch Déjà at login")
+                                    .font(.system(size: 13))
+                                    .foregroundColor(.white)
+                                Text("Automatically start when you log in to your Mac")
+                                    .font(.system(size: 11))
+                                    .foregroundColor(.white.opacity(0.35))
+                            }
+                        }
+                        .toggleStyle(SwitchToggleStyle(tint: .orange))
                     }
+                    .padding(16)
+
+                    Divider().background(Color.white.opacity(0.1))
+
+                    // Permissions
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Permissions")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(.white.opacity(0.4))
+                            .textCase(.uppercase)
+
+                        permissionRow(
+                            icon: "rectangle.dashed.badge.record",
+                            title: "Screen Recording",
+                            description: "See what apps and documents are active",
+                            granted: monitor.hasScreenRecording,
+                            settingsURL: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
+                        )
+
+                        permissionRow(
+                            icon: "bubble.left.and.bubble.right",
+                            title: "Message Access",
+                            description: "Read iMessage and WhatsApp conversations",
+                            granted: monitor.hasFullDiskAccess,
+                            settingsURL: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"
+                        )
+                    }
+                    .padding(16)
+
+                    Divider().background(Color.white.opacity(0.1))
+
+                    // Account
+                    VStack(alignment: .leading, spacing: 16) {
+                        Text("Account")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(.white.opacity(0.4))
+                            .textCase(.uppercase)
+
+                        Button(action: {
+                            DispatchQueue.global(qos: .userInitiated).async {
+                                let task = Process()
+                                task.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+                                task.arguments = ["gws", "auth", "revoke"]
+                                try? task.run()
+                                task.waitUntilExit()
+                                DispatchQueue.main.async {
+                                    NSApplication.shared.terminate(nil)
+                                }
+                            }
+                        }) {
+                            HStack(spacing: 6) {
+                                Image(systemName: "rectangle.portrait.and.arrow.right")
+                                    .font(.system(size: 12))
+                                Text("Sign out")
+                                    .font(.system(size: 13))
+                            }
+                            .foregroundColor(.red.opacity(0.8))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(16)
                 }
-                .toggleStyle(SwitchToggleStyle(tint: .orange))
             }
-            .padding(16)
+        }
+        .background(Color.black)
+    }
 
-            Divider().background(Color.white.opacity(0.1))
+    // MARK: - Permission Row
 
-            VStack(alignment: .leading, spacing: 16) {
-                Text("Account")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundColor(.white.opacity(0.4))
-                    .textCase(.uppercase)
+    func permissionRow(icon: String, title: String, description: String, granted: Bool, settingsURL: String) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: icon)
+                .font(.system(size: 14))
+                .foregroundColor(granted ? .green : .orange)
+                .frame(width: 20)
 
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: 13))
+                    .foregroundColor(.white)
+                Text(description)
+                    .font(.system(size: 11))
+                    .foregroundColor(.white.opacity(0.35))
+            }
+
+            Spacer()
+
+            if granted {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 14))
+                    .foregroundColor(.green)
+            } else {
                 Button(action: {
-                    // Revoke gws auth and clear local tokens
-                    let task = Process()
-                    task.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-                    task.arguments = ["gws", "auth", "revoke"]
-                    try? task.run()
-                    task.waitUntilExit()
-
-                    // Quit the app so user can re-authenticate on next launch
-                    NSApplication.shared.terminate(nil)
-                }) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "rectangle.portrait.and.arrow.right")
-                            .font(.system(size: 12))
-                        Text("Sign out")
-                            .font(.system(size: 13))
+                    if let url = URL(string: settingsURL) {
+                        NSWorkspace.shared.open(url)
                     }
-                    .foregroundColor(.red.opacity(0.8))
+                }) {
+                    Text("Grant")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 4)
+                        .background(Color.white.opacity(0.15))
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
                 }
                 .buttonStyle(.plain)
             }
-            .padding(16)
-
-            Spacer()
         }
-        .background(Color.black)
     }
 }

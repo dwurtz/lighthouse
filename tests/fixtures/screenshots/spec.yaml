@@ -35,13 +35,13 @@ cases:
     wiki_match: ship-new-blade-rose-theme
 
   - file: workagent-debug-enrich-layer.png
-    description: Debugging workagent's QMD enrich layer / vector search
+    description: Debugging Deja's QMD enrich layer / vector search
     must_contain:
       - "debug"
     wiki_match: research-legacy-dc-desktop-monitor-application
 
   - file: terminal-plus-browser-research.png
-    description: Terminal + browser researching "Lighthouse" domain names
+    description: Terminal + browser researching "Deja" domain names
     must_contain:
       - "domain"
     must_not_contain:

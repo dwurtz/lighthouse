@@ -113,9 +113,8 @@ class MeetingCoordinator {
     // MARK: - Stop Recording
 
     func stopRecording(notes: String, onProcessed: @escaping () -> Void) {
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            self?.recorder.stopRecording()
-
+        recorder.stopRecording { [weak self] in
+            guard self != nil else { return }
             guard let url = URL(string: "http://localhost:5055/api/meeting/stop") else { return }
             var req = URLRequest(url: url)
             req.httpMethod = "POST"
@@ -160,7 +159,7 @@ class MeetingCoordinator {
             }
         } else {
             // Pause
-            recorder.stopRecording()
+            recorder.stopRecording(completion: nil)
         }
     }
 

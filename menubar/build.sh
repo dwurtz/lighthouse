@@ -19,8 +19,17 @@ xcrun swiftc \
     -o "$DIR/DejaRecorder" "$DIR/DejaRecorder.swift"
 
 echo "Signing binaries..."
-codesign --force --sign "-" --identifier com.deja.app "$DIR/Deja"
-codesign --force --sign "-" "$DIR/DejaRecorder"
+# Use a stable certificate so TCC permissions (Screen Recording, Full Disk
+# Access) survive recompiles. Ad-hoc signing (--sign -) creates a new identity
+# each build, breaking permission detection. Falls back to ad-hoc for CI.
+if security find-identity -v -p codesigning 2>/dev/null | grep -q "Deja Dev"; then
+    codesign --force --sign "Deja Dev" --identifier com.deja.app "$DIR/Deja"
+    codesign --force --sign "Deja Dev" --identifier com.deja.recorder "$DIR/DejaRecorder"
+else
+    echo "  (Deja Dev cert not found — using ad-hoc signing)"
+    codesign --force --sign "-" --identifier com.deja.app "$DIR/Deja"
+    codesign --force --sign "-" --identifier com.deja.recorder "$DIR/DejaRecorder"
+fi
 
 echo "Copying to app bundle..."
 cp "$DIR/Deja" "$APP/Contents/MacOS/Deja"

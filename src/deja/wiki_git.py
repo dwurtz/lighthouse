@@ -1,6 +1,6 @@
 """Git-backed version history for the Déjà wiki.
 
-The wiki lives at ~/Lighthouse/ and is a plain directory of
+The wiki lives at ~/Deja/ and is a plain directory of
 markdown files. Inspired by Karpathy's observation that a wiki is just a git
 repo of markdown — this module initializes a git repository inside the wiki
 directory and provides a best-effort helper to auto-commit changes after

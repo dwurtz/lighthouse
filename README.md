@@ -297,7 +297,7 @@ File: `~/Library/Application Support/Claude/claude_desktop_config.json`
 All models are Gemini. The API key is resolved via `secrets.py`:
 `GEMINI_API_KEY` env var > `GOOGLE_API_KEY` env var > macOS Keychain
 (service: `deja`, account: `gemini-api-key`). Falls back to legacy
-keychain service `lighthouse` for migration.
+keychain service names for migration.
 
 
 ## CLI

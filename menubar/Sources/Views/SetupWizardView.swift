@@ -24,7 +24,7 @@ struct SetupWizardView: View {
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundColor(.white.opacity(0.9))
                 Spacer()
-                Text("Step \(max(monitor.setupStep, 1)) of 2")
+                Text("Step \(min(max(monitor.setupStep, 1), 2)) of 2")
                     .font(.system(size: 10))
                     .foregroundColor(.white.opacity(0.3))
             }
@@ -38,7 +38,22 @@ struct SetupWizardView: View {
                     switch monitor.setupStep {
                     case 0, 1: googleAuthStep
                     case 2: permissionsStep
-                    default: EmptyView()
+                    default:
+                        // Setup complete — show brief confirmation while
+                        // the wizard dismisses itself.
+                        VStack(spacing: 16) {
+                            Spacer().frame(height: 40)
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.system(size: 48))
+                                .foregroundColor(.green)
+                            Text("You're all set")
+                                .font(.system(size: 20, weight: .semibold))
+                                .foregroundColor(.white)
+                            Text("Déjà is building your wiki in the background.")
+                                .font(.system(size: 13))
+                                .foregroundColor(.white.opacity(0.5))
+                        }
+                        .frame(maxWidth: .infinity)
                     }
                 }
                 .padding(20)
@@ -53,9 +68,18 @@ struct SetupWizardView: View {
             Text("Sign in with Google")
                 .font(.system(size: 18, weight: .semibold))
                 .foregroundColor(.white)
-            Text("Déjà uses your Google account to read Gmail, Calendar, and Drive. This also tells Déjà who you are.")
+            Text("Déjà connects to your Google Workspace to build your wiki from:")
                 .font(.system(size: 12))
                 .foregroundColor(.white.opacity(0.5))
+            VStack(alignment: .leading, spacing: 6) {
+                Label("Emails — who you're talking to and about what", systemImage: "envelope")
+                Label("Calendar — meetings, attendees, and agendas", systemImage: "calendar")
+                Label("Drive — documents and shared files", systemImage: "doc")
+                Label("Meet — meeting transcripts and notes", systemImage: "video")
+            }
+            .font(.system(size: 12))
+            .foregroundColor(.white.opacity(0.4))
+            .labelStyle(.titleAndIcon)
 
             if !gwsEmail.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
@@ -116,13 +140,6 @@ struct SetupWizardView: View {
                     .buttonStyle(.plain)
 
                     Spacer()
-
-                    Button(action: { monitor.setupStep = 2 }) {
-                        Text("Skip for now")
-                            .font(.system(size: 12))
-                            .foregroundColor(.white.opacity(0.3))
-                    }
-                    .buttonStyle(.plain)
                 }
             }
         }
@@ -204,9 +221,15 @@ struct SetupWizardView: View {
                 .font(.system(size: 20, weight: .semibold))
                 .foregroundColor(.white)
 
-            Text("Déjà reads your screen every few seconds to understand what you're working on. Nothing leaves your Mac without your permission.")
+            Text("Déjà reads your screen every few seconds so it can understand what you're working on — which apps, documents, and tabs are active.")
                 .font(.system(size: 13))
                 .foregroundColor(.white.opacity(0.5))
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 30)
+
+            Text("Screenshots are sent to our server for analysis, then immediately discarded — they're never stored.")
+                .font(.system(size: 11))
+                .foregroundColor(.white.opacity(0.3))
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 30)
 
@@ -242,30 +265,30 @@ struct SetupWizardView: View {
 
             Spacer()
 
-            HStack {
-                Spacer()
-                Button(action: {
-                    permPollTimer?.invalidate()
-                    permSubStep = 1
-                }) {
-                    HStack(spacing: 4) {
-                        Text(screenRecordingGranted ? "Continue" : "Skip for now")
-                            .font(.system(size: 13, weight: screenRecordingGranted ? .semibold : .regular))
-                        if screenRecordingGranted {
+            if screenRecordingGranted {
+                HStack {
+                    Spacer()
+                    Button(action: {
+                        permPollTimer?.invalidate()
+                        permSubStep = 1
+                    }) {
+                        HStack(spacing: 4) {
+                            Text("Continue")
+                                .font(.system(size: 13, weight: .semibold))
                             Image(systemName: "arrow.right")
                                 .font(.system(size: 11))
                         }
+                        .foregroundColor(.black)
+                        .padding(.horizontal, 24)
+                        .padding(.vertical, 8)
+                        .background(Color.white)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
                     }
-                    .foregroundColor(screenRecordingGranted ? .black : .white.opacity(0.3))
-                    .padding(.horizontal, 24)
-                    .padding(.vertical, 8)
-                    .background(screenRecordingGranted ? Color.white : Color.clear)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
+                .padding(.horizontal, 20)
+                .padding(.bottom, 16)
             }
-            .padding(.horizontal, 20)
-            .padding(.bottom, 16)
         }
         .frame(maxWidth: .infinity)
     }
@@ -289,13 +312,29 @@ struct SetupWizardView: View {
                 .font(.system(size: 40))
                 .foregroundColor(fullDiskGranted ? .green : .orange)
 
-            Text("Set up message access")
+            Text("Connect your messages")
                 .font(.system(size: 20, weight: .semibold))
                 .foregroundColor(.white)
 
-            Text("Déjà reads your iMessage and WhatsApp conversations to understand who you're talking to and what you're working on.")
+            Text("Déjà reads your iMessage and WhatsApp conversations locally on your Mac to:")
                 .font(.system(size: 13))
                 .foregroundColor(.white.opacity(0.5))
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 30)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Label("Build wiki pages about people you talk to", systemImage: "person.2")
+                Label("Track project discussions across conversations", systemImage: "bubble.left.and.bubble.right")
+                Label("Notice deadlines, decisions, and follow-ups", systemImage: "checkmark.circle")
+            }
+            .font(.system(size: 12))
+            .foregroundColor(.white.opacity(0.4))
+            .labelStyle(.titleAndIcon)
+            .padding(.horizontal, 10)
+
+            Text("Full conversations are never uploaded — only text summaries are sent for analysis.")
+                .font(.system(size: 11))
+                .foregroundColor(.white.opacity(0.3))
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 30)
 

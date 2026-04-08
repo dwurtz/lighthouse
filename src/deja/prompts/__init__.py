@@ -1,6 +1,6 @@
 """Prompt templates for deja LLM calls.
 
-Prompts live in `~/Lighthouse/prompts/<name>.md` and are edited
+Prompts live in `~/Deja/prompts/<name>.md` and are edited
 live in Obsidian. There is no fallback — if a prompt file is missing, this
 raises FileNotFoundError loudly so the caller sees it immediately instead of
 silently running on stale or absent instructions.

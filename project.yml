@@ -23,7 +23,7 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.deja.app
-        CODE_SIGN_IDENTITY: "-"
+        CODE_SIGN_IDENTITY: "Deja Dev"
         CODE_SIGN_STYLE: Manual
         MACOSX_DEPLOYMENT_TARGET: "14.0"
         SWIFT_VERSION: "5.0"
@@ -42,20 +42,16 @@ targets:
         LSUIElement: true
         NSMicrophoneUsageDescription: "Déjà uses the microphone to transcribe voice notes when you hit Listen in the popover."
     dependencies:
-      - framework: AppKit.framework
-        implicit: true
-      - framework: Foundation.framework
-        implicit: true
-      - framework: SwiftUI.framework
-        implicit: true
-      - framework: CoreGraphics.framework
-        implicit: true
-      - framework: ImageIO.framework
-        implicit: true
-      - framework: ScreenCaptureKit.framework
-        implicit: true
-      - framework: ServiceManagement.framework
-        implicit: true
+      - target: DejaRecorder
+        copy:
+          destination: executables
+      - sdk: AppKit.framework
+      - sdk: Foundation.framework
+      - sdk: SwiftUI.framework
+      - sdk: CoreGraphics.framework
+      - sdk: ImageIO.framework
+      - sdk: ScreenCaptureKit.framework
+      - sdk: ServiceManagement.framework
       - sdk: libsqlite3.tbd
     postBuildScripts:
       - name: "Bundle Python Environment"
@@ -73,17 +69,13 @@ targets:
       - path: menubar/DejaRecorder.swift
     settings:
       base:
-        CODE_SIGN_IDENTITY: "-"
+        CODE_SIGN_IDENTITY: "Deja Dev"
         CODE_SIGN_STYLE: Manual
         MACOSX_DEPLOYMENT_TARGET: "14.0"
         SWIFT_VERSION: "5.0"
         PRODUCT_NAME: DejaRecorder
     dependencies:
-      - framework: Foundation.framework
-        implicit: true
-      - framework: ScreenCaptureKit.framework
-        implicit: true
-      - framework: AVFoundation.framework
-        implicit: true
-      - framework: CoreMedia.framework
-        implicit: true
+      - sdk: Foundation.framework
+      - sdk: ScreenCaptureKit.framework
+      - sdk: AVFoundation.framework
+      - sdk: CoreMedia.framework

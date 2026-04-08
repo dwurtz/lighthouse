@@ -19,9 +19,6 @@ secrets/
 # macOS / Swift build artifacts
 menubar/Deja
 menubar/DejaRecorder
-# Legacy Lighthouse build artifacts
-menubar/Lighthouse
-menubar/LighthouseRecorder
 menubar/*.o
 menubar/*.dSYM/
 .DS_Store
@@ -49,12 +46,6 @@ tests/fixtures/screenshots/baseline_descriptions/
 logs/
 *.log
 
-# Legacy Lighthouse icon build artifacts
-menubar/icon/Lighthouse.icns
-menubar/icon/Lighthouse.iconset/
 menubar/icon/app_icon.svg
-menubar/icon/lighthouse.png
-menubar/icon/lighthouse@2x.png
-Lighthouse.dmg
 Deja.dmg
 !site/Deja.dmg

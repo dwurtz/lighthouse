@@ -10,7 +10,7 @@ describe **what happened** (timestamped, linked to entities). Entity
 pages reference events via ``[[event-slug]]``; events reference entities
 via ``[[person-or-project-slug]]``. QMD indexes all three categories.
 
-The wiki lives at ``~/Lighthouse/`` so it's browsable in Finder and
+The wiki lives at ``~/Deja/`` so it's browsable in Finder and
 openable as an Obsidian vault.
 """
 

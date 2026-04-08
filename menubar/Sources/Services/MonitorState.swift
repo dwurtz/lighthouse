@@ -123,7 +123,6 @@ class MonitorState: ObservableObject {
     func start() {
         setupNeeded = !setupManager.isSetupDone
         loadLaunchAtLoginState()
-        setupManager.ensureApiKey()
 
         startWeb()
 
@@ -315,26 +314,36 @@ class MonitorState: ObservableObject {
     // MARK: - Stats & Insights (delegated to DatabaseReader)
 
     private func updateStats() {
-        let result = databaseReader.readStats(isMonitorRunning: processManager.isMonitorRunning)
-        DispatchQueue.main.async {
-            self.signals = result.stats.signals
-            self.matches = result.stats.matches
-            self.running = result.running
+        let isMonitorRunning = processManager.isMonitorRunning
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            guard let self = self else { return }
+            let result = self.databaseReader.readStats(isMonitorRunning: isMonitorRunning)
+            DispatchQueue.main.async {
+                self.signals = result.stats.signals
+                self.matches = result.stats.matches
+                self.running = result.running
+            }
         }
     }
 
     private func updateInsights() {
-        let parsed = databaseReader.readInsights()
-        DispatchQueue.main.async { self.insights = parsed }
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            guard let self = self else { return }
+            let parsed = self.databaseReader.readInsights()
+            DispatchQueue.main.async { self.insights = parsed }
+        }
     }
 
     private func updateRecentSignals() {
-        let result = databaseReader.readRecentSignals()
-        DispatchQueue.main.async {
-            self.recentSignals = result.signals
-            self.lastSignalISO = result.latestISO
-            self.lastSignalSource = result.latestSource
-            self.lastSignalPreview = result.latestPreview
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            guard let self = self else { return }
+            let result = self.databaseReader.readRecentSignals()
+            DispatchQueue.main.async {
+                self.recentSignals = result.signals
+                self.lastSignalISO = result.latestISO
+                self.lastSignalSource = result.latestSource
+                self.lastSignalPreview = result.latestPreview
+            }
         }
     }
 

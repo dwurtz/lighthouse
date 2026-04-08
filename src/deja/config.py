@@ -46,14 +46,14 @@ _is_default_home = DEJA_HOME == Path.home() / ".deja"
 _is_default_wiki = WIKI_DIR == Path.home() / "Deja"
 
 _LEGACY_HOME_WORKAGENT = Path.home() / ".workagent"
-_LEGACY_HOME_LIGHTHOUSE = Path.home() / ".lighthouse"  # legacy migration
+_LEGACY_HOME_LIGHTHOUSE = Path.home() / ".lighthouse"  # legacy path — do not rename
 if _is_default_home and not DEJA_HOME.exists():
     if _LEGACY_HOME_LIGHTHOUSE.exists():
         try:
             _LEGACY_HOME_LIGHTHOUSE.rename(DEJA_HOME)
         except OSError:
             log.warning(
-                "Legacy home ~/.lighthouse/ exists but ~/.deja/ does not. "
+                "Legacy home ~/.lighthouse exists but ~/.deja does not. "
                 "Run: mv ~/.lighthouse ~/.deja"
             )
     elif _LEGACY_HOME_WORKAGENT.exists():
@@ -66,7 +66,7 @@ if _is_default_home and not DEJA_HOME.exists():
 # fires if the source exists and the final target doesn't.
 _ORIGINAL_WIKI = Path.home() / "WorkAgent Wiki"
 _INTERMEDIATE_WIKI = Path.home() / "Lighthouse Wiki"
-_LEGACY_WIKI_LIGHTHOUSE = Path.home() / "Lighthouse"  # legacy migration
+_LEGACY_WIKI_LIGHTHOUSE = Path.home() / "Lighthouse"  # legacy path — do not rename
 if _is_default_wiki and not WIKI_DIR.exists():
     if _ORIGINAL_WIKI.exists() and not _INTERMEDIATE_WIKI.exists():
         try:
@@ -83,7 +83,7 @@ if _is_default_wiki and not WIKI_DIR.exists():
             _LEGACY_WIKI_LIGHTHOUSE.rename(WIKI_DIR)
         except OSError:
             log.warning(
-                "Legacy wiki ~/Lighthouse/ exists but ~/Deja/ does not. "
+                "Legacy wiki ~/Lighthouse exists but ~/Deja does not. "
                 "Run: mv ~/Lighthouse ~/Deja"
             )
 

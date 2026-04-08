@@ -13,15 +13,16 @@ run:
 	./launch.sh
 
 dev:
-	menubar/build.sh
+	xcodebuild -project Deja.xcodeproj -scheme Deja -configuration Release build SYMROOT=build -quiet
+	@rsync -a --delete build/Release/Deja.app/ /Applications/Deja.app/
 	@pkill -x Deja 2>/dev/null || true
 	@sleep 1
 	@open /Applications/Deja.app
 	@echo "Rebuilt and relaunched Deja.app"
 
 dmg:
-	menubar/build.sh
-	hdiutil create -volname "Deja" -srcfolder Deja.app -ov -format UDZO Deja.dmg
+	xcodebuild -project Deja.xcodeproj -scheme Deja -configuration Release build SYMROOT=build -quiet
+	hdiutil create -volname "Deja" -srcfolder build/Release/Deja.app -ov -format UDZO Deja.dmg
 	@echo "Built Deja.dmg"
 
 release:
@@ -36,7 +37,7 @@ bump:
 	sed -i '' 's/^version = ".*"/version = "$(VERSION)"/' pyproject.toml
 	sed -i '' 's/CFBundleVersion: ".*"/CFBundleVersion: "$(VERSION)"/' project.yml
 	sed -i '' 's/CFBundleShortVersionString: ".*"/CFBundleShortVersionString: "$(VERSION)"/' project.yml
-	sed -i '' 's|<string>[0-9]*\.[0-9]*\.[0-9]*</string>|<string>$(VERSION)</string>|g' Deja-Info.plist Info.plist
+	sed -i '' 's|<string>[0-9]*\.[0-9]*\.[0-9]*</string>|<string>$(VERSION)</string>|g' Deja-Info.plist
 	sed -i '' 's/version="[0-9]*\.[0-9]*\.[0-9]*"/version="$(VERSION)"/' src/deja/web/app.py src/deja/mcp_server.py server/app.py
 	@echo "Updated version to $(VERSION) in all files"
 	@echo "Run 'make release VERSION=$(VERSION)' to tag and push"

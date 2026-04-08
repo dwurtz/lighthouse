@@ -8,89 +8,95 @@
 
 /* Begin PBXBuildFile section */
 		070169F7CFC7C96432745E16 /* MeetingPillView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E78982A7A76CA05C3EB71ABE /* MeetingPillView.swift */; };
-		09F911D1C62CA6740B37C366 /* SwiftUI.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 226E8F65EA938B8663F5957F /* SwiftUI.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		0C01FC2FFCC37AF1B2A160EB /* MeetingRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 546E703E0F803FFACC8456F1 /* MeetingRecorder.swift */; };
 		12142699C3AB7EDE92148355 /* DejaRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4EB157B404F53D33F9512646 /* DejaRecorder.swift */; };
 		178EC75C341DB8846FABC6F8 /* PermissionsBlockerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC2F3F6EAACF51C249B8BB05 /* PermissionsBlockerView.swift */; };
 		222D3A7333DB15AC31B0D93D /* ScreenCaptureKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = EFF72E223E893D4D84DE66CD /* ScreenCaptureKit.framework */; };
-		22564D97126DDA251ED34DEA /* CoreGraphics.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = FF7DDEFB774D920864C65017 /* CoreGraphics.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		26EF2D41EF33FF9682E58319 /* ChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3024499F04CAB34515366957 /* ChatView.swift */; };
 		2BB909BD53EAFA57BE316649 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78A8FC28E10F34A2E91C7923 /* AppDelegate.swift */; };
 		32DEBC6FCAE27D0A5887E829 /* CoreMedia.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 511117673C0D6E68362ACC2F /* CoreMedia.framework */; };
+		41A94BA85426F5525FBCDC9E /* BackendProcessManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8ACEA8F312916A3DB10B6583 /* BackendProcessManager.swift */; };
 		4932CD8F57C136EC18EBD81A /* ImageIO.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5FBB5CB7483B90FD0ADB9A4A /* ImageIO.framework */; };
 		4A3956D1DCC05A9AC3623D12 /* ScreenCaptureKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = EFF72E223E893D4D84DE66CD /* ScreenCaptureKit.framework */; };
 		5878450BBB6A4FCF7D791AFC /* DejaApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC62B6B690ED57D0403A32A3 /* DejaApp.swift */; };
 		5FBCDF4D4459E775639BE862 /* ActivityView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0728911E37A1E45580AEBFB /* ActivityView.swift */; };
 		62A958FF0371CBDBFFD3919C /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = BCC51732D86F475138598563 /* Foundation.framework */; };
-		6305795B079B19F592F61EE2 /* ServiceManagement.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = A2EB423F071542766FE3CFF1 /* ServiceManagement.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		6A45A1CEF7C8496C3088E347 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = BCC51732D86F475138598563 /* Foundation.framework */; };
-		7041BBC40852AEA5B98C1B5E /* AppKit.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 876F7AA11CEC762975464D2F /* AppKit.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		7530B2F920F0FFCF1E2D3AA1 /* PopoverContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18CDCF2320DFBB2102143A62 /* PopoverContentView.swift */; };
 		7C47A76DB22E37B757401576 /* CoreGraphics.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = FF7DDEFB774D920864C65017 /* CoreGraphics.framework */; };
 		85D45BB4F029F7418F251EC6 /* SetupWizardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68A8055779A0F9F43304DBF2 /* SetupWizardView.swift */; };
 		94559C662FE0F6196D5528E7 /* Utilities.swift in Sources */ = {isa = PBXBuildFile; fileRef = 577197DA62750145A9E65676 /* Utilities.swift */; };
-		9A339075BE3E815C2054F927 /* ScreenCaptureKit.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = EFF72E223E893D4D84DE66CD /* ScreenCaptureKit.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		A3419BAB5DF619CFC302DDB9 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEBD0855AD78D7C16A60FE1D /* SettingsView.swift */; };
+		AF2024A02B1E811E745245BB /* DatabaseReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 30A978138C56BCDD8744D302 /* DatabaseReader.swift */; };
+		B159333D857730B8493EB6E9 /* MeetingCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 129900B011818660B477E1AA /* MeetingCoordinator.swift */; };
+		B8128765737EF8AE5BE141EE /* SetupManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 651D730D288689BC54939D75 /* SetupManager.swift */; };
 		BC654C23332F7A07702D26E6 /* AppKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 876F7AA11CEC762975464D2F /* AppKit.framework */; };
 		C21BEA9674BCB5B70046B6C6 /* NotificationBubbleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80E5DE1FB0E45B028FF313F4 /* NotificationBubbleView.swift */; };
-		C238FA3073120FC01528B5D6 /* Foundation.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = BCC51732D86F475138598563 /* Foundation.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
-		C9854E3CD43FF7C146A900B1 /* ImageIO.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 5FBB5CB7483B90FD0ADB9A4A /* ImageIO.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		D029A72970BEE1DA98ECF8B3 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 226E8F65EA938B8663F5957F /* SwiftUI.framework */; };
 		D7010FC9AB7B7615FF6A22DD /* libsqlite3.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = 0F1C502F9FCA44E27F8C29E8 /* libsqlite3.tbd */; };
 		E30B302F8BC897491D9B78F0 /* ServiceManagement.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A2EB423F071542766FE3CFF1 /* ServiceManagement.framework */; };
 		ECD9847C91199C7871F64AFF /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4706308135587855A7DE9E3 /* Models.swift */; };
 		F5D1F9EDFD861854AD0E9D85 /* MonitorState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53B9C764CDEDAB4DC7902FAE /* MonitorState.swift */; };
+		FB5C037D3F22DBFC04E86FD2 /* DejaRecorder in Embed Dependencies */ = {isa = PBXBuildFile; fileRef = 41C7170F3A82EC0FDD65B613 /* DejaRecorder */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		FF70DF7C8F24D722987CF40A /* AVFoundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 0FDFEE7E2F0C96284BD047D2 /* AVFoundation.framework */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		A7ED408F4E93E70767C41D61 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 86140A3D25A756123167315D /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 5BDBEE461C59973503B6306C;
+			remoteInfo = DejaRecorder;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXCopyFilesBuildPhase section */
-		7C7E4957DE6A5A9B78DEEA58 /* Embed Frameworks */ = {
+		32010ADD6593D50631FA03E1 /* Embed Dependencies */ = {
 			isa = PBXCopyFilesBuildPhase;
 			buildActionMask = 2147483647;
 			dstPath = "";
-			dstSubfolderSpec = 10;
+			dstSubfolderSpec = 6;
 			files = (
-				7041BBC40852AEA5B98C1B5E /* AppKit.framework in Embed Frameworks */,
-				C238FA3073120FC01528B5D6 /* Foundation.framework in Embed Frameworks */,
-				09F911D1C62CA6740B37C366 /* SwiftUI.framework in Embed Frameworks */,
-				22564D97126DDA251ED34DEA /* CoreGraphics.framework in Embed Frameworks */,
-				C9854E3CD43FF7C146A900B1 /* ImageIO.framework in Embed Frameworks */,
-				9A339075BE3E815C2054F927 /* ScreenCaptureKit.framework in Embed Frameworks */,
-				6305795B079B19F592F61EE2 /* ServiceManagement.framework in Embed Frameworks */,
+				FB5C037D3F22DBFC04E86FD2 /* DejaRecorder in Embed Dependencies */,
 			);
-			name = "Embed Frameworks";
+			name = "Embed Dependencies";
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		0F1C502F9FCA44E27F8C29E8 /* libsqlite3.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libsqlite3.tbd; path = usr/lib/libsqlite3.tbd; sourceTree = SDKROOT; };
-		0FDFEE7E2F0C96284BD047D2 /* AVFoundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; path = AVFoundation.framework; sourceTree = BUILT_PRODUCTS_DIR; };
+		0FDFEE7E2F0C96284BD047D2 /* AVFoundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AVFoundation.framework; path = System/Library/Frameworks/AVFoundation.framework; sourceTree = SDKROOT; };
+		129900B011818660B477E1AA /* MeetingCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingCoordinator.swift; sourceTree = "<group>"; };
 		18CDCF2320DFBB2102143A62 /* PopoverContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PopoverContentView.swift; sourceTree = "<group>"; };
-		226E8F65EA938B8663F5957F /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; path = SwiftUI.framework; sourceTree = BUILT_PRODUCTS_DIR; };
+		226E8F65EA938B8663F5957F /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
 		3024499F04CAB34515366957 /* ChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatView.swift; sourceTree = "<group>"; };
+		30A978138C56BCDD8744D302 /* DatabaseReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DatabaseReader.swift; sourceTree = "<group>"; };
 		41C7170F3A82EC0FDD65B613 /* DejaRecorder */ = {isa = PBXFileReference; includeInIndex = 0; path = DejaRecorder; sourceTree = BUILT_PRODUCTS_DIR; };
 		4EB157B404F53D33F9512646 /* DejaRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DejaRecorder.swift; sourceTree = "<group>"; };
-		511117673C0D6E68362ACC2F /* CoreMedia.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; path = CoreMedia.framework; sourceTree = BUILT_PRODUCTS_DIR; };
+		511117673C0D6E68362ACC2F /* CoreMedia.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreMedia.framework; path = System/Library/Frameworks/CoreMedia.framework; sourceTree = SDKROOT; };
 		53B9C764CDEDAB4DC7902FAE /* MonitorState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MonitorState.swift; sourceTree = "<group>"; };
 		546E703E0F803FFACC8456F1 /* MeetingRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingRecorder.swift; sourceTree = "<group>"; };
 		577197DA62750145A9E65676 /* Utilities.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Utilities.swift; sourceTree = "<group>"; };
-		5FBB5CB7483B90FD0ADB9A4A /* ImageIO.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; path = ImageIO.framework; sourceTree = BUILT_PRODUCTS_DIR; };
+		5FBB5CB7483B90FD0ADB9A4A /* ImageIO.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = ImageIO.framework; path = System/Library/Frameworks/ImageIO.framework; sourceTree = SDKROOT; };
+		651D730D288689BC54939D75 /* SetupManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetupManager.swift; sourceTree = "<group>"; };
 		6657279FEB277AA5D969A150 /* Deja.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Deja.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		68A8055779A0F9F43304DBF2 /* SetupWizardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetupWizardView.swift; sourceTree = "<group>"; };
 		78A8FC28E10F34A2E91C7923 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		80E5DE1FB0E45B028FF313F4 /* NotificationBubbleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationBubbleView.swift; sourceTree = "<group>"; };
-		876F7AA11CEC762975464D2F /* AppKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; path = AppKit.framework; sourceTree = BUILT_PRODUCTS_DIR; };
-		A2EB423F071542766FE3CFF1 /* ServiceManagement.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; path = ServiceManagement.framework; sourceTree = BUILT_PRODUCTS_DIR; };
+		876F7AA11CEC762975464D2F /* AppKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AppKit.framework; path = System/Library/Frameworks/AppKit.framework; sourceTree = SDKROOT; };
+		8ACEA8F312916A3DB10B6583 /* BackendProcessManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackendProcessManager.swift; sourceTree = "<group>"; };
+		A2EB423F071542766FE3CFF1 /* ServiceManagement.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = ServiceManagement.framework; path = System/Library/Frameworks/ServiceManagement.framework; sourceTree = SDKROOT; };
 		A4706308135587855A7DE9E3 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
 		BC62B6B690ED57D0403A32A3 /* DejaApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DejaApp.swift; sourceTree = "<group>"; };
-		BCC51732D86F475138598563 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; path = Foundation.framework; sourceTree = BUILT_PRODUCTS_DIR; };
+		BCC51732D86F475138598563 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = System/Library/Frameworks/Foundation.framework; sourceTree = SDKROOT; };
 		D0728911E37A1E45580AEBFB /* ActivityView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityView.swift; sourceTree = "<group>"; };
 		DEBD0855AD78D7C16A60FE1D /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		E78982A7A76CA05C3EB71ABE /* MeetingPillView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingPillView.swift; sourceTree = "<group>"; };
-		EFF72E223E893D4D84DE66CD /* ScreenCaptureKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; path = ScreenCaptureKit.framework; sourceTree = BUILT_PRODUCTS_DIR; };
+		EFF72E223E893D4D84DE66CD /* ScreenCaptureKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = ScreenCaptureKit.framework; path = System/Library/Frameworks/ScreenCaptureKit.framework; sourceTree = SDKROOT; };
 		FC2F3F6EAACF51C249B8BB05 /* PermissionsBlockerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionsBlockerView.swift; sourceTree = "<group>"; };
-		FF7DDEFB774D920864C65017 /* CoreGraphics.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; path = CoreGraphics.framework; sourceTree = BUILT_PRODUCTS_DIR; };
+		FF7DDEFB774D920864C65017 /* CoreGraphics.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreGraphics.framework; path = System/Library/Frameworks/CoreGraphics.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -190,8 +196,12 @@
 		8CBDAE53684B385B522E7DE1 /* Services */ = {
 			isa = PBXGroup;
 			children = (
+				8ACEA8F312916A3DB10B6583 /* BackendProcessManager.swift */,
+				30A978138C56BCDD8744D302 /* DatabaseReader.swift */,
+				129900B011818660B477E1AA /* MeetingCoordinator.swift */,
 				546E703E0F803FFACC8456F1 /* MeetingRecorder.swift */,
 				53B9C764CDEDAB4DC7902FAE /* MonitorState.swift */,
+				651D730D288689BC54939D75 /* SetupManager.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -248,12 +258,13 @@
 			buildPhases = (
 				D70CC9BD1810B5E3E88A3F33 /* Sources */,
 				C2A964F76C3412C286F8577A /* Frameworks */,
-				7C7E4957DE6A5A9B78DEEA58 /* Embed Frameworks */,
+				32010ADD6593D50631FA03E1 /* Embed Dependencies */,
 				79DFC0884777AD1D2E2E1DF6 /* Bundle Python Environment */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				D068078457DB232B55E2AB55 /* PBXTargetDependency */,
 			);
 			name = Deja;
 			packageProductDependencies = (
@@ -336,8 +347,11 @@
 			files = (
 				5FBCDF4D4459E775639BE862 /* ActivityView.swift in Sources */,
 				2BB909BD53EAFA57BE316649 /* AppDelegate.swift in Sources */,
+				41A94BA85426F5525FBCDC9E /* BackendProcessManager.swift in Sources */,
 				26EF2D41EF33FF9682E58319 /* ChatView.swift in Sources */,
+				AF2024A02B1E811E745245BB /* DatabaseReader.swift in Sources */,
 				5878450BBB6A4FCF7D791AFC /* DejaApp.swift in Sources */,
+				B159333D857730B8493EB6E9 /* MeetingCoordinator.swift in Sources */,
 				070169F7CFC7C96432745E16 /* MeetingPillView.swift in Sources */,
 				0C01FC2FFCC37AF1B2A160EB /* MeetingRecorder.swift in Sources */,
 				ECD9847C91199C7871F64AFF /* Models.swift in Sources */,
@@ -346,12 +360,21 @@
 				178EC75C341DB8846FABC6F8 /* PermissionsBlockerView.swift in Sources */,
 				7530B2F920F0FFCF1E2D3AA1 /* PopoverContentView.swift in Sources */,
 				A3419BAB5DF619CFC302DDB9 /* SettingsView.swift in Sources */,
+				B8128765737EF8AE5BE141EE /* SetupManager.swift in Sources */,
 				85D45BB4F029F7418F251EC6 /* SetupWizardView.swift in Sources */,
 				94559C662FE0F6196D5528E7 /* Utilities.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		D068078457DB232B55E2AB55 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 5BDBEE461C59973503B6306C /* DejaRecorder */;
+			targetProxy = A7ED408F4E93E70767C41D61 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		332481EC90D28B95B104226F /* Debug */ = {
@@ -421,7 +444,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CODE_SIGN_IDENTITY = "Lighthouse Dev";
+				CODE_SIGN_IDENTITY = "Deja Dev";
 				CODE_SIGN_STYLE = Manual;
 				COMBINE_HIDPI_IMAGES = YES;
 				INFOPLIST_FILE = "Deja-Info.plist";
@@ -498,7 +521,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CODE_SIGN_IDENTITY = "Lighthouse Dev";
+				CODE_SIGN_IDENTITY = "Deja Dev";
 				CODE_SIGN_STYLE = Manual;
 				COMBINE_HIDPI_IMAGES = YES;
 				INFOPLIST_FILE = "Deja-Info.plist";
@@ -518,7 +541,7 @@
 		D11526E993B5722572997F5F /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CODE_SIGN_IDENTITY = "Lighthouse Dev";
+				CODE_SIGN_IDENTITY = "Deja Dev";
 				CODE_SIGN_STYLE = Manual;
 				COMBINE_HIDPI_IMAGES = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -536,7 +559,7 @@
 		EC80CC8D02DC0F11B755204D /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CODE_SIGN_IDENTITY = "Lighthouse Dev";
+				CODE_SIGN_IDENTITY = "Deja Dev";
 				CODE_SIGN_STYLE = Manual;
 				COMBINE_HIDPI_IMAGES = YES;
 				LD_RUNPATH_SEARCH_PATHS = (

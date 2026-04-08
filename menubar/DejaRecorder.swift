@@ -352,31 +352,35 @@ func log(_ message: String) {
 
 // MARK: - Main
 
-guard CommandLine.arguments.count >= 2 else {
-    log("Usage: DejaRecorder <session-dir>")
-    exit(1)
-}
-
-let sessionDir = URL(fileURLWithPath: CommandLine.arguments[1])
-try? FileManager.default.createDirectory(at: sessionDir, withIntermediateDirectories: true)
-
-// Run as a pure background process — no Dock icon, no menu bar presence.
-// Without this, macOS treats the process as a GUI app and displaces
-// the parent Deja.app's status item from the menu bar.
 import AppKit
-NSApplication.shared.setActivationPolicy(.accessory)
 
-let recorder = AudioRecorder(outputDir: sessionDir)
+@main
+struct DejaRecorderApp {
+    static func main() {
+        guard CommandLine.arguments.count >= 2 else {
+            log("Usage: DejaRecorder <session-dir>")
+            exit(1)
+        }
 
-// Poll for .stop sentinel file
-Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
-    let stopFile = sessionDir.appendingPathComponent(".stop")
-    if FileManager.default.fileExists(atPath: stopFile.path) {
-        try? FileManager.default.removeItem(at: stopFile)
-        recorder.stop()
-        exit(0)
+        let sessionDir = URL(fileURLWithPath: CommandLine.arguments[1])
+        try? FileManager.default.createDirectory(at: sessionDir, withIntermediateDirectories: true)
+
+        // Run as a pure background process — no Dock icon, no menu bar presence.
+        NSApplication.shared.setActivationPolicy(.accessory)
+
+        let recorder = AudioRecorder(outputDir: sessionDir)
+
+        // Poll for .stop sentinel file
+        Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
+            let stopFile = sessionDir.appendingPathComponent(".stop")
+            if FileManager.default.fileExists(atPath: stopFile.path) {
+                try? FileManager.default.removeItem(at: stopFile)
+                recorder.stop()
+                exit(0)
+            }
+        }
+
+        recorder.start()
+        RunLoop.main.run()
     }
 }
-
-recorder.start()
-RunLoop.main.run()

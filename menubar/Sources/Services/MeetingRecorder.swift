@@ -61,19 +61,25 @@ class MeetingRecorder {
         }
     }
 
-    func stopRecording() {
-        guard isRecording, let proc = process else { return }
+    func stopRecording(completion: (() -> Void)? = nil) {
+        guard isRecording, let proc = process else {
+            completion?()
+            return
+        }
         isRecording = false
 
         // Write .stop sentinel — the recorder polls for this
         let stopFile = URL(fileURLWithPath: sessionDir).appendingPathComponent(".stop")
         FileManager.default.createFile(atPath: stopFile.path, contents: nil)
 
-        // Wait for the recorder to exit (it merges mic audio on shutdown).
-        // Block up to 10 seconds — the merge is typically < 2 seconds.
-        proc.waitUntilExit()
-
-        process = nil
-        NSLog("deja: recorder exited (merge complete)")
+        // Wait on a background thread to avoid blocking the UI
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            proc.waitUntilExit()
+            DispatchQueue.main.async {
+                self?.process = nil
+                NSLog("deja: recorder exited (merge complete)")
+                completion?()
+            }
+        }
     }
 }

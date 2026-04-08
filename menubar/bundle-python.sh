@@ -21,8 +21,10 @@ DEST="$APP/Contents/Resources/python-env"
 PYTHON_VERSION="3.14"
 SITE_PACKAGES="$VENV/lib/python${PYTHON_VERSION}/site-packages"
 
-# Resolve the real Python binary (follow symlinks)
-REAL_PYTHON="$(python3 -c "import sys; print(sys.executable)")"
+# Resolve the real Python binary (follow symlinks).
+# Use the venv's Python explicitly — Xcode's build environment may
+# have a different python3 on PATH than the shell.
+REAL_PYTHON="$("$VENV/bin/python3" -c "import sys; print(sys.executable)")"
 if [ ! -f "$REAL_PYTHON" ]; then
     REAL_PYTHON="$(readlink -f "$VENV/bin/python3")"
 fi
@@ -129,10 +131,10 @@ find "$DEST" -name '*.so' -exec strip -x {} \; 2>/dev/null || true
 # 9. Sign all native extensions — macOS code signing monitor kills
 # unsigned .so files loaded from inside a signed .app bundle.
 echo "Signing native extensions..."
-find "$DEST" -name '*.so' -exec codesign --force --sign "Lighthouse Dev" {} \; 2>/dev/null || true
-find "$DEST" -name '*.dylib' -exec codesign --force --sign "Lighthouse Dev" {} \; 2>/dev/null || true
+find "$DEST" -name '*.so' -exec codesign --force --sign "Deja Dev" {} \; 2>/dev/null || true
+find "$DEST" -name '*.dylib' -exec codesign --force --sign "Deja Dev" {} \; 2>/dev/null || true
 # Also sign the Python binary itself
-codesign --force --sign "Lighthouse Dev" "$DEST/bin/python3" 2>/dev/null || true
+codesign --force --sign "Deja Dev" "$DEST/bin/python3" 2>/dev/null || true
 
 # Report size
 BUNDLE_SIZE="$(du -sh "$DEST" | cut -f1)"

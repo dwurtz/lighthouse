@@ -3,7 +3,7 @@
 Runs every real-usage fixture in ``tests/fixtures/screenshots/`` through N
 Gemini models, computes objective per-frame metrics, and reports aggregate
 win rates and cost so we can decide whether a pricier vision model is
-worth the delta for lighthouse specifically.
+worth the delta for deja specifically.
 
 Objective metrics (no judge model needed):
   - length_chars           — depth of description
@@ -21,7 +21,7 @@ Usage:
         --samples 2 \\
         --fixtures tests/fixtures/screenshots/
 
-Saves results to ``~/.lighthouse/vision_eval/<timestamp>.jsonl`` so runs
+Saves results to ``~/.deja/vision_eval/<timestamp>.jsonl`` so runs
 can be compared over time. Prints a summary table at the end.
 """
 
@@ -40,12 +40,12 @@ from pathlib import Path
 
 import yaml
 
-# Ensure ``lighthouse`` is importable when run from the repo root.
+# Ensure ``deja`` is importable when run from the repo root.
 _REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_REPO / "src"))
 
-from lighthouse.config import WIKI_DIR, LIGHTHOUSE_HOME  # noqa: E402
-from lighthouse.prompts import load as load_prompt  # noqa: E402
+from deja.config import WIKI_DIR, DEJA_HOME  # noqa: E402
+from deja.prompts import load as load_prompt  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -223,7 +223,7 @@ def load_image_bytes(path: Path) -> tuple[bytes, str]:
 
 def render_prompt(index_md: str) -> str:
     """Load the describe_screen prompt with real wiki grounding."""
-    from lighthouse.identity import load_user
+    from deja.identity import load_user
     user_fields = load_user().as_prompt_fields()
     template = load_prompt("describe_screen")
     try:
@@ -404,7 +404,7 @@ async def evaluate(args):
     print("Overall wins:", ", ".join(f"{m}={n}" for m, n in model_wins.items()))
 
     # Persist full detail for later comparison
-    out_dir = LIGHTHOUSE_HOME / "vision_eval"
+    out_dir = DEJA_HOME / "vision_eval"
     out_dir.mkdir(parents=True, exist_ok=True)
     out_file = out_dir / f"{datetime.now().strftime('%Y%m%d-%H%M%S')}.jsonl"
     with open(out_file, "w") as f:
