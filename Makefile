@@ -13,10 +13,7 @@ run:
 	./launch.sh
 
 dmg:
-	./venv/bin/pyinstaller deja.spec
 	menubar/build.sh
-	rm -rf Deja.app/Contents/MacOS/deja-backend
-	cp -R dist/deja-backend Deja.app/Contents/MacOS/deja-backend
 	hdiutil create -volname "Deja" -srcfolder Deja.app -ov -format UDZO Deja.dmg
 	@echo "Built Deja.dmg"
 

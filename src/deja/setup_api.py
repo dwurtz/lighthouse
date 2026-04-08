@@ -132,15 +132,30 @@ def start_gws_auth() -> dict:
     """
     # Ensure client_secret.json exists for gws CLI
     import shutil
+    import sys
     gws_config = Path.home() / ".config" / "gws"
     client_secret = gws_config / "client_secret.json"
     if not client_secret.exists():
         gws_config.mkdir(parents=True, exist_ok=True)
-        # Try bundled client_secret first
-        bundled = Path(__file__).parent / "default_assets" / "client_secret.json"
-        if bundled.exists():
-            shutil.copy(bundled, client_secret)
-            log.info("Copied bundled client_secret.json to ~/.config/gws/")
+        # Try bundled client_secret from multiple locations:
+        # 1. Package default_assets (development / pip install -e)
+        # 2. App bundle Resources (macOS .app distribution)
+        candidates = [
+            Path(__file__).parent / "default_assets" / "client_secret.json",
+        ]
+        # When running inside Deja.app, the bundle Resources dir is two levels
+        # up from Contents/MacOS/deja-backend: .../Contents/Resources/
+        if getattr(sys, 'frozen', False):
+            bundle_resources = Path(sys.executable).parent.parent / "Resources" / "client_secret.json"
+            candidates.append(bundle_resources)
+        else:
+            # Development: check relative to project root
+            candidates.append(Path(__file__).parents[3] / "Deja.app" / "Contents" / "Resources" / "client_secret.json")
+        for bundled in candidates:
+            if bundled.exists():
+                shutil.copy(bundled, client_secret)
+                log.info("Copied client_secret.json from %s to ~/.config/gws/", bundled)
+                break
 
     already_authed = False
     try:
@@ -163,28 +178,49 @@ def start_gws_auth() -> dict:
     if not already_authed:
         # Start OAuth flow — capture the auth URL and open the browser
         # explicitly, since the frozen backend runs headless.
-        import webbrowser
         try:
             proc = subprocess.Popen(
                 ["gws", "auth", "login"],
                 stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                stderr=subprocess.STDOUT,  # merge stderr into stdout
                 text=True,
             )
-            # Read stdout line by line to find the auth URL
+            # gws prints the auth URL to stderr. We merged it into
+            # stdout so we only need to read one stream.
             auth_url = None
-            import select
             import time
             start = time.time()
-            while time.time() - start < 10:
+            while time.time() - start < 15:
                 line = proc.stdout.readline()
                 if not line:
-                    break
+                    if proc.poll() is not None:
+                        break  # process exited
+                    continue
+                log.info("gws auth output: %s", line.rstrip())
                 if "accounts.google.com" in line:
                     auth_url = line.strip()
                     break
             if auth_url:
-                webbrowser.open(auth_url)
+                # Rewrite the redirect_uri to point to our own callback server
+                # so we can show a branded success page instead of the plain gws one.
+                # Extract the port gws is listening on from the URL.
+                import urllib.parse
+                parsed = urllib.parse.urlparse(auth_url)
+                params = urllib.parse.parse_qs(parsed.query)
+                gws_redirect = params.get("redirect_uri", [""])[0]
+                gws_port = gws_redirect.split(":")[-1] if gws_redirect else ""
+
+                # Start our own callback server on a different port
+                from deja._oauth_callback import start_branded_callback
+                our_port = start_branded_callback(gws_port=int(gws_port) if gws_port.isdigit() else 0)
+
+                if our_port:
+                    # Rewrite the auth URL to redirect to our branded server
+                    new_redirect = f"http://localhost:{our_port}"
+                    auth_url = auth_url.replace(gws_redirect, new_redirect)
+                    log.info("Rewrote OAuth redirect to branded callback on port %d", our_port)
+
+                subprocess.run(["open", auth_url])
                 log.info("Opened Google auth URL in browser")
             # Wait for the callback (user signs in → gws receives the code)
             try:
@@ -193,8 +229,7 @@ def start_gws_auth() -> dict:
                 proc.kill()
                 return {"ok": False, "error": "Auth timed out — try again"}
             if proc.returncode != 0:
-                stderr = proc.stderr.read()[:200] if proc.stderr else ""
-                return {"ok": False, "error": stderr or "Auth failed"}
+                return {"ok": False, "error": "Auth failed"}
         except FileNotFoundError:
             return {"ok": False, "error": "gws CLI not found"}
         except Exception as e:

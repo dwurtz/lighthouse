@@ -1,0 +1,152 @@
+import Foundation
+import CoreGraphics
+
+/// Manages the Python monitor and web backend subprocesses,
+/// including starting, stopping, health-checking, and crash restart.
+class BackendProcessManager {
+
+    private var monitorProcess: Process?
+    private var webProcess: Process?
+
+    /// Whether the monitor process is currently running.
+    var isMonitorRunning: Bool {
+        monitorProcess?.isRunning ?? false
+    }
+
+    // MARK: - Environment
+
+    private func makeEnv() -> [String: String] {
+        var env = ProcessInfo.processInfo.environment
+        if MonitorState.isBundledPython {
+            if let resourceURL = Bundle.main.resourceURL {
+                env["PYTHONPATH"] = resourceURL.appendingPathComponent("python-env/src").path
+            }
+        } else {
+            env["PYTHONPATH"] = MonitorState.projectDir + "/src"
+        }
+        env["PATH"] = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+        if env["GEMINI_API_KEY"] == nil, let key = readKeyFromEnv() { env["GEMINI_API_KEY"] = key }
+        env["__CFBundleIdentifier"] = "com.deja.app"
+        return env
+    }
+
+    private func readKeyFromEnv() -> String? {
+        for path in [NSHomeDirectory() + "/.zshrc", NSHomeDirectory() + "/.zprofile", NSHomeDirectory() + "/.bash_profile"] {
+            if let content = try? String(contentsOfFile: path, encoding: .utf8) {
+                for line in content.split(separator: "\n") {
+                    let t = line.trimmingCharacters(in: .whitespaces)
+                    if t.hasPrefix("export GEMINI_API_KEY=") {
+                        return t.replacingOccurrences(of: "export GEMINI_API_KEY=", with: "").trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
+                    }
+                }
+            }
+        }
+        return nil
+    }
+
+    // MARK: - Monitor Process
+
+    /// Start the Python monitor subprocess. Calls `onTermination` on the main queue when it exits.
+    func startMonitor(onTermination: @escaping () -> Void) {
+        guard monitorProcess == nil || !monitorProcess!.isRunning else { return }
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: MonitorState.backendPath)
+        proc.arguments = ["-m", "deja", "monitor"]
+        if !MonitorState.isBundledPython {
+            proc.currentDirectoryURL = URL(fileURLWithPath: MonitorState.projectDir)
+        }
+        proc.environment = makeEnv()
+        proc.standardOutput = FileHandle.nullDevice
+        proc.standardError = FileHandle.nullDevice
+        proc.terminationHandler = { _ in
+            DispatchQueue.main.async { onTermination() }
+        }
+        do {
+            try proc.run()
+            monitorProcess = proc
+        } catch {
+            print("Monitor start failed: \(error)")
+        }
+    }
+
+    // MARK: - Web Process
+
+    func startWeb() {
+        guard webProcess == nil || !webProcess!.isRunning else { return }
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: MonitorState.backendPath)
+        proc.arguments = ["-m", "deja", "web"]
+        if !MonitorState.isBundledPython {
+            proc.currentDirectoryURL = URL(fileURLWithPath: MonitorState.projectDir)
+        }
+        proc.environment = makeEnv()
+        proc.standardOutput = FileHandle.nullDevice
+        proc.standardError = FileHandle.nullDevice
+        do {
+            try proc.run()
+            webProcess = proc
+        } catch {
+            print("Web start failed: \(error)")
+        }
+    }
+
+    // MARK: - Screenshot Capture
+
+    private var screenCaptureAttempted = false
+
+    /// Capture a screenshot to ~/.deja/latest_screen.png. Runs synchronously on the calling thread.
+    func captureScreenshot() {
+        if screenCaptureAttempted {
+            guard CGPreflightScreenCaptureAccess() else { return }
+        }
+        screenCaptureAttempted = true
+
+        let home = MonitorState.home
+        let screenshotPath = home + "/latest_screen.png"
+        let timestampPath = home + "/latest_screen_ts.txt"
+
+        try? FileManager.default.createDirectory(
+            atPath: home,
+            withIntermediateDirectories: true
+        )
+
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+        proc.arguments = ["-x", "-C", screenshotPath]
+        proc.standardOutput = FileHandle.nullDevice
+        proc.standardError = FileHandle.nullDevice
+        do {
+            try proc.run()
+            proc.waitUntilExit()
+        } catch {
+            return
+        }
+
+        guard FileManager.default.fileExists(atPath: screenshotPath),
+              (try? FileManager.default.attributesOfItem(atPath: screenshotPath)[.size] as? Int) ?? 0 > 1024
+        else { return }
+
+        let ts = String(format: "%.3f", Date().timeIntervalSince1970)
+        try? ts.write(toFile: timestampPath, atomically: true, encoding: .utf8)
+    }
+
+    // MARK: - Lifecycle
+
+    func stopAll() {
+        monitorProcess?.terminate()
+        monitorProcess = nil
+        webProcess?.terminate()
+        webProcess = nil
+    }
+
+    func restartAll(onMonitorTermination: @escaping () -> Void) {
+        monitorProcess?.terminate()
+        monitorProcess = nil
+        webProcess?.terminate()
+        webProcess = nil
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+            self?.startMonitor(onTermination: onMonitorTermination)
+            self?.startWeb()
+        }
+    }
+}

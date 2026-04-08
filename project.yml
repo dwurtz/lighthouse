@@ -1,0 +1,90 @@
+name: Deja
+options:
+  bundleIdPrefix: com.deja
+  deploymentTarget:
+    macOS: "14.0"
+  xcodeVersion: "15.0"
+  minimumXcodeGenVersion: "2.35"
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+
+targets:
+  Deja:
+    type: application
+    platform: macOS
+    sources:
+      - path: menubar/Sources
+    resources:
+      - path: Resources/AppIcon.icns
+      - path: Resources/tray-icon.png
+      - path: Resources/client_secret.json
+      - path: Resources/default_api_key.txt
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.deja.app
+        CODE_SIGN_IDENTITY: "-"
+        CODE_SIGN_STYLE: Manual
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+        SWIFT_VERSION: "5.0"
+        INFOPLIST_KEY_LSUIElement: true
+        PRODUCT_NAME: Deja
+    info:
+      path: Deja-Info.plist
+      properties:
+        CFBundleExecutable: Deja
+        CFBundleIdentifier: com.deja.app
+        CFBundleName: "Déjà"
+        CFBundleDisplayName: "Déjà"
+        CFBundleVersion: "0.2.0"
+        CFBundleShortVersionString: "0.2.0"
+        CFBundleIconFile: AppIcon
+        LSUIElement: true
+        NSMicrophoneUsageDescription: "Déjà uses the microphone to transcribe voice notes when you hit Listen in the popover."
+    dependencies:
+      - framework: AppKit.framework
+        implicit: true
+      - framework: Foundation.framework
+        implicit: true
+      - framework: SwiftUI.framework
+        implicit: true
+      - framework: CoreGraphics.framework
+        implicit: true
+      - framework: ImageIO.framework
+        implicit: true
+      - framework: ScreenCaptureKit.framework
+        implicit: true
+      - framework: ServiceManagement.framework
+        implicit: true
+      - sdk: libsqlite3.tbd
+    postBuildScripts:
+      - name: "Bundle Python Environment"
+        script: |
+          cd "${PROJECT_DIR}"
+          if [ -f "menubar/bundle-python.sh" ]; then
+            bash menubar/bundle-python.sh
+          fi
+        basedOnDependencyAnalysis: false
+
+  DejaRecorder:
+    type: tool
+    platform: macOS
+    sources:
+      - path: menubar/DejaRecorder.swift
+    settings:
+      base:
+        CODE_SIGN_IDENTITY: "-"
+        CODE_SIGN_STYLE: Manual
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+        SWIFT_VERSION: "5.0"
+        PRODUCT_NAME: DejaRecorder
+    dependencies:
+      - framework: Foundation.framework
+        implicit: true
+      - framework: ScreenCaptureKit.framework
+        implicit: true
+      - framework: AVFoundation.framework
+        implicit: true
+      - framework: CoreMedia.framework
+        implicit: true

@@ -28,6 +28,7 @@ import tempfile
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from deja.observations.base import BaseObserver
 from deja.observations.types import Observation
 
 log = logging.getLogger(__name__)
@@ -95,6 +96,24 @@ def _active_history_files() -> list[tuple[str, Path]]:
             label = name if profile == "Default" else f"{name} ({profile})"
             out.append((label, hist))
     return out
+
+
+class BrowserObserver(BaseObserver):
+    """Collects recent browser history from Chromium-based browsers."""
+
+    def __init__(self, since_minutes: int = 15, limit_per_browser: int = 50) -> None:
+        self.since_minutes = since_minutes
+        self.limit_per_browser = limit_per_browser
+
+    @property
+    def name(self) -> str:
+        return "Browser"
+
+    def collect(self) -> list[Observation]:
+        return collect_browser_history(
+            since_minutes=self.since_minutes,
+            limit_per_browser=self.limit_per_browser,
+        )
 
 
 def collect_browser_history(since_minutes: int = 15, limit_per_browser: int = 50) -> list[Observation]:

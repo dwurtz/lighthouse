@@ -15,6 +15,7 @@ import tempfile
 import time
 from datetime import datetime
 
+from deja.observations.base import BaseObserver
 from deja.observations.types import Observation
 
 log = logging.getLogger(__name__)
@@ -25,6 +26,18 @@ _last_read_ts: float = 0
 _DEJA_HOME = os.path.expanduser("~/.deja")
 _SCREENSHOT_PATH = os.path.join(_DEJA_HOME, "latest_screen.png")
 _TIMESTAMP_PATH = os.path.join(_DEJA_HOME, "latest_screen_ts.txt")
+
+
+class ScreenshotObserver(BaseObserver):
+    """Captures screenshots when the visual state changes, with perceptual dedup."""
+
+    @property
+    def name(self) -> str:
+        return "Screenshot"
+
+    def collect(self) -> list[Observation]:
+        result = capture_screenshot_if_changed()
+        return [result] if result else []
 
 
 def screen_recording_granted() -> bool:

@@ -1,0 +1,68 @@
+"""Observation (signal collection) cycle — extracted from AgentLoop.
+
+Handles one collection cycle: gather signals from all sources, run
+vision on screenshots, persist, and update stats.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import os
+from datetime import datetime, timezone
+
+log = logging.getLogger(__name__)
+
+
+async def run_collect_cycle(loop_ref) -> None:
+    """One collection cycle -- gather all new signals.
+
+    ``loop_ref`` is the AgentLoop instance (used for gemini client,
+    collector, stats counters, and the stats callback).
+    """
+    loop_ref.phase = "OBSERVING"
+
+    loop = asyncio.get_running_loop()
+    new_signals = await loop.run_in_executor(None, loop_ref.collector.collect_all)
+
+    if new_signals:
+        for sig in new_signals:
+            if sig.source == "screenshot":
+                # Screenshots are the only source that needs post-collection
+                # processing: the collector hands us a raw PNG path, we run
+                # vision on it, replace the placeholder text with the
+                # description, optionally retain a copy for vision eval,
+                # delete the original, and persist.
+                image_path = getattr(sig, "_image_path", None)
+                if image_path:
+                    try:
+                        vision_result = await loop_ref.gemini.describe_screen(image_path)
+                        sig.text = (vision_result.get("summary") or "").strip() or "(empty vision description)"
+                    finally:
+                        # Optional retention for vision A/B eval — gated by
+                        # config.VISION_RETENTION. Saves PNG + sidecar .txt
+                        # so we can rerun alternate models against real frames.
+                        try:
+                            from deja.config import VISION_RETENTION, VISION_RETENTION_DIR
+                            if VISION_RETENTION:
+                                import shutil
+                                VISION_RETENTION_DIR.mkdir(parents=True, exist_ok=True)
+                                ts = sig.timestamp.strftime("%Y%m%d-%H%M%S")
+                                dest_png = VISION_RETENTION_DIR / f"{ts}.png"
+                                dest_txt = VISION_RETENTION_DIR / f"{ts}.txt"
+                                shutil.copy(image_path, dest_png)
+                                dest_txt.write_text(sig.text, encoding="utf-8")
+                        except Exception:
+                            log.debug("vision retention failed", exc_info=True)
+                        try:
+                            os.remove(image_path)
+                        except OSError:
+                            pass
+                loop_ref.collector._persist_signal(sig)
+
+        loop_ref.signals_collected += len(new_signals)
+        loop_ref.last_signal_time = datetime.now(timezone.utc)
+        log.info("Collected %d new signals", len(new_signals))
+        loop_ref._fire_stats_update()
+
+    loop_ref.phase = "IDLE"

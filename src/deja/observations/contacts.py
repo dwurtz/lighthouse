@@ -61,6 +61,14 @@ def _build_index():
     log.info("Loaded %d contacts, %d phone mappings", len(_name_set), len(_phone_index))
 
 
+def name_with_handle(name: str, handle: str) -> str:
+    """Render 'Jane Doe (+15551234567)', or just the handle if name and
+    handle are the same string (i.e. contact resolution failed)."""
+    if name == handle or not handle:
+        return name
+    return f"{name} ({handle})"
+
+
 def resolve_contact(identifier: str) -> str | None:
     """Resolve a phone number or display name to a contact name."""
     if _phone_index is None:

@@ -21,6 +21,7 @@ import logging
 import subprocess
 from datetime import datetime, timedelta, timezone
 
+from deja.observations.base import BaseObserver
 from deja.observations.types import Observation
 
 log = logging.getLogger(__name__)
@@ -186,6 +187,24 @@ def _build_event_observation(
 # ---------------------------------------------------------------------------
 # Steady-state collectors
 # ---------------------------------------------------------------------------
+
+
+class CalendarObserver(BaseObserver):
+    """Collects upcoming and recently-finished calendar events via gws CLI."""
+
+    def __init__(self, hours_ahead: int = 2, lookback_minutes: int = 120) -> None:
+        self.hours_ahead = hours_ahead
+        self.lookback_minutes = lookback_minutes
+
+    @property
+    def name(self) -> str:
+        return "Calendar"
+
+    def collect(self) -> list[Observation]:
+        results: list[Observation] = []
+        results.extend(collect_upcoming_events(hours_ahead=self.hours_ahead))
+        results.extend(collect_past_events(lookback_minutes=self.lookback_minutes))
+        return results
 
 
 def collect_upcoming_events(hours_ahead: int = 2) -> list[Observation]:

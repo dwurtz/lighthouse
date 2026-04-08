@@ -8,6 +8,7 @@ import subprocess
 import urllib.request
 from datetime import datetime
 
+from deja.observations.base import BaseObserver
 from deja.observations.types import Observation
 
 log = logging.getLogger(__name__)
@@ -83,6 +84,17 @@ def _collect_via_applescript() -> list[dict]:
         return tabs
     except Exception:
         return []
+
+
+class ChromeTabsObserver(BaseObserver):
+    """Collects open Chrome tab titles and URLs via CDP or AppleScript fallback."""
+
+    @property
+    def name(self) -> str:
+        return "Chrome Tabs"
+
+    def collect(self) -> list[Observation]:
+        return collect_chrome_tabs()
 
 
 def collect_chrome_tabs() -> list[Observation]:

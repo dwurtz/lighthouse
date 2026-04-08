@@ -21,6 +21,7 @@ import logging
 import subprocess
 from datetime import datetime, timedelta, timezone
 
+from deja.observations.base import BaseObserver
 from deja.observations.types import Observation
 
 log = logging.getLogger(__name__)
@@ -162,6 +163,20 @@ def _build_observation(file_meta: dict, doc_text: str) -> Observation | None:
 # ---------------------------------------------------------------------------
 # Steady-state collector
 # ---------------------------------------------------------------------------
+
+
+class MeetObserver(BaseObserver):
+    """Collects recent Google Meet transcripts from Drive."""
+
+    def __init__(self, since_minutes: int = 15) -> None:
+        self.since_minutes = since_minutes
+
+    @property
+    def name(self) -> str:
+        return "Meet Transcripts"
+
+    def collect(self) -> list[Observation]:
+        return collect_recent_transcripts(since_minutes=self.since_minutes)
 
 
 def collect_recent_transcripts(since_minutes: int = 15) -> list[Observation]:

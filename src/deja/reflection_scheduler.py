@@ -1,0 +1,147 @@
+"""Reflection scheduling — when to run, cooldowns, last-run marker.
+
+Extracted from reflection.py. Contains the slot-based scheduling logic,
+the last-run marker persistence, and the ``run_reflection`` wrapper that
+serializes concurrent invocations and updates the marker on success.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+from datetime import datetime, timedelta, timezone
+
+from deja.config import (
+    REFLECT_SLOT_HOURS,
+    DEJA_HOME,
+)
+
+log = logging.getLogger(__name__)
+
+# Persistent marker of the last successful reflection run. The agent
+# loop checks this on startup and at the start of every integration
+# cycle — if the last run predates the most recent slot boundary,
+# reflection is triggered inline.
+_LAST_RUN_FILE = DEJA_HOME / "last_reflection_run"
+_LEGACY_LAST_RUN = DEJA_HOME / "last_nightly_run"
+if _LEGACY_LAST_RUN.exists() and not _LAST_RUN_FILE.exists():
+    try:
+        _LEGACY_LAST_RUN.rename(_LAST_RUN_FILE)
+    except OSError:
+        pass
+
+# Lock that serializes reflection runs.
+_run_lock = asyncio.Lock()
+
+
+# ---------------------------------------------------------------------------
+# Slot calculation
+# ---------------------------------------------------------------------------
+
+def _most_recent_slot(now: datetime) -> datetime:
+    """Return the most recent reflect slot boundary at or before ``now``.
+
+    Walks the configured ``REFLECT_SLOT_HOURS`` in local time. If any of
+    today's slots is <= now, returns the latest one. Otherwise returns
+    yesterday's last slot (the clock hasn't crossed today's earliest slot
+    yet, so the "current" slot is still yesterday's final one).
+    """
+    if not REFLECT_SLOT_HOURS:
+        return now
+    today_slots = [
+        now.replace(hour=h, minute=0, second=0, microsecond=0)
+        for h in REFLECT_SLOT_HOURS
+    ]
+    past = [s for s in today_slots if s <= now]
+    if past:
+        return past[-1]
+    return today_slots[-1] - timedelta(days=1)
+
+
+# ---------------------------------------------------------------------------
+# Last-run marker
+# ---------------------------------------------------------------------------
+
+def _read_last_run() -> datetime | None:
+    """Return the timestamp of the last successful reflection run, or None."""
+    try:
+        raw = _LAST_RUN_FILE.read_text().strip()
+    except (OSError, FileNotFoundError):
+        return None
+    try:
+        ts = datetime.fromisoformat(raw)
+    except ValueError:
+        log.warning("last_reflection_run file has unparseable content: %r", raw)
+        return None
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    return ts
+
+
+def _write_last_run(ts: datetime | None = None) -> None:
+    """Record `ts` (or now) as the last successful reflection run."""
+    if ts is None:
+        ts = datetime.now(timezone.utc)
+    try:
+        DEJA_HOME.mkdir(parents=True, exist_ok=True)
+        _LAST_RUN_FILE.write_text(ts.isoformat())
+    except OSError:
+        log.exception("Failed to write last_reflection_run marker")
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
+def should_run_reflection(now: datetime | None = None) -> bool:
+    """Return True if reflection hasn't run since the most recent slot boundary.
+
+    Clock-aligned, not interval-based. With default slots (02:00, 11:00,
+    18:00), "did reflection run since the last time the clock crossed any
+    slot boundary?" means:
+
+      - It's 12:00 today, last run was today at 03:00 -> run (last run
+        predates today's 11:00 slot that just passed)
+      - It's 12:00 today, last run was today at 11:30 -> don't run
+        (last run is past today's most recent slot)
+      - It's 01:30 today, last run was yesterday at 19:00 -> don't run
+        (last run is past yesterday's final slot of 18:00; today's 02:00
+        hasn't happened yet)
+      - Machine was asleep all day; wakes at 20:00 with last run 6 days
+        ago -> run ONCE (backs up to today's 18:00 slot, not a stampede)
+
+    All times are local.
+    """
+    if now is None:
+        now = datetime.now().astimezone()
+    elif now.tzinfo is None:
+        now = now.astimezone()
+
+    last = _read_last_run()
+    if last is None:
+        return True
+
+    threshold = _most_recent_slot(now)
+    return last.astimezone(threshold.tzinfo) < threshold
+
+
+async def run_reflection() -> dict:
+    """Run one reflection pass. Returns the parsed LLM output.
+
+    Concurrent invocations are coalesced: the second caller sees the
+    lock held and returns an empty result immediately rather than
+    waiting or double-running Pro.
+    """
+    if _run_lock.locked():
+        log.info("Reflection already running — skipping concurrent invocation")
+        return {"wiki_updates": [], "thoughts": "", "skipped": "concurrent"}
+
+    async with _run_lock:
+        try:
+            from deja.reflection import _run_reflection_body
+            result = await _run_reflection_body()
+        except Exception:
+            log.exception("Reflection failed — not updating last-run marker")
+            return {"wiki_updates": [], "thoughts": "", "error": True}
+        _write_last_run()
+        return result

@@ -15,10 +15,12 @@ dist/
 *.key
 *.p12
 secrets/
+Resources/default_api_key.txt
 
 # macOS / Swift build artifacts
 menubar/Deja
 menubar/DejaRecorder
+# Legacy Lighthouse build artifacts
 menubar/Lighthouse
 menubar/LighthouseRecorder
 menubar/*.o
@@ -48,7 +50,7 @@ tests/fixtures/screenshots/baseline_descriptions/
 logs/
 *.log
 
-# Icon build artifacts — intermediate files regenerable from menubar/icon/lighthouse.svg
+# Legacy Lighthouse icon build artifacts
 menubar/icon/Lighthouse.icns
 menubar/icon/Lighthouse.iconset/
 menubar/icon/app_icon.svg

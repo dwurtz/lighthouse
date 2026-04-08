@@ -7,6 +7,7 @@ import logging
 import subprocess
 from datetime import datetime, timedelta, timezone
 
+from deja.observations.base import BaseObserver
 from deja.observations.types import Observation
 
 log = logging.getLogger(__name__)
@@ -27,6 +28,20 @@ def _readable_type(mime_type: str, filename: str) -> str:
     if "." in filename:
         return filename.rsplit(".", 1)[-1].upper()
     return "File"
+
+
+class DriveObserver(BaseObserver):
+    """Collects recently created or modified Google Drive files via gws CLI."""
+
+    def __init__(self, since_hours: int = 24) -> None:
+        self.since_hours = since_hours
+
+    @property
+    def name(self) -> str:
+        return "Drive"
+
+    def collect(self) -> list[Observation]:
+        return collect_recent_drive_activity(since_hours=self.since_hours)
 
 
 def collect_recent_drive_activity(since_hours: int = 24) -> list[Observation]:

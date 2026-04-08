@@ -2,9 +2,9 @@
 
 Two entry points:
 
-  * ``collect_imessages`` — the steady-state live collector used by
-    the monitor's 3-second observation cycle. Returns one
-    ``Observation`` per *recent message*.
+  * ``IMessageObserver.collect`` (aliased as ``collect_imessages``) —
+    the steady-state live collector used by the monitor's 3-second
+    observation cycle. Returns one ``Observation`` per *recent message*.
   * ``fetch_imessage_contacts_backfill`` — the onboarding path used
     once per user. Returns one ``Observation`` per *conversation* over
     the last N days, with each observation's text being a compact
@@ -23,6 +23,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from deja.config import DEJA_HOME, IMESSAGE_DB
+from deja.observations.base import BaseObserver
 from deja.observations.types import Observation
 
 log = logging.getLogger(__name__)
@@ -36,7 +37,27 @@ _APPLE_EPOCH_OFFSET = 978307200
 _IMESSAGE_BUFFER = DEJA_HOME / "imessage_buffer.json"
 
 
+class IMessageObserver(BaseObserver):
+    """Collects recent iMessages from the JSON buffer written by the Swift app."""
+
+    def __init__(self, since_minutes: int = 5, limit: int = 20) -> None:
+        self.since_minutes = since_minutes
+        self.limit = limit
+
+    @property
+    def name(self) -> str:
+        return "iMessage"
+
+    def collect(self) -> list[Observation]:
+        return _collect_imessages(since_minutes=self.since_minutes, limit=self.limit)
+
+
 def collect_imessages(since_minutes: int = 5, limit: int = 20) -> list[Observation]:
+    """Legacy function entry point — delegates to _collect_imessages."""
+    return _collect_imessages(since_minutes=since_minutes, limit=limit)
+
+
+def _collect_imessages(since_minutes: int = 5, limit: int = 20) -> list[Observation]:
     """Read recent iMessages from the JSON buffer written by the Swift app.
 
     The Swift app reads ~/Library/Messages/chat.db every 15 seconds and
@@ -155,7 +176,7 @@ def fetch_imessage_contacts_backfill(
         # "Alice" in the sender field. We need chat_handle_join for
         # this (messages only carry the sender handle, not the full
         # participant list of the chat).
-        from deja.observations.contacts import resolve_contact
+        from deja.observations.contacts import resolve_contact, name_with_handle
 
         for chat in chat_rows:
             chat_id = chat["chat_id"]
@@ -185,14 +206,6 @@ def fetch_imessage_contacts_backfill(
                 participant_pairs.append((resolved, handle))
             participant_names = [name for name, _ in participant_pairs]
 
-            def _name_with_handle(name: str, handle: str) -> str:
-                """Render 'Jane Doe (+15551234567)', or just the handle
-                if name and handle are already the same string (i.e.
-                contact resolution failed and name IS the handle)."""
-                if name == handle or not handle:
-                    return name
-                return f"{name} ({handle})"
-
             # Concise sender_label for the Observation row (100-char cap
             # enforced downstream). The FULL participant list with handles
             # goes in the digest text, where the 4KB cap gives plenty of
@@ -208,7 +221,7 @@ def fetch_imessage_contacts_backfill(
             else:
                 if participant_pairs:
                     name, handle = participant_pairs[0]
-                    chat_label_short = _name_with_handle(name, handle)
+                    chat_label_short = name_with_handle(name, handle)
                 else:
                     chat_label_short = "unknown"
                 sender_label = chat_label_short
@@ -260,14 +273,14 @@ def fetch_imessage_contacts_backfill(
                     f"({chat['outbound_count']} from user)"
                 )
                 participants_line = "; ".join(
-                    _name_with_handle(n, h) for n, h in participant_pairs
+                    name_with_handle(n, h) for n, h in participant_pairs
                 )
                 lines.append(f"Participants: {participants_line}")
             else:
                 # 1:1 — header already contains name + handle
                 if participant_pairs:
                     name, handle = participant_pairs[0]
-                    header_name = _name_with_handle(name, handle)
+                    header_name = name_with_handle(name, handle)
                 else:
                     header_name = "unknown"
                 lines.append(
@@ -282,7 +295,7 @@ def fetch_imessage_contacts_backfill(
                 else:
                     raw = m["sender_handle"] or "unknown"
                     resolved = resolve_contact(raw) or raw
-                    who = _name_with_handle(resolved, raw)
+                    who = name_with_handle(resolved, raw)
                 text = (m["text"] or "").replace("\n", " ").strip()
                 # Per-message cap so a long rant can't eat the whole budget.
                 text = text[:300]

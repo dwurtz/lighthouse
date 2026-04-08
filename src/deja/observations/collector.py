@@ -11,17 +11,18 @@ from typing import Any
 
 from deja.config import IGNORED_APPS, DEJA_HOME
 from deja.observations.active_app import get_active_app
-from deja.observations.browser import collect_browser_history
-from deja.observations.calendar import collect_upcoming_events, collect_past_events
-from deja.observations.clipboard import collect_clipboard
-from deja.observations.drive import collect_recent_drive_activity
-from deja.observations.email import collect_recent_emails
-from deja.observations.imessage import collect_imessages
+from deja.observations.base import BaseObserver
+from deja.observations.browser import BrowserObserver
+from deja.observations.calendar import CalendarObserver
+from deja.observations.clipboard import ClipboardObserver
+from deja.observations.drive import DriveObserver
+from deja.observations.email import EmailObserver
+from deja.observations.imessage import IMessageObserver
+from deja.observations.meet import MeetObserver
 from deja.observations.screenshot import capture_screenshot_if_changed
-from deja.observations.tasks import collect_pending_tasks
+from deja.observations.tasks import TasksObserver
 from deja.observations.types import Observation
-from deja.observations.whatsapp import collect_whatsapp
-from deja.observations.meet import collect_recent_transcripts
+from deja.observations.whatsapp import WhatsAppObserver
 
 log = logging.getLogger(__name__)
 
@@ -35,15 +36,32 @@ class Observer:
         self._last_title: str = ""
         self._screenshot_counter: int = 0
         self._screenshot_every: int = 1
-        self._email_counter: int = 0
-        self._calendar_counter: int = 0
-        self._drive_counter: int = 0
-        self._tasks_counter: int = 0
-        self._browser_counter: int = 0
-        self._gws_every: int = 5
-        self._browser_every: int = 3  # ~9s at OBSERVE_INTERVAL=3
-        self.recent_history: deque[Observation] = deque(maxlen=history_size)
         self._signal_log_path = DEJA_HOME / "observations.jsonl"
+
+        # Observers that run every cycle
+        self._every_cycle_observers: list[BaseObserver] = [
+            IMessageObserver(),
+            WhatsAppObserver(),
+            ClipboardObserver(),
+        ]
+
+        # Observers gated by a shared GWS counter (every Nth cycle)
+        self._gws_every: int = 5
+        self._gws_counter: int = 0
+        self._gws_observers: list[BaseObserver] = [
+            EmailObserver(),
+            CalendarObserver(),
+            DriveObserver(),
+            TasksObserver(),
+            MeetObserver(),
+        ]
+
+        # Browser observer has its own cadence
+        self._browser_every: int = 3  # ~9s at OBSERVE_INTERVAL=3
+        self._browser_counter: int = 0
+        self._browser_observer: BaseObserver = BrowserObserver(since_minutes=10)
+
+        self.recent_history: deque[Observation] = deque(maxlen=history_size)
         self._load_history()
 
     def collect_all(self) -> list[Observation]:
@@ -53,24 +71,12 @@ class Observer:
         """
         raw: list[Observation] = []
 
-        # Messages
-        try:
-            raw.extend(collect_imessages())
-        except Exception:
-            log.exception("iMessage collector error")
-
-        try:
-            raw.extend(collect_whatsapp())
-        except Exception:
-            log.exception("WhatsApp collector error")
-
-        # Clipboard
-        try:
-            clip = collect_clipboard()
-            if clip:
-                raw.append(clip)
-        except Exception:
-            log.exception("Clipboard collector error")
+        # Every-cycle observers (messages, clipboard)
+        for obs in self._every_cycle_observers:
+            try:
+                raw.extend(obs.collect())
+            except Exception:
+                log.exception("%s collector error", obs.name)
 
         # Active app / window — NOT emitted as a signal. Captured solely to
         # decide whether the visual state changed enough to warrant a new
@@ -83,63 +89,24 @@ class Observer:
         except Exception:
             log.exception("Active app probe error")
 
-        # Browser history — every 3rd cycle (~9s). Reads only the active
-        # profile of each installed Chromium browser (Chrome, Arc, etc.),
-        # chosen from each browser's Local State `profile.last_used` field.
+        # Browser history — every 3rd cycle (~9s)
         self._browser_counter += 1
         if self._browser_counter >= self._browser_every:
             self._browser_counter = 0
             try:
-                raw.extend(collect_browser_history(since_minutes=10))
+                raw.extend(self._browser_observer.collect())
             except Exception:
-                log.exception("Browser history collector error")
+                log.exception("%s collector error", self._browser_observer.name)
 
-        # Email — every 5th cycle
-        self._email_counter += 1
-        if self._email_counter >= self._gws_every:
-            self._email_counter = 0
-            try:
-                raw.extend(collect_recent_emails())
-            except Exception:
-                log.exception("Email collector error")
-
-        # Calendar — every 5th cycle (both upcoming + recently finished)
-        self._calendar_counter += 1
-        if self._calendar_counter >= self._gws_every:
-            self._calendar_counter = 0
-            try:
-                raw.extend(collect_upcoming_events())
-            except Exception:
-                log.exception("Calendar upcoming collector error")
-            try:
-                raw.extend(collect_past_events())
-            except Exception:
-                log.exception("Calendar past collector error")
-
-        # Drive — every 5th cycle
-        self._drive_counter += 1
-        if self._drive_counter >= self._gws_every:
-            self._drive_counter = 0
-            try:
-                raw.extend(collect_recent_drive_activity())
-            except Exception:
-                log.exception("Drive collector error")
-
-        # Tasks — every 5th cycle
-        self._tasks_counter += 1
-        if self._tasks_counter >= self._gws_every:
-            self._tasks_counter = 0
-            try:
-                raw.extend(collect_pending_tasks())
-            except Exception:
-                log.exception("Tasks collector error")
-
-        # Meet transcripts — every 5th cycle (Drive API query)
-        if self._email_counter == 0:  # piggyback on email counter
-            try:
-                raw.extend(collect_recent_transcripts())
-            except Exception:
-                log.exception("Meet transcript collector error")
+        # GWS-gated observers — every 5th cycle
+        self._gws_counter += 1
+        if self._gws_counter >= self._gws_every:
+            self._gws_counter = 0
+            for obs in self._gws_observers:
+                try:
+                    raw.extend(obs.collect())
+                except Exception:
+                    log.exception("%s collector error", obs.name)
 
         # Microphone: handled entirely by the web server via
         # /api/mic/start and /api/mic/stop. Nothing to poll here — mic
@@ -155,7 +122,7 @@ class Observer:
             try:
                 self._screenshot_counter += 1
                 context_changed = self.should_screenshot(current_app, current_title)
-                periodic = self._screenshot_counter >= 2  # 2 cycles × 3s = 6s
+                periodic = self._screenshot_counter >= 2  # 2 cycles x 3s = 6s
 
                 if context_changed or periodic:
                     self._screenshot_counter = 0
@@ -204,8 +171,8 @@ class Observer:
             return ""
 
         now = datetime.now()
-        recent = []   # last hour
-        older = []    # older than 1 hour
+        recent: list[Observation] = []   # last hour
+        older: list[Observation] = []    # older than 1 hour
 
         for s in unmatched:
             age = (now - s.timestamp).total_seconds()
@@ -214,7 +181,7 @@ class Observer:
             else:
                 older.append(s)
 
-        lines = []
+        lines: list[str] = []
 
         # Recent: show detail
         if recent:
@@ -333,7 +300,7 @@ class Observer:
         if file_size <= offset:
             return "", offset  # no new data
 
-        lines = []
+        lines: list[str] = []
         with open(self._signal_log_path) as f:
             f.seek(offset)
             for line in f:

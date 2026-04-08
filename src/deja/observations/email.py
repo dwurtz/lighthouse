@@ -19,6 +19,7 @@ import subprocess
 from datetime import datetime
 from email.utils import parsedate_to_datetime
 
+from deja.observations.base import BaseObserver
 from deja.observations.types import Observation
 
 log = logging.getLogger(__name__)
@@ -212,6 +213,20 @@ def _fetch_emails(
             continue
 
     return signals
+
+
+class EmailObserver(BaseObserver):
+    """Collects recent incoming and outgoing emails via gws CLI."""
+
+    def __init__(self, since_minutes: int = 15) -> None:
+        self.since_minutes = since_minutes
+
+    @property
+    def name(self) -> str:
+        return "Email"
+
+    def collect(self) -> list[Observation]:
+        return collect_recent_emails(since_minutes=self.since_minutes)
 
 
 def collect_recent_emails(since_minutes: int = 15) -> list[Observation]:

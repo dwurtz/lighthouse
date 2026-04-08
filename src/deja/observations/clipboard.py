@@ -7,12 +7,25 @@ import logging
 import subprocess
 from datetime import datetime
 
+from deja.observations.base import BaseObserver
 from deja.observations.types import Observation
 
 log = logging.getLogger(__name__)
 
 
-def collect_clipboard() -> Signal | None:
+class ClipboardObserver(BaseObserver):
+    """Collects the current clipboard contents."""
+
+    @property
+    def name(self) -> str:
+        return "Clipboard"
+
+    def collect(self) -> list[Observation]:
+        result = collect_clipboard()
+        return [result] if result else []
+
+
+def collect_clipboard() -> Observation | None:
     """Return clipboard contents as a Signal, or None if empty."""
     try:
         r = subprocess.run(["pbpaste"], capture_output=True, text=True, timeout=5)

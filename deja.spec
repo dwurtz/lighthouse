@@ -1,4 +1,4 @@
-# PyInstaller spec for freezing the Lighthouse Python backend
+# PyInstaller spec for freezing the Deja Python backend
 # into a single self-contained binary. No Python installation needed.
 #
 # Build: ./venv/bin/pyinstaller deja.spec

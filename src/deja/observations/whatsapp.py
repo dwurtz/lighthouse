@@ -2,8 +2,8 @@
 
 Two entry points:
 
-  * ``collect_whatsapp`` — steady-state live collector; one
-    ``Observation`` per recent message.
+  * ``WhatsAppObserver.collect`` (aliased as ``collect_whatsapp``) —
+    steady-state live collector; one ``Observation`` per recent message.
   * ``fetch_whatsapp_contacts_backfill`` — onboarding path; one
     ``Observation`` per active chat (1:1 or group) over the last N
     days, with a digest of the last M messages in each.
@@ -19,6 +19,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from deja.config import DEJA_HOME, WHATSAPP_DB
+from deja.observations.base import BaseObserver
 from deja.observations.types import Observation
 
 log = logging.getLogger(__name__)
@@ -32,7 +33,27 @@ _APPLE_EPOCH_OFFSET = 978307200
 _WHATSAPP_BUFFER = DEJA_HOME / "whatsapp_buffer.json"
 
 
+class WhatsAppObserver(BaseObserver):
+    """Collects recent WhatsApp messages from the JSON buffer written by the Swift app."""
+
+    def __init__(self, since_minutes: int = 5, limit: int = 20) -> None:
+        self.since_minutes = since_minutes
+        self.limit = limit
+
+    @property
+    def name(self) -> str:
+        return "WhatsApp"
+
+    def collect(self) -> list[Observation]:
+        return _collect_whatsapp(since_minutes=self.since_minutes, limit=self.limit)
+
+
 def collect_whatsapp(since_minutes: int = 5, limit: int = 20) -> list[Observation]:
+    """Legacy function entry point — delegates to _collect_whatsapp."""
+    return _collect_whatsapp(since_minutes=since_minutes, limit=limit)
+
+
+def _collect_whatsapp(since_minutes: int = 5, limit: int = 20) -> list[Observation]:
     """Read recent WhatsApp messages from the JSON buffer written by the Swift app.
 
     The Swift app reads ChatStorage.sqlite every 15 seconds and writes
@@ -130,14 +151,7 @@ def fetch_whatsapp_contacts_backfill(
             len(session_rows), min_outbound_messages, days,
         )
 
-        from deja.observations.contacts import resolve_contact
-
-        def _name_with_handle(name: str, handle: str) -> str:
-            """Render 'Jane Doe (+15551234567)' or just the handle if
-            contact resolution failed. Matches the iMessage convention."""
-            if not handle or name == handle:
-                return name
-            return f"{name} ({handle})"
+        from deja.observations.contacts import resolve_contact, name_with_handle
 
         for session in session_rows:
             session_id = session["session_id"]
@@ -158,7 +172,7 @@ def fetch_whatsapp_contacts_backfill(
                 # accounts). Strip the @s.whatsapp.net suffix.
                 raw_phone = jid.split("@", 1)[0] if "@" in jid else jid
                 resolved = resolve_contact(raw_phone) or partner_name or raw_phone
-                chat_label = _name_with_handle(resolved, raw_phone)
+                chat_label = name_with_handle(resolved, raw_phone)
                 sender_label = chat_label
                 one_to_one_handle = raw_phone
 
@@ -207,7 +221,7 @@ def fetch_whatsapp_contacts_backfill(
                         seen_handles[raw] = resolve_contact(raw) or raw
                 if seen_handles:
                     participants_line = "; ".join(
-                        _name_with_handle(name, raw)
+                        name_with_handle(name, raw)
                         for raw, name in seen_handles.items()
                     )
                     lines.append(f"Participants: {participants_line}")
@@ -220,7 +234,7 @@ def fetch_whatsapp_contacts_backfill(
                     raw = (m["from_jid"] or "").split("@", 1)[0] if m["from_jid"] else ""
                     if raw:
                         resolved = resolve_contact(raw) or raw
-                        who = _name_with_handle(resolved, raw)
+                        who = name_with_handle(resolved, raw)
                     else:
                         who = "unknown"
                 else:
@@ -229,7 +243,7 @@ def fetch_whatsapp_contacts_backfill(
                         resolve_contact(one_to_one_handle)
                         if one_to_one_handle else None
                     ) or partner_name or (one_to_one_handle or "unknown")
-                    who = _name_with_handle(name_only, one_to_one_handle or "")
+                    who = name_with_handle(name_only, one_to_one_handle or "")
                 text = (m["text"] or "").replace("\n", " ").strip()[:300]
                 lines.append(f"  [{m['dt']}] {who}: {text}")
 

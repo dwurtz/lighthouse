@@ -19,8 +19,8 @@ xcrun swiftc \
     -o "$DIR/DejaRecorder" "$DIR/DejaRecorder.swift"
 
 echo "Signing binaries..."
-codesign --force --sign "Lighthouse Dev" --identifier com.deja.app "$DIR/Deja"
-codesign --force --sign "Lighthouse Dev" "$DIR/DejaRecorder"
+codesign --force --sign "-" --identifier com.deja.app "$DIR/Deja"
+codesign --force --sign "-" "$DIR/DejaRecorder"
 
 echo "Copying to app bundle..."
 cp "$DIR/Deja" "$APP/Contents/MacOS/Deja"
@@ -40,6 +40,10 @@ fi
 CLIENT_SECRET="$DIR/../src/deja/default_assets/client_secret.json"
 if [ -f "$CLIENT_SECRET" ]; then
     cp "$CLIENT_SECRET" "$RESOURCES/client_secret.json"
+fi
+# Bundled API key
+if [ -f "$DIR/../Resources/default_api_key.txt" ]; then
+    cp "$DIR/../Resources/default_api_key.txt" "$RESOURCES/default_api_key.txt"
 fi
 
 echo "Bundling Python environment..."

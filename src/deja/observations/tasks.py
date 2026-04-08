@@ -7,11 +7,23 @@ import logging
 import subprocess
 from datetime import datetime
 
+from deja.observations.base import BaseObserver
 from deja.observations.types import Observation
 
 log = logging.getLogger(__name__)
 
 TASKLIST_ID = "MDcyMDk1NzkwNzU5MDEzNzE5MTk6MDow"
+
+
+class TasksObserver(BaseObserver):
+    """Collects incomplete Google Tasks via gws CLI."""
+
+    @property
+    def name(self) -> str:
+        return "Tasks"
+
+    def collect(self) -> list[Observation]:
+        return collect_pending_tasks()
 
 
 def collect_pending_tasks() -> list[Observation]:
