@@ -126,7 +126,22 @@ def start_gws_auth() -> dict:
     user's email and name, creates the identity self-page, and
     initializes the wiki — combining what used to be separate
     "Google auth" and "identity" steps into one.
+
+    The OAuth client_secret.json is bundled inside the app. On first
+    run, it's copied to ~/.config/gws/ so gws CLI can find it.
     """
+    # Ensure client_secret.json exists for gws CLI
+    import shutil
+    gws_config = Path.home() / ".config" / "gws"
+    client_secret = gws_config / "client_secret.json"
+    if not client_secret.exists():
+        gws_config.mkdir(parents=True, exist_ok=True)
+        # Try bundled client_secret first
+        bundled = Path(__file__).parent / "default_assets" / "client_secret.json"
+        if bundled.exists():
+            shutil.copy(bundled, client_secret)
+            log.info("Copied bundled client_secret.json to ~/.config/gws/")
+
     already_authed = False
     try:
         r = subprocess.run(
@@ -146,16 +161,42 @@ def start_gws_auth() -> dict:
         pass
 
     if not already_authed:
-        # Start OAuth flow (opens browser)
+        # Start OAuth flow — capture the auth URL and open the browser
+        # explicitly, since the frozen backend runs headless.
+        import webbrowser
         try:
-            r = subprocess.run(
+            proc = subprocess.Popen(
                 ["gws", "auth", "login"],
-                capture_output=True, text=True, timeout=120,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
             )
-            if r.returncode != 0:
-                return {"ok": False, "error": r.stderr[:200] or "Auth failed"}
-        except subprocess.TimeoutExpired:
-            return {"ok": False, "error": "Auth timed out — try again"}
+            # Read stdout line by line to find the auth URL
+            auth_url = None
+            import select
+            import time
+            start = time.time()
+            while time.time() - start < 10:
+                line = proc.stdout.readline()
+                if not line:
+                    break
+                if "accounts.google.com" in line:
+                    auth_url = line.strip()
+                    break
+            if auth_url:
+                webbrowser.open(auth_url)
+                log.info("Opened Google auth URL in browser")
+            # Wait for the callback (user signs in → gws receives the code)
+            try:
+                proc.wait(timeout=120)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                return {"ok": False, "error": "Auth timed out — try again"}
+            if proc.returncode != 0:
+                stderr = proc.stderr.read()[:200] if proc.stderr else ""
+                return {"ok": False, "error": stderr or "Auth failed"}
+        except FileNotFoundError:
+            return {"ok": False, "error": "gws CLI not found"}
         except Exception as e:
             return {"ok": False, "error": str(e)}
 

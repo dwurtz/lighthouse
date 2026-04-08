@@ -376,9 +376,6 @@ struct PopoverContentView: View {
         VStack(spacing: 0) {
             // Header
             HStack {
-                Image(systemName: "sparkles")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(.white.opacity(0.9))
                 Text("Déjà")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundColor(.white.opacity(0.9))
@@ -689,7 +686,7 @@ struct PopoverContentView: View {
 
             if monitor.insights.isEmpty {
                 VStack(spacing: 8) {
-                    Image(systemName: "sparkles")
+                    Text("d").font(.system(size: 24, weight: .bold, design: .serif))
                         .font(.system(size: 24))
                         .foregroundColor(.white.opacity(0.15))
                     Text("No analysis yet")
@@ -730,7 +727,7 @@ struct PopoverContentView: View {
                         // New facts extracted
                         ForEach(insight.facts, id: \.self) { fact in
                             HStack(alignment: .top, spacing: 6) {
-                                Image(systemName: "sparkles")
+                                Text("d").font(.system(size: 24, weight: .bold, design: .serif))
                                     .font(.system(size: 8))
                                     .foregroundColor(.purple)
                                     .padding(.top, 3)
@@ -972,9 +969,6 @@ struct SetupWizardView: View {
         VStack(spacing: 0) {
             // Header
             HStack {
-                Image(systemName: "sparkles")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(.white.opacity(0.9))
                 Text("Déjà")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundColor(.white.opacity(0.9))
@@ -1010,9 +1004,6 @@ struct SetupWizardView: View {
     var welcomeStep: some View {
         VStack(spacing: 20) {
             Spacer().frame(height: 40)
-            Image(systemName: "sparkles")
-                .font(.system(size: 48))
-                .foregroundColor(.white.opacity(0.6))
             Text("Welcome to Déjà")
                 .font(.system(size: 20, weight: .semibold))
                 .foregroundColor(.white)
@@ -1526,9 +1517,6 @@ struct SetupWizardView: View {
             if !backfillRunning && !backfillDone {
                 // Initial "Start" screen
                 Spacer().frame(height: 20)
-                Image(systemName: "sparkles")
-                    .font(.system(size: 48))
-                    .foregroundColor(.white.opacity(0.6))
                 Text("Ready to build your wiki")
                     .font(.system(size: 20, weight: .semibold))
                     .foregroundColor(.white)
