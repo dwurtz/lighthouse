@@ -198,7 +198,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // 1. User-provided icon at ~/.deja/icon.png
         if FileManager.default.fileExists(atPath: iconPath.path),
            let img = NSImage(contentsOf: iconPath) {
-            img.isTemplate = true  // macOS auto-colors for light/dark menu bar
+            img.isTemplate = false  // macOS auto-colors for light/dark menu bar
             img.size = NSSize(width: 22, height: 22)
             return img
         }
@@ -274,7 +274,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // can cause macOS to drop our status item icon during capture.
         if let button = statusItem?.button, button.image == nil {
             if let img = loadPreferredIcon() {
-                img.isTemplate = true
+                img.isTemplate = false
                 button.image = img
             }
         }

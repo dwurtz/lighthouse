@@ -52,14 +52,20 @@ struct SettingsView: View {
                     .textCase(.uppercase)
 
                 Button(action: {
-                    NSAppleScript(source: """
-                        tell application "System Events" to log out
-                    """)?.executeAndReturnError(nil)
+                    // Revoke gws auth and clear local tokens
+                    let task = Process()
+                    task.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+                    task.arguments = ["gws", "auth", "revoke"]
+                    try? task.run()
+                    task.waitUntilExit()
+
+                    // Quit the app so user can re-authenticate on next launch
+                    NSApplication.shared.terminate(nil)
                 }) {
                     HStack(spacing: 6) {
                         Image(systemName: "rectangle.portrait.and.arrow.right")
                             .font(.system(size: 12))
-                        Text("Log out of macOS")
+                        Text("Sign out")
                             .font(.system(size: 13))
                     }
                     .foregroundColor(.red.opacity(0.8))
