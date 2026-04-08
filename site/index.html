@@ -27,7 +27,8 @@
   --ease:cubic-bezier(0.16,1,0.3,1);
 }
 
-html{scroll-behavior:smooth}
+html{scroll-behavior:smooth;scroll-snap-type:y mandatory;overflow-y:scroll}
+section,footer{scroll-snap-align:start}
 body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:16px;line-height:1.6;overflow-x:hidden;-webkit-font-smoothing:antialiased}
 
 /* Noise */
@@ -39,7 +40,8 @@ body::after{content:'';position:fixed;inset:0;background-image:url("data:image/s
 
 /* Layout */
 .w{max-width:1100px;margin:0 auto;padding:0 32px;position:relative;z-index:1}
-section{padding:140px 0}
+section{min-height:100vh;padding:140px 0;position:relative;display:flex;align-items:center}
+section>.w{width:100%}
 
 /* Reveal */
 .r{opacity:0;transform:translateY(20px);transition:opacity 0.9s var(--ease),transform 0.9s var(--ease)}
@@ -57,7 +59,7 @@ nav.scrolled{background:rgba(5,5,7,0.95);padding:14px 0;border-bottom-color:var(
 .nav-l a:hover{color:var(--text)}
 
 /* ─── Hero ─── */
-.hero{min-height:100vh;display:flex;align-items:center;padding:120px 0 80px;position:relative}
+.hero{padding:120px 0 80px}
 .hero-grid{display:grid;grid-template-columns:1fr 1fr;gap:48px;align-items:center}
 .hero-left{text-align:left}
 
@@ -104,16 +106,18 @@ nav.scrolled{background:rgba(5,5,7,0.95);padding:14px 0;border-bottom-color:var(
   .event-ring-wrap{max-width:320px}
 }
 
-/* Scroll chevron */
-.scroll-hint{
-  position:absolute;bottom:32px;left:50%;
+/* Scroll chevron — fixed at bottom of viewport */
+.scroll-chevron{
+  position:fixed;bottom:32px;left:50%;transform:translateX(-50%);
+  z-index:150;cursor:pointer;
   display:flex;flex-direction:column;align-items:center;gap:2px;
-  opacity:0.25;cursor:pointer;
+  opacity:0.3;
   animation:bob 2.5s ease infinite;
   transition:opacity 0.4s;
 }
-.scroll-hint svg{width:20px;height:20px}
-.scroll-hint svg path{stroke:var(--text);stroke-width:1.5;fill:none;stroke-linecap:round;stroke-linejoin:round}
+.scroll-chevron.hidden{opacity:0;pointer-events:none}
+.scroll-chevron svg{width:20px;height:20px}
+.scroll-chevron svg path{stroke:var(--text);stroke-width:1.5;fill:none;stroke-linecap:round;stroke-linejoin:round}
 @keyframes bob{0%,100%{transform:translateX(-50%) translateY(0)}50%{transform:translateX(-50%) translateY(6px)}}
 
 /* ─── Divider ─── */
@@ -203,10 +207,6 @@ footer{border-top:1px solid var(--border);padding:48px 0}
         <canvas id="event-ring" width="960" height="960"></canvas>
       </div>
     </div>
-    <a href="#features" class="scroll-hint">
-      <svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
-      <svg viewBox="0 0 24 24" style="opacity:0.5"><path d="M6 9l6 6 6-6"/></svg>
-    </a>
   </div>
 </section>
 
@@ -249,7 +249,6 @@ footer{border-top:1px solid var(--border);padding:48px 0}
   </div>
 </section>
 
-<div class="w"><div class="div-line"></div></div>
 
 <section class="steps" id="how">
   <div class="w">
@@ -275,7 +274,6 @@ footer{border-top:1px solid var(--border);padding:48px 0}
   </div>
 </section>
 
-<div class="w"><div class="div-line"></div></div>
 
 <section class="inst" id="install">
   <div class="w">
@@ -295,6 +293,11 @@ footer{border-top:1px solid var(--border);padding:48px 0}
     <span class="foot-r">macOS · Runs Locally</span>
   </div>
 </footer>
+
+<div class="scroll-chevron" id="scroll-chevron">
+  <svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
+  <svg viewBox="0 0 24 24" style="opacity:0.4"><path d="M6 9l6 6 6-6"/></svg>
+</div>
 
 <script>
 // ─── Animated dot ring ───
@@ -626,12 +629,26 @@ function dotRing(canvas,radius,count,dotSize,speed){
   loop();
 })();
 
-// ─── Nav scroll state ───
+// ─── Nav scroll state + chevron ───
 const nav=document.querySelector('nav');
-const hint=document.querySelector('.scroll-hint');
+const chevron=document.getElementById('scroll-chevron');
+const sections=Array.from(document.querySelectorAll('section'));
+
+// Click chevron → scroll to next section
+chevron.addEventListener('click',()=>{
+  const scrollY=window.scrollY;
+  const next=sections.find(s=>s.offsetTop>scrollY+10);
+  if(next)next.scrollIntoView({behavior:'smooth'});
+});
+
 window.addEventListener('scroll',()=>{
-  if(window.scrollY>80){nav.classList.add('scrolled');if(hint)hint.style.opacity='0'}
-  else{nav.classList.remove('scrolled');if(hint)hint.style.opacity=''}
+  // Nav background
+  if(window.scrollY>80)nav.classList.add('scrolled');
+  else nav.classList.remove('scrolled');
+  // Hide chevron near bottom of page
+  const nearBottom=window.scrollY+window.innerHeight>=document.body.scrollHeight-100;
+  if(nearBottom)chevron.classList.add('hidden');
+  else chevron.classList.remove('hidden');
 },{passive:true});
 
 // ─── Reveal ───
