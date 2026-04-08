@@ -22,7 +22,7 @@ class MeetingRecorder {
             return bundled
         }
         // Dev fallback
-        return NSHomeDirectory() + "/projects/workagents/workagent/menubar/DejaRecorder"
+        return NSHomeDirectory() + "/projects/deja/menubar/DejaRecorder"
     }
 
     func startRecording(sessionId: String, outputDirPath: String) {

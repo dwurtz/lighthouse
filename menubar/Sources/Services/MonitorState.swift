@@ -79,7 +79,7 @@ class MonitorState: ObservableObject {
                 return bundled
             }
         }
-        return NSHomeDirectory() + "/projects/workagents/workagent/venv/bin/python3"
+        return NSHomeDirectory() + "/projects/deja/venv/bin/python3"
     }
 
     static var isBundledPython: Bool {
@@ -91,7 +91,7 @@ class MonitorState: ObservableObject {
         return false
     }
 
-    static let projectDir = NSHomeDirectory() + "/projects/workagents/workagent"
+    static let projectDir = NSHomeDirectory() + "/projects/deja"
 
     // MARK: - Launch at Login (SMAppService)
 
