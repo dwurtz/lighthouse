@@ -123,7 +123,7 @@ def main() -> None:
 
     sub.add_parser(
         "configure",
-        help="Interactive first-run setup — store API key in keychain, create self-page",
+        help="Interactive first-run setup — configure identity and permissions",
     )
     sub.add_parser(
         "health",
@@ -206,42 +206,14 @@ def _run_configure() -> None:
     check. Designed to be safe to re-run — detects existing config and
     asks before overwriting.
     """
-    import getpass
     from deja.config import DEJA_HOME, WIKI_DIR
-    from deja.secrets import get_api_key, store_api_key, api_key_source
 
     print("Deja setup")
     print("=" * 60)
     print()
 
-    # --- 1. Gemini API key (stored in macOS Keychain) ---
-    print("[1/5] Gemini API key")
-    existing = get_api_key()
-    source = api_key_source()
-    if existing:
-        print(f"  already configured ({source})")
-        ans = input("  replace it? [y/N] ").strip().lower()
-        if ans != "y":
-            print("  keeping existing key")
-        else:
-            key = getpass.getpass("  new GEMINI_API_KEY: ").strip()
-            if key:
-                store_api_key(key)
-                print("  stored in macOS keychain (service=deja)")
-            else:
-                print("  empty input, skipping")
-    else:
-        print("  get a free key at https://aistudio.google.com/app/apikey")
-        key = getpass.getpass("  GEMINI_API_KEY: ").strip()
-        if not key:
-            print("  no key entered — setup cannot continue")
-            sys.exit(1)
-        store_api_key(key)
-        print("  stored in macOS keychain (service=deja)")
-    print()
-
-    # --- 2. Wiki layout + default prompts ---
-    print("[2/5] Wiki layout")
+    # --- 1. Wiki layout + default prompts ---
+    print("[1/4] Wiki layout")
     print(f"  wiki lives at: {WIKI_DIR}")
     WIKI_DIR.mkdir(parents=True, exist_ok=True)
     (WIKI_DIR / "people").mkdir(exist_ok=True)
@@ -275,8 +247,8 @@ def _run_configure() -> None:
         print(f"  warning: git init skipped ({e})")
     print()
 
-    # --- 3. Self-page (identity) ---
-    print("[3/5] Identity self-page")
+    # --- 2. Self-page (identity) ---
+    print("[2/4] Identity self-page")
     from deja.identity import load_user
     user = load_user()
     if not user.is_generic:
@@ -305,15 +277,15 @@ def _run_configure() -> None:
                 print(f"  created {self_path.relative_to(WIKI_DIR.parent)}")
     print()
 
-    # --- 4. MCP auto-install ---
-    print("[4/5] MCP server configuration")
+    # --- 3. MCP auto-install ---
+    print("[3/4] MCP server configuration")
     from deja.mcp_install import install_on_all, print_install_report
     mcp_results = install_on_all()
     print_install_report(mcp_results, indent="  ")
     print()
 
-    # --- 5. Health check ---
-    print("[5/5] Health check")
+    # --- 4. Health check ---
+    print("[4/4] Health check")
     _run_health(indent="  ")
     print()
     print("=" * 60)
@@ -334,7 +306,7 @@ def _run_health(indent: str = "") -> None:
     """Print current config + all startup checks, then exit."""
     from deja.health_check import run_health_checks
     from deja.config import DEJA_HOME, WIKI_DIR, INTEGRATE_MODEL, VISION_MODEL, REFLECT_MODEL
-    from deja.secrets import api_key_source
+    from deja.llm_client import DEJA_API_URL
 
     if not indent:
         print("Deja health check")
@@ -345,7 +317,7 @@ def _run_health(indent: str = "") -> None:
         print(f"  INTEGRATE_MODEL  = {INTEGRATE_MODEL}")
         print(f"  VISION_MODEL     = {VISION_MODEL}")
         print(f"  REFLECT_MODEL    = {REFLECT_MODEL}")
-        print(f"  API key source   = {api_key_source()}")
+        print(f"  DEJA_API_URL     = {DEJA_API_URL}")
         print()
 
     results = run_health_checks()

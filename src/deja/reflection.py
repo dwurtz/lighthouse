@@ -32,7 +32,7 @@ from deja.config import (
     REFLECT_MODEL,
     WIKI_DIR,
 )
-from deja.llm_client import GeminiClient, types
+from deja.llm_client import GeminiClient
 from deja.prompts import load as load_prompt
 
 # Re-export the public scheduling API so callers that do
@@ -248,16 +248,16 @@ async def _run_reflection_body() -> dict:
     )
 
     gemini = GeminiClient()
-    resp = await gemini.client.aio.models.generate_content(
+    resp_text = await gemini._generate(
         model=REFLECT_MODEL,
         contents=prompt,
-        config=types.GenerateContentConfig(
-            response_mime_type="application/json",
-            max_output_tokens=65536,
-            temperature=0.3,
-        ),
+        config_dict={
+            "response_mime_type": "application/json",
+            "max_output_tokens": 65536,
+            "temperature": 0.3,
+        },
     )
-    data = json.loads(resp.text)
+    data = json.loads(resp_text)
 
     updates = data.get("wiki_updates", []) or []
     thoughts = (data.get("thoughts") or "").strip()

@@ -210,43 +210,45 @@ def _check_user_profile() -> CheckResult:
     )
 
 
-def _check_gemini_key() -> CheckResult:
-    """Verify the Gemini API key is resolvable from env or keychain."""
-    from deja.secrets import get_api_key, api_key_source
-    key = get_api_key()
-    source = api_key_source()
-    if key:
+def _check_server() -> CheckResult:
+    """Check connectivity to the Deja API server (or direct dev mode)."""
+    if os.environ.get("GEMINI_API_KEY"):
         return CheckResult(
-            name="gemini api key",
+            name="llm backend",
             ok=True,
-            detail=f"{key[:8]}… (source: {source})",
+            detail="direct mode (dev) — GEMINI_API_KEY is set",
             fix="",
         )
-    return CheckResult(
-        name="gemini api key",
-        ok=False,
-        detail="not configured (checked env vars and macOS keychain)",
-        fix="Run `deja configure` to store the key in the macOS keychain, or export GEMINI_API_KEY in your shell.",
-    )
-
-
-def _OLD_check_gemini_key() -> CheckResult:
-    """Gemini API key must be set as an environment variable."""
-    key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
-    if key:
-        return CheckResult(name="gemini api key", ok=True, detail=f"{key[:8]}…", fix="")
-    return CheckResult(
-        name="gemini api key",
-        ok=False,
-        detail="GEMINI_API_KEY not set in environment",
-        fix="Set GEMINI_API_KEY in your shell or launch.sh so the monitor and web subprocesses inherit it.",
-    )
+    from deja.llm_client import DEJA_API_URL
+    try:
+        import httpx
+        r = httpx.get(f"{DEJA_API_URL}/v1/health", timeout=5)
+        if r.status_code < 500:
+            return CheckResult(
+                name="llm backend",
+                ok=True,
+                detail=f"server reachable at {DEJA_API_URL}",
+                fix="",
+            )
+        return CheckResult(
+            name="llm backend",
+            ok=False,
+            detail=f"server returned {r.status_code}",
+            fix=f"Check the Deja API server at {DEJA_API_URL}.",
+        )
+    except Exception as e:
+        return CheckResult(
+            name="llm backend",
+            ok=False,
+            detail=f"server unreachable at {DEJA_API_URL}: {e}",
+            fix=f"Ensure the Deja API server is running at {DEJA_API_URL}, or set GEMINI_API_KEY for direct mode.",
+        )
 
 
 def run_health_checks() -> list[CheckResult]:
     """Run every probe and return the results list."""
     results: list[CheckResult] = []
-    results.append(_check_gemini_key())
+    results.append(_check_server())
     results.extend(_check_wiki())
     results.append(_check_user_profile())
     results.append(_check_sqlite("iMessage", IMESSAGE_DB))

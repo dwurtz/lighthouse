@@ -8,7 +8,7 @@ from pathlib import Path
 from deja.health_check import (
     CheckResult,
     _check_ffmpeg,
-    _check_gemini_key,
+    _check_server,
     _check_sqlite,
     _check_wiki,
     run_health_checks,
@@ -83,28 +83,22 @@ def test_check_wiki_missing_prompt(isolated_home):
     assert "prefilter.md" in prompts_result.detail
 
 
-def test_check_gemini_key_present(monkeypatch):
+def test_check_server_direct_mode(monkeypatch):
     monkeypatch.setenv("GEMINI_API_KEY", "fake-key-abcdef1234")
-    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
-    # Invalidate the process-level secrets cache so the env var is re-read
-    import deja.secrets as sec
-    monkeypatch.setattr(sec, "_cache_valid", False)
-    r = _check_gemini_key()
+    r = _check_server()
     assert r.ok is True
+    assert "direct mode" in r.detail
 
 
-def test_check_gemini_key_missing(monkeypatch):
-    """When neither env vars nor the keychain have the key, the check fails."""
+def test_check_server_unreachable(monkeypatch):
+    """When no GEMINI_API_KEY and server is unreachable, the check fails."""
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
-    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
-    # Invalidate cache AND stub the keychain read so this test doesn't
-    # depend on what's in the developer's actual login keychain.
-    import deja.secrets as sec
-    monkeypatch.setattr(sec, "_cache_valid", False)
-    monkeypatch.setattr(sec, "_read_keychain", lambda *a, **kw: None)
-    r = _check_gemini_key()
+    # Point at a definitely-unreachable URL
+    import deja.llm_client as llm_mod
+    monkeypatch.setattr(llm_mod, "DEJA_API_URL", "http://localhost:1")
+    r = _check_server()
     assert r.ok is False
-    assert "configure" in r.fix.lower() or "keychain" in r.fix.lower()
+    assert "unreachable" in r.detail
 
 
 def test_check_ffmpeg_returns_result():

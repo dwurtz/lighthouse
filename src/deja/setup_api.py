@@ -2,10 +2,9 @@
 
 Called by the Swift setup wizard to configure Deja without
 any terminal usage. The wizard walks through:
-  1. Gemini API key (validate + store in Keychain)
-  2. Google Workspace OAuth (browser-based)
-  3. User identity (name, email → self-page)
-  4. Wiki initialization (dirs, prompts, git)
+  1. Google Workspace OAuth (browser-based)
+  2. User identity (name, email → self-page)
+  3. Wiki initialization (dirs, prompts, git)
 
 All endpoints are idempotent — safe to call multiple times.
 """
@@ -28,10 +27,20 @@ router = APIRouter(prefix="/api/setup")
 @router.get("/status")
 def setup_status() -> dict:
     """Check what's already configured."""
-    from deja.secrets import get_api_key, api_key_source
+    import os
+    import httpx as _httpx
+    from deja.llm_client import DEJA_API_URL
 
-    key = get_api_key()
-    has_key = bool(key)
+    # Check server reachability (or dev direct mode)
+    server_reachable = False
+    if os.environ.get("GEMINI_API_KEY"):
+        server_reachable = True  # dev direct mode
+    else:
+        try:
+            r = _httpx.get(f"{DEJA_API_URL}/v1/health", timeout=5)
+            server_reachable = r.status_code < 500
+        except Exception:
+            pass
 
     # Check gws auth — output is JSON with token_valid and user fields
     gws_authed = False
@@ -73,49 +82,13 @@ def setup_status() -> dict:
 
     return {
         "setup_done": setup_done,
-        "has_api_key": has_key,
-        "api_key_source": api_key_source() if has_key else None,
+        "server_reachable": server_reachable,
         "gws_authenticated": gws_authed,
         "gws_email": gws_email,
         "has_identity": has_identity,
         "user_name": user_name,
         "wiki_exists": wiki_exists,
     }
-
-
-@router.post("/api-key")
-def set_api_key(body: dict) -> dict:
-    """Validate and store the Gemini API key in macOS Keychain."""
-    key = (body.get("key") or "").strip()
-    if not key:
-        return {"ok": False, "error": "No key provided"}
-
-    # Validate by making a trivial API call
-    try:
-        from google import genai
-        client = genai.Client(api_key=key)
-        # Simple model list call to validate the key
-        models = client.models.list()
-        # If we get here, the key works
-    except Exception as e:
-        err = str(e)
-        if "API_KEY_INVALID" in err or "401" in err or "403" in err:
-            return {"ok": False, "error": "Invalid API key. Check it and try again."}
-        # Other errors might be transient — store anyway
-        log.warning("API key validation inconclusive: %s", err)
-
-    # Store in Keychain
-    try:
-        from deja.secrets import store_api_key
-        store_api_key(key)
-    except Exception as e:
-        return {"ok": False, "error": f"Failed to store key: {e}"}
-
-    # Also set in current process environment
-    import os
-    os.environ["GEMINI_API_KEY"] = key
-
-    return {"ok": True}
 
 
 @router.post("/gws-auth")

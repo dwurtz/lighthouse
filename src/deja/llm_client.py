@@ -1,23 +1,31 @@
 """Gemini LLM client for Déjà.
 
-Uses the google-genai SDK for all LLM calls. All methods are async.
-The API key is resolved via ``deja.secrets.get_api_key()`` which
-checks environment variables first (``GEMINI_API_KEY`` /
-``GOOGLE_API_KEY``) and falls back to the macOS login keychain.
+Routes all LLM calls through the Deja API server proxy. When the
+``GEMINI_API_KEY`` env var is set, falls back to direct google-genai
+SDK calls (developer / CI mode).
+
+The server proxy is at ``DEJA_API_URL`` (default ``https://api.trydeja.com``)
+and accepts ``POST /v1/generate`` with ``Authorization: Bearer <token>``.
 """
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
+import os
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from google import genai
-from google.genai import types
+import httpx
+from google.genai import types  # re-exported for reflection.py and prefilter.py
 
+from deja.auth import get_auth_token
 from deja.config import INTEGRATE_MODEL, REFLECT_MODEL, VISION_MODEL
+
+DEJA_API_URL = os.environ.get("DEJA_API_URL", "https://api.trydeja.com")
+_USE_DIRECT = bool(os.environ.get("GEMINI_API_KEY"))
 
 # Onboarding is a one-time, high-stakes run against potentially the
 # user's entire digital history. Cost is amortized across the one run,
@@ -50,41 +58,103 @@ def _parse_json(raw: str) -> Any:
     return json.loads(text)
 
 
-def _ensure_api_key_in_env() -> None:
-    """Populate os.environ['GEMINI_API_KEY'] from the keychain if not set.
-
-    The google-genai SDK reads the key from the environment at
-    ``genai.Client()`` construction time. When Déjà is launched
-    from the Swift menu-bar app (launchd-inherited environment), env
-    vars are NOT populated from the user's shell profile — so we have
-    to fetch the key from the keychain and set it explicitly before
-    the SDK initializes its client.
-
-    This runs ONCE at module import time and again at GeminiClient
-    construction as a safety net. ``secrets.get_api_key()`` is cached
-    so repeat calls don't spawn fresh ``security`` subprocesses.
-    """
-    import os
-    if os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"):
-        return
-    from deja.secrets import get_api_key
-    key = get_api_key()
-    if key:
-        os.environ["GEMINI_API_KEY"] = key
-
-
-# Pre-populate at import time so any code that reads os.environ
-# directly (the google-genai SDK, tests, subprocess.Popen spawns) sees
-# the key before it's needed.
-_ensure_api_key_in_env()
-
-
 class GeminiClient:
-    """Async wrapper around the google-genai SDK for all agent LLM operations."""
+    """Async wrapper for all agent LLM operations.
+
+    In production, routes requests through the Deja API server proxy.
+    When ``GEMINI_API_KEY`` is set, uses the google-genai SDK directly
+    (developer / CI fallback).
+    """
 
     def __init__(self) -> None:
-        _ensure_api_key_in_env()
-        self.client = genai.Client()
+        if _USE_DIRECT:
+            from google import genai
+            self._direct_client = genai.Client()
+            self._http = None
+        else:
+            self._direct_client = None
+            self._http = httpx.AsyncClient(base_url=DEJA_API_URL, timeout=120)
+
+    @property
+    def client(self):
+        """Direct genai.Client — only available in direct mode (GEMINI_API_KEY set).
+        Used by chat_routes.py for the tool-calling loop.
+        """
+        if not self._direct_client:
+            raise RuntimeError(
+                "GeminiClient.client requires GEMINI_API_KEY (direct mode). "
+                "Use _generate() for proxy-compatible calls."
+            )
+        return self._direct_client
+
+    async def _generate_full(self, model: str, contents, config_dict: dict) -> dict:
+        """Like _generate but returns the full response dict (including
+        function_call parts for tool-calling flows like chat).
+        """
+        if self._direct_client:
+            from google.genai import types
+            resp = await self._direct_client.aio.models.generate_content(
+                model=model,
+                contents=contents,
+                config=types.GenerateContentConfig(**config_dict),
+            )
+            return resp
+
+        token = get_auth_token()
+        headers = {"Authorization": f"Bearer {token}"} if token else {}
+        serialized = self._serialize_contents(contents)
+        resp = await self._http.post("/v1/generate", json={
+            "model": model,
+            "contents": serialized,
+            "config": config_dict,
+        }, headers=headers)
+        resp.raise_for_status()
+        return resp.json()
+
+    async def _generate(self, model: str, contents, config_dict: dict) -> str:
+        """Unified generate call: proxy or direct SDK."""
+        if self._direct_client:
+            from google.genai import types
+            resp = await self._direct_client.aio.models.generate_content(
+                model=model,
+                contents=contents,
+                config=types.GenerateContentConfig(**config_dict),
+            )
+            return resp.text
+
+        token = get_auth_token()
+        headers = {"Authorization": f"Bearer {token}"} if token else {}
+        # Serialize contents for JSON transport
+        serialized = self._serialize_contents(contents)
+        resp = await self._http.post("/v1/generate", json={
+            "model": model,
+            "contents": serialized,
+            "config": config_dict,
+        }, headers=headers)
+        resp.raise_for_status()
+        return resp.json()["text"]
+
+    @staticmethod
+    def _serialize_contents(contents) -> Any:
+        """Convert contents to a JSON-serializable form.
+
+        Plain strings pass through. Lists may contain Part-like dicts
+        with base64-encoded binary data for image/audio payloads.
+        """
+        if isinstance(contents, str):
+            return contents
+        if isinstance(contents, list):
+            out = []
+            for item in contents:
+                if isinstance(item, str):
+                    out.append(item)
+                elif isinstance(item, dict):
+                    out.append(item)
+                else:
+                    # Assume it's some object — pass as string
+                    out.append(str(item))
+            return out
+        return contents
 
     # ------------------------------------------------------------------
     # Unified analyze + write (one LLM call per cycle)
@@ -141,16 +211,15 @@ class GeminiClient:
             **user_fields,
         )
 
-        resp = await self.client.aio.models.generate_content(
+        resp_text = await self._generate(
             model=INTEGRATE_MODEL,
             contents=prompt,
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json",
-                max_output_tokens=16384,
-                temperature=0.2,
-            ),
+            config_dict={
+                "response_mime_type": "application/json",
+                "max_output_tokens": 16384,
+                "temperature": 0.2,
+            },
         )
-        resp_text = resp.text
 
         try:
             result = json.loads(resp_text)
@@ -220,16 +289,15 @@ class GeminiClient:
             **user_fields,
         )
 
-        resp = await self.client.aio.models.generate_content(
+        resp_text = await self._generate(
             model=_ONBOARD_MODEL,
             contents=prompt,
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json",
-                max_output_tokens=16384,
-                temperature=0.2,
-            ),
+            config_dict={
+                "response_mime_type": "application/json",
+                "max_output_tokens": 16384,
+                "temperature": 0.2,
+            },
         )
-        resp_text = resp.text
 
         try:
             result = json.loads(resp_text)
@@ -300,23 +368,32 @@ class GeminiClient:
         # on real fixtures and outperforms Pro on every aggregate metric
         # at 1/4 the cost. Max tokens bumped to 1024 because Flash is
         # more verbose than Flash-Lite and 800 was truncating some frames.
-        resp = await self.client.aio.models.generate_content(
-            model=VISION_MODEL,
-            contents=[
+        if self._direct_client:
+            from google.genai import types
+            contents = [
                 types.Part.from_bytes(data=image_bytes, mime_type=mime),
                 prompt,
-            ],
-            config=types.GenerateContentConfig(
-                max_output_tokens=1024,
-                temperature=0.2,
-            ),
+            ]
+        else:
+            contents = [
+                {"type": "bytes", "data": base64.b64encode(image_bytes).decode(), "mime_type": mime},
+                prompt,
+            ]
+
+        resp_text = await self._generate(
+            model=VISION_MODEL,
+            contents=contents,
+            config_dict={
+                "max_output_tokens": 1024,
+                "temperature": 0.2,
+            },
         )
 
-        if not resp.text:
+        if not resp_text:
             log.warning("Vision returned empty response (model=%s)", VISION_MODEL)
             return {"summary": "Screenshot analysis failed", "app": "", "key_details": ""}
 
-        return {"summary": resp.text.strip()[:1000], "app": "", "key_details": ""}
+        return {"summary": resp_text.strip()[:1000], "app": "", "key_details": ""}
 
     # ------------------------------------------------------------------
     # Audio transcription
@@ -349,18 +426,27 @@ class GeminiClient:
             "If there is no intelligible speech, return an empty string."
         )
 
-        resp = await self.client.aio.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=[
+        if self._direct_client:
+            from google.genai import types
+            contents = [
                 types.Part.from_bytes(data=audio_bytes, mime_type="audio/wav"),
                 prompt,
-            ],
-            config=types.GenerateContentConfig(
-                max_output_tokens=2048,
-                temperature=0.0,
-            ),
+            ]
+        else:
+            contents = [
+                {"type": "bytes", "data": base64.b64encode(audio_bytes).decode(), "mime_type": "audio/wav"},
+                prompt,
+            ]
+
+        raw = await self._generate(
+            model="gemini-2.5-flash",
+            contents=contents,
+            config_dict={
+                "max_output_tokens": 2048,
+                "temperature": 0.0,
+            },
         )
-        raw = resp.text or ""
+        raw = raw or ""
         log.info("transcribe_audio raw response: %r", raw[:500])
 
         transcript = raw.strip()

@@ -33,7 +33,6 @@ async def transcribe_meeting_chunk(wav_path: Path, chunk_index: int) -> str:
     A 5-min chunk at 16kHz mono ≈ 9.6 MB — well within Gemini limits.
     """
     from deja.llm_client import GeminiClient
-    from google.genai import types
 
     try:
         audio_bytes = wav_path.read_bytes()
@@ -58,20 +57,23 @@ async def transcribe_meeting_chunk(wav_path: Path, chunk_index: int) -> str:
         "commentary, no preamble."
     )
 
+    import base64
+    audio_b64 = base64.b64encode(audio_bytes).decode()
+
     gemini = GeminiClient()
     try:
-        resp = await gemini.client.aio.models.generate_content(
+        raw = await gemini._generate(
             model="gemini-2.5-flash",
             contents=[
-                types.Part.from_bytes(data=audio_bytes, mime_type="audio/wav"),
+                {"type": "bytes", "data": audio_b64, "mime_type": "audio/wav"},
                 prompt,
             ],
-            config=types.GenerateContentConfig(
-                max_output_tokens=4096,
-                temperature=0.0,
-            ),
+            config_dict={
+                "max_output_tokens": 4096,
+                "temperature": 0.0,
+            },
         )
-        raw = (resp.text or "").strip()
+        raw = (raw or "").strip()
         if raw.lower() in ("", "empty", "(empty)", "no speech", "no speech detected"):
             return ""
         return raw
@@ -183,7 +185,6 @@ async def create_meeting_wiki_page(
     Returns the slug of the created page, or None on failure.
     """
     from deja.llm_client import GeminiClient
-    from google.genai import types
 
     calendar_title = metadata.get("title", "")
     attendees = metadata.get("attendees", [])
@@ -274,15 +275,15 @@ Do not wrap in code fences. Start with --- for the frontmatter.
 
     gemini = GeminiClient()
     try:
-        resp = await gemini.client.aio.models.generate_content(
+        content = await gemini._generate(
             model=REFLECT_MODEL,
             contents=prompt,
-            config=types.GenerateContentConfig(
-                max_output_tokens=16384,
-                temperature=0.2,
-            ),
+            config_dict={
+                "max_output_tokens": 16384,
+                "temperature": 0.2,
+            },
         )
-        content = (resp.text or "").strip()
+        content = (content or "").strip()
     except Exception:
         log.exception("Meeting wiki page creation failed")
         return None

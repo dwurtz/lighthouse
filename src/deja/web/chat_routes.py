@@ -52,7 +52,16 @@ async def post_chat(body: dict):
     )
     save_conversation(messages)
 
-    from deja.llm_client import GeminiClient
+    from deja.llm_client import GeminiClient, _USE_DIRECT
+
+    if not _USE_DIRECT:
+        # Chat with tool calling requires the full genai SDK.
+        # TODO: Support tool calling through the proxy server.
+        from starlette.responses import JSONResponse
+        return JSONResponse(
+            {"error": "Chat requires GEMINI_API_KEY (tool calling not yet supported through proxy)"},
+            status_code=501,
+        )
 
     gemini = GeminiClient()
 

@@ -80,7 +80,7 @@ async def triage_batch(
         return []
 
     from deja.config import INTEGRATE_MODEL
-    from deja.llm_client import GeminiClient, types
+    from deja.llm_client import GeminiClient
     from deja.prompts import load as load_prompt
 
     if index_md is None:
@@ -110,16 +110,15 @@ async def triage_batch(
 
     gemini = GeminiClient()
     try:
-        resp = await gemini.client.aio.models.generate_content(
+        raw = await gemini._generate(
             model=INTEGRATE_MODEL,
             contents=prompt,
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json",
-                max_output_tokens=2048,
-                temperature=0.1,
-            ),
-        )
-        raw = resp.text or ""
+            config_dict={
+                "response_mime_type": "application/json",
+                "max_output_tokens": 2048,
+                "temperature": 0.1,
+            },
+        ) or ""
     except Exception as e:
         log.warning("triage batch Flash-Lite call failed: %s", e)
         return [(True, "triage API failed — keeping")] * len(items)

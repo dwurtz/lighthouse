@@ -42,9 +42,6 @@ import mcp.types as types
 
 log = logging.getLogger(__name__)
 
-# Pre-populate the API key from keychain before any Gemini import
-from deja.llm_client import _ensure_api_key_in_env
-_ensure_api_key_in_env()
 
 
 # ---------------------------------------------------------------------------
