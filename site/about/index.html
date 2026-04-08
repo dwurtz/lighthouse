@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>About — Déjà</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;1,300;1,400;1,500&family=DM+Mono:wght@300;400&family=Inter:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+
+:root{
+  --bg:#050507;
+  --bg2:#0a0a0f;
+  --bg3:#101018;
+  --border:rgba(255,255,255,0.06);
+  --border-b:rgba(255,255,255,0.10);
+  --text:#ece8e1;
+  --text2:rgba(255,255,255,0.50);
+  --text3:rgba(255,255,255,0.22);
+  --accent:#8ab4d4;
+  --serif:'Cormorant Garamond',Georgia,serif;
+  --sans:'Inter',system-ui,sans-serif;
+  --mono:'DM Mono',monospace;
+  --ease:cubic-bezier(0.16,1,0.3,1);
+}
+
+html{scroll-behavior:smooth}
+body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:16px;line-height:1.6;-webkit-font-smoothing:antialiased;min-height:100vh}
+
+/* Noise */
+body::after{content:'';position:fixed;inset:0;background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 512 512' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");pointer-events:none;z-index:50}
+
+/* Layout */
+.w{max-width:1100px;margin:0 auto;padding:0 32px;position:relative;z-index:1}
+
+/* Reveal */
+.r{opacity:0;transform:translateY(24px);transition:opacity 0.9s var(--ease),transform 0.9s var(--ease)}
+.r.v{opacity:1;transform:translateY(0)}
+
+/* ─── Nav ─── */
+#top-bar{position:fixed;top:0;left:0;right:0;z-index:200}
+nav{padding:20px 0;background:rgba(5,5,7,0.8);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border-bottom:1px solid transparent;transition:all 0.3s ease}
+nav.scrolled{background:rgba(5,5,7,0.95);padding:14px 0;border-bottom-color:var(--border)}
+.nav-i{display:flex;align-items:center;justify-content:space-between;position:relative}
+.logo{text-decoration:none;font-family:var(--serif);font-size:24px;font-weight:400;color:var(--text);letter-spacing:-0.02em}
+.nav-l{display:flex;gap:36px;list-style:none}
+.nav-l a{color:var(--text2);text-decoration:none;font-size:13px;font-weight:400;letter-spacing:0.02em;transition:color 0.2s}
+.nav-l a:hover{color:var(--text)}
+.btn-nav{font-size:13px;font-weight:500;color:var(--bg);background:var(--text);padding:8px 20px;border-radius:100px;text-decoration:none;letter-spacing:0.01em;transition:all 0.3s var(--ease)}
+.btn-nav:hover{transform:translateY(-1px);box-shadow:0 8px 24px rgba(236,232,225,0.12)}
+
+/* ─── About hero ─── */
+.about-hero{padding:180px 0 100px}
+.about-label{font-family:var(--mono);font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:var(--text3);margin-bottom:28px}
+.about-hero h1{font-family:var(--serif);font-size:clamp(40px,5.5vw,68px);font-weight:300;letter-spacing:-0.02em;line-height:1.05;margin-bottom:48px;max-width:700px}
+.about-hero h1 em{font-style:italic;font-weight:400;color:var(--accent)}
+.about-body{max-width:620px}
+.about-body p{color:var(--text2);font-size:17px;line-height:1.85;font-weight:300;margin-bottom:28px}
+.about-body p strong{color:var(--text);font-weight:500}
+
+/* ─── Beliefs ─── */
+.beliefs{padding:80px 0 120px}
+.beliefs-label{font-family:var(--mono);font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:var(--text3);margin-bottom:48px}
+.belief-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--border);border-radius:20px;overflow:hidden;border:1px solid var(--border)}
+.belief-card{background:var(--bg2);padding:48px 36px;transition:background 0.4s}
+.belief-card:hover{background:var(--bg3)}
+.belief-card h3{font-family:var(--serif);font-size:24px;font-weight:400;letter-spacing:-0.01em;margin-bottom:16px;line-height:1.3}
+.belief-card p{color:var(--text2);font-size:14px;line-height:1.7;font-weight:300}
+
+/* ─── Contact ─── */
+.contact-section{padding:0 0 120px}
+.contact-section .label{font-family:var(--mono);font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:var(--text3);margin-bottom:16px}
+.contact-section a{color:var(--accent);text-decoration:none;font-size:18px;font-weight:300;transition:opacity 0.2s}
+.contact-section a:hover{opacity:0.7}
+
+/* ─── Divider ─── */
+.div-line{height:1px;background:var(--border)}
+
+/* ─── Footer ─── */
+footer{border-top:1px solid var(--border);padding:64px 0}
+.foot-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:48px}
+.foot-brand .foot-logo{font-family:var(--serif);font-size:18px;color:var(--text);opacity:0.4;margin-bottom:16px;display:block;text-decoration:none}
+.foot-brand p{font-size:13px;color:var(--text3);font-weight:300;line-height:1.7;max-width:240px}
+.foot-col h4{font-size:11px;font-family:var(--mono);letter-spacing:0.12em;text-transform:uppercase;color:var(--text3);margin-bottom:20px;font-weight:400}
+.foot-col ul{list-style:none;padding:0}
+.foot-col ul li{margin-bottom:12px}
+.foot-col ul a{color:var(--text2);text-decoration:none;font-size:13px;font-weight:300;transition:color 0.2s}
+.foot-col ul a:hover{color:var(--text)}
+.foot-bottom{margin-top:48px;padding-top:24px;border-top:1px solid var(--border);font-size:12px;color:var(--text3);font-weight:300}
+
+/* Responsive */
+@media(max-width:768px){
+  .about-hero{padding:140px 0 64px}
+  .belief-grid{grid-template-columns:1fr}
+  .foot-grid{grid-template-columns:1fr;gap:32px}
+  .nav-l{display:none}
+  .btn-nav{display:none}
+}
+</style>
+</head>
+<body>
+
+<header id="top-bar">
+<nav>
+  <div class="w nav-i">
+    <a href="/" class="logo">Déjà</a>
+    <ul class="nav-l">
+      <li><a href="/#features">Features</a></li>
+      <li><a href="/#use-cases">Use cases</a></li>
+      <li><a href="/#testimonials">Testimonials</a></li>
+      <li><a href="/#pricing">Pricing</a></li>
+      <li><a href="/faq">FAQ</a></li>
+    </ul>
+    <a href="/download" class="btn-nav">Get Started</a>
+  </div>
+</nav>
+</header>
+
+<section class="about-hero">
+  <div class="w">
+    <div class="about-label r">// About</div>
+    <h1 class="r" style="transition-delay:0.08s">From chatbot to <em>chief of staff</em></h1>
+    <div class="about-body">
+      <p class="r" style="transition-delay:0.16s">AI tools are remarkably powerful. But ask Claude to prep you for a meeting, and it has no idea who you're meeting, what you discussed last time, or what you promised to follow up on. The problem isn't the model — it's the context.</p>
+      <p class="r" style="transition-delay:0.24s"><strong>Déjà</strong> bridges that gap. It connects to your email, calendar, meetings, and messages, then builds a local knowledge base — a structured map of your people, projects, commitments, and conversations — that any AI tool can read.</p>
+      <p class="r" style="transition-delay:0.32s">No data leaves your machine. There's no cloud sync, no account to create, no new tab to keep open. Déjà runs quietly on your Mac, keeping your knowledge base current as signals arrive. The AI tools you already use — Claude, Cursor, ChatGPT, Copilot — simply become smarter because they finally know your world.</p>
+      <p class="r" style="transition-delay:0.40s">Built by <strong>David Wurtz</strong> in Scottsdale, AZ.</p>
+    </div>
+  </div>
+</section>
+
+<div class="w"><div class="div-line"></div></div>
+
+<section class="beliefs">
+  <div class="w">
+    <div class="beliefs-label r">What we believe</div>
+    <div class="belief-grid r" style="transition-delay:0.1s">
+      <div class="belief-card">
+        <h3>Your data is yours</h3>
+        <p>Everything lives on your machine. Nothing is uploaded, nothing is shared, nothing leaves your disk. Export it, back it up, or delete it anytime.</p>
+      </div>
+      <div class="belief-card">
+        <h3>AI should know you</h3>
+        <p>Context is what makes AI useful — not bigger models or fancier prompts. Give any model the right context and it becomes genuinely helpful.</p>
+      </div>
+      <div class="belief-card">
+        <h3>Set up once</h3>
+        <p>Connect your accounts, let Déjà catch up on your history, and forget about it. It works in the background, keeping your knowledge base current — forever.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="contact-section">
+  <div class="w">
+    <div class="label r">Get in touch</div>
+    <a href="mailto:david@trydeja.com" class="r" style="transition-delay:0.08s;display:inline-block">david@trydeja.com</a>
+  </div>
+</section>
+
+<footer>
+  <div class="w">
+    <div class="foot-grid">
+      <div class="foot-brand">
+        <a href="/" class="foot-logo">Déjà</a>
+        <p>Feed your work into the AI tools you already use. Local, private, always up to date.</p>
+      </div>
+      <div class="foot-col">
+        <h4>Product</h4>
+        <ul>
+          <li><a href="/#features">Features</a></li>
+          <li><a href="/#use-cases">Use cases</a></li>
+          <li><a href="/#pricing">Pricing</a></li>
+          <li><a href="/faq">FAQ</a></li>
+          <li><a href="/download">Download</a></li>
+        </ul>
+      </div>
+      <div class="foot-col">
+        <h4>Company</h4>
+        <ul>
+          <li><a href="/about">About</a></li>
+          <li><a href="/privacy">Privacy</a></li>
+          <li><a href="/changelog">Changelog</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="foot-bottom">macOS 14+ &middot; Apple Silicon &amp; Intel</div>
+  </div>
+</footer>
+
+<script>
+// Reveal on scroll
+const obs = new IntersectionObserver((entries) => {
+  entries.forEach(e => { if (e.isIntersecting) { e.target.classList.add('v'); obs.unobserve(e.target); } });
+}, { threshold: 0.15 });
+document.querySelectorAll('.r').forEach(el => obs.observe(el));
+
+// Nav scroll state
+const nav = document.querySelector('nav');
+window.addEventListener('scroll', () => {
+  nav.classList.toggle('scrolled', window.scrollY > 40);
+});
+</script>
+
+</body>
+</html>

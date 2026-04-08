@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FAQ — Déjà</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;1,300;1,400;1,500&family=DM+Mono:wght@300;400&family=Inter:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+
+:root{
+  --bg:#050507;
+  --bg2:#0a0a0f;
+  --bg3:#101018;
+  --border:rgba(255,255,255,0.06);
+  --border-b:rgba(255,255,255,0.10);
+  --text:#ece8e1;
+  --text2:rgba(255,255,255,0.50);
+  --text3:rgba(255,255,255,0.22);
+  --accent:#8ab4d4;
+  --serif:'Cormorant Garamond',Georgia,serif;
+  --sans:'Inter',system-ui,sans-serif;
+  --mono:'DM Mono',monospace;
+  --ease:cubic-bezier(0.16,1,0.3,1);
+}
+
+html{scroll-behavior:smooth}
+body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:16px;line-height:1.6;-webkit-font-smoothing:antialiased;min-height:100vh}
+
+/* Noise */
+body::after{content:'';position:fixed;inset:0;background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 512 512' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");pointer-events:none;z-index:50}
+
+/* Layout */
+.w{max-width:1100px;margin:0 auto;padding:0 32px;position:relative;z-index:1}
+
+/* Reveal */
+.r{opacity:0;transform:translateY(20px);transition:opacity 0.9s var(--ease),transform 0.9s var(--ease)}
+.r.v{opacity:1;transform:translateY(0)}
+
+/* ─── Nav ─── */
+#top-bar{position:fixed;top:0;left:0;right:0;z-index:200}
+nav{padding:20px 0;background:rgba(5,5,7,0.8);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border-bottom:1px solid transparent;transition:all 0.3s ease}
+nav.scrolled{background:rgba(5,5,7,0.95);padding:14px 0;border-bottom-color:var(--border)}
+.nav-i{display:flex;align-items:center;justify-content:space-between;position:relative}
+.logo{display:flex;align-items:center;text-decoration:none}
+.logo-svg{height:36px;width:auto}
+.nav-l{display:flex;gap:36px;list-style:none}
+.nav-l a{color:var(--text2);text-decoration:none;font-size:13px;font-weight:400;letter-spacing:0.02em;transition:color 0.2s}
+.nav-l a:hover,.nav-l a.active{color:var(--text)}
+.btn-nav{font-size:13px;font-weight:500;color:var(--bg);background:var(--text);padding:8px 20px;border-radius:100px;text-decoration:none;letter-spacing:0.01em;transition:all 0.3s var(--ease)}
+.btn-nav:hover{transform:translateY(-1px);box-shadow:0 8px 24px rgba(236,232,225,0.12)}
+
+/* ─── Hero ─── */
+.faq-hero{padding:180px 0 80px;text-align:center}
+.faq-hero .label{font-family:var(--mono);font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:var(--text3);margin-bottom:24px}
+.faq-hero h1{font-family:var(--serif);font-size:clamp(40px,6vw,64px);font-weight:300;letter-spacing:-0.02em}
+
+/* ─── FAQ Grid ─── */
+.faq-section{padding:0 0 120px}
+.faq-grid{display:grid;grid-template-columns:1fr 1fr;gap:0 48px}
+
+.faq-category{
+  font-family:var(--mono);
+  font-size:10px;
+  letter-spacing:0.14em;
+  text-transform:uppercase;
+  color:var(--text3);
+  padding:32px 0 16px;
+  border-bottom:1px solid var(--border);
+  grid-column:1 / -1;
+}
+
+.faq-item{border-bottom:1px solid var(--border)}
+.faq-q{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding:24px 0;
+  cursor:pointer;
+  gap:16px;
+  -webkit-user-select:none;
+  user-select:none;
+}
+.faq-q h3{
+  font-family:var(--sans);
+  font-size:15px;
+  font-weight:400;
+  color:var(--text);
+  line-height:1.5;
+}
+.faq-q .icon{
+  width:20px;
+  height:20px;
+  flex-shrink:0;
+  position:relative;
+  transition:transform 0.35s var(--ease);
+}
+.faq-q .icon::before,
+.faq-q .icon::after{
+  content:'';
+  position:absolute;
+  background:var(--text2);
+  border-radius:1px;
+  transition:transform 0.35s var(--ease), opacity 0.35s var(--ease);
+}
+.faq-q .icon::before{
+  width:12px;height:1px;
+  top:50%;left:50%;
+  transform:translate(-50%,-50%);
+}
+.faq-q .icon::after{
+  width:1px;height:12px;
+  top:50%;left:50%;
+  transform:translate(-50%,-50%);
+}
+.faq-item.open .faq-q .icon{transform:rotate(45deg)}
+.faq-item.open .faq-q .icon::before{background:var(--text)}
+.faq-item.open .faq-q .icon::after{background:var(--text)}
+
+.faq-a{
+  max-height:0;
+  overflow:hidden;
+  transition:max-height 0.45s var(--ease), opacity 0.35s ease;
+  opacity:0;
+}
+.faq-item.open .faq-a{
+  max-height:300px;
+  opacity:1;
+}
+.faq-a p{
+  font-size:14px;
+  color:var(--text2);
+  line-height:1.8;
+  font-weight:300;
+  padding:0 0 24px;
+  max-width:520px;
+}
+
+/* ─── Footer ─── */
+footer{border-top:1px solid var(--border);padding:64px 0}
+.foot-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:48px}
+.foot-brand svg{height:16px;width:auto;opacity:0.4;margin-bottom:16px;display:block}
+.foot-brand p{font-size:13px;color:var(--text3);font-weight:300;line-height:1.7;max-width:240px}
+.foot-col h4{font-size:11px;font-family:var(--mono);letter-spacing:0.12em;text-transform:uppercase;color:var(--text3);margin-bottom:20px;font-weight:400}
+.foot-col ul{list-style:none;padding:0}
+.foot-col ul li{margin-bottom:12px}
+.foot-col ul a{color:var(--text2);text-decoration:none;font-size:13px;font-weight:300;transition:color 0.2s}
+.foot-col ul a:hover{color:var(--text)}
+.foot-bottom{margin-top:48px;padding-top:24px;border-top:1px solid var(--border);font-size:12px;color:var(--text3);font-weight:300}
+
+/* Responsive */
+@media(max-width:768px){
+  .faq-grid{grid-template-columns:1fr}
+  .nav-l{display:none}
+  .btn-nav{display:none}
+  .foot-grid{grid-template-columns:1fr;gap:32px}
+  .faq-hero{padding:140px 0 60px}
+}
+</style>
+</head>
+<body>
+
+<header id="top-bar">
+<nav>
+  <div class="w nav-i">
+    <a href="/" class="logo">
+      <svg class="logo-svg" viewBox="4350 5050 3150 1900" xmlns="http://www.w3.org/2000/svg"><g transform="translate(0,12000) scale(1,-1)" fill="#ffffff"><path d="M6216 6740 c-39 -31 -42 -42 -21 -88 45 -98 184 -49 157 55 -15 63 -80 79 -136 33z"/><path d="M4524 6666 c5 -47 18 -57 93 -72 416 -82 402 -753 -18 -824 -71 -12 -79 -19 -79 -74 0 -59 1 -59 85 -45 506 84 610 789 151 1017 -145 72 -241 71 -232 -2z"/><path d="M6220 5944 c0 -495 -11 -564 -91 -564 -19 0 -29 -21 -29 -60 0 -69 30 -76 118 -31 111 57 122 117 122 649 l0 482 -60 0 -60 0 0 -476z"/><path d="M5400 6360 c-119 -64 -170 -163 -170 -330 0 -324 329 -496 592 -308 l62 43 -42 42 c-35 35 -48 38 -77 18 -119 -85 -259 -81 -347 9 -121 123 -102 135 219 142 l288 5 -9 108 c-21 251 -291 393 -516 271z m345 -139 c109 -122 86 -141 -175 -141 -249 0 -252 2 -184 102 92 136 256 154 359 39z"/><path d="M6745 6361 c-91 -42 -99 -55 -60 -108 23 -32 30 -31 105 8 145 76 310 16 310 -113 0 -46 -5 -48 -151 -48 -190 0 -278 -35 -322 -128 -125 -261 282 -444 519 -233 80 72 108 398 45 519 -71 137 -269 183 -446 103z m355 -432 c0 -143 -190 -226 -316 -138 -128 90 -25 209 180 209 l136 0 0 -71z"/></g><path d="M 4520 5530 A 280 280 0 0 1 4520 6090" fill="none" stroke="#ffffff" stroke-width="90" stroke-linecap="round"/></svg>
+    </a>
+    <ul class="nav-l">
+      <li><a href="/#features">Features</a></li>
+      <li><a href="/#use-cases">Use cases</a></li>
+      <li><a href="/#testimonials">Testimonials</a></li>
+      <li><a href="/#pricing">Pricing</a></li>
+      <li><a href="/faq" class="active">FAQ</a></li>
+    </ul>
+    <a href="/download" class="btn-nav">Get Started</a>
+  </div>
+</nav>
+</header>
+
+<section class="faq-hero">
+  <div class="w">
+    <div class="label r">// FAQ</div>
+    <h1 class="r" style="transition-delay:0.1s">Common questions</h1>
+  </div>
+</section>
+
+<section class="faq-section">
+  <div class="w">
+    <div class="faq-grid">
+
+      <!-- General -->
+      <div class="faq-category r">General</div>
+
+      <div class="faq-item r">
+        <div class="faq-q"><h3>What is Déjà?</h3><span class="icon"></span></div>
+        <div class="faq-a"><p>Déjà feeds your email, calendar, messages, and meetings into Claude, Cursor, and the AI tools you already use. It builds a local knowledge base of your people, projects, and commitments.</p></div>
+      </div>
+
+      <div class="faq-item r">
+        <div class="faq-q"><h3>Who is Déjà for?</h3><span class="icon"></span></div>
+        <div class="faq-a"><p>Anyone who uses AI tools and wants them to have full context about their work. Developers, founders, PMs, and teams.</p></div>
+      </div>
+
+      <div class="faq-item r">
+        <div class="faq-q"><h3>What AI tools does it work with?</h3><span class="icon"></span></div>
+        <div class="faq-a"><p>Claude, Cursor, Windsurf, ChatGPT, GitHub Copilot. Any tool that supports MCP or can read local files.</p></div>
+      </div>
+
+      <div class="faq-item r">
+        <div class="faq-q"><h3>What platforms does it support?</h3><span class="icon"></span></div>
+        <div class="faq-a"><p>macOS 14+ (Sonoma and later), Apple Silicon and Intel.</p></div>
+      </div>
+
+      <!-- Privacy & Data -->
+      <div class="faq-category r">Privacy &amp; Data</div>
+
+      <div class="faq-item r">
+        <div class="faq-q"><h3>Where does my data go?</h3><span class="icon"></span></div>
+        <div class="faq-a"><p>Everything stays on your machine. Your knowledge base is a local folder you can open, back up, or delete anytime. Nothing is sent to a server.</p></div>
+      </div>
+
+      <div class="faq-item r">
+        <div class="faq-q"><h3>Does Déjà read my emails?</h3><span class="icon"></span></div>
+        <div class="faq-a"><p>Déjà syncs your Gmail metadata and content to build your local knowledge base. The data never leaves your machine.</p></div>
+      </div>
+
+      <div class="faq-item r">
+        <div class="faq-q"><h3>Can I delete my data?</h3><span class="icon"></span></div>
+        <div class="faq-a"><p>Yes. Your knowledge base is a regular folder on your Mac. Delete it anytime.</p></div>
+      </div>
+
+      <!-- Setup -->
+      <div class="faq-category r">Setup</div>
+
+      <div class="faq-item r">
+        <div class="faq-q"><h3>How long does setup take?</h3><span class="icon"></span></div>
+        <div class="faq-a"><p>About 5 minutes. Download, sign in with Google, and Déjà catches up on your recent history.</p></div>
+      </div>
+
+      <div class="faq-item r">
+        <div class="faq-q"><h3>What does the onboarding process look like?</h3><span class="icon"></span></div>
+        <div class="faq-a"><p>On first launch, Déjà ingests your recent email, calendar, and contacts. It builds a knowledge base of your people, projects, and commitments.</p></div>
+      </div>
+
+      <div class="faq-item r">
+        <div class="faq-q"><h3>Do I need to configure anything?</h3><span class="icon"></span></div>
+        <div class="faq-a"><p>Déjà works out of the box with Claude and Cursor. For other tools, you point them at your local knowledge base folder.</p></div>
+      </div>
+
+      <!-- Pricing -->
+      <div class="faq-category r">Pricing</div>
+
+      <div class="faq-item r">
+        <div class="faq-q"><h3>Is it free?</h3><span class="icon"></span></div>
+        <div class="faq-a"><p>Yes, Déjà is free during the beta.</p></div>
+      </div>
+
+      <div class="faq-item r">
+        <div class="faq-q"><h3>Will there be paid plans?</h3><span class="icon"></span></div>
+        <div class="faq-a"><p>Yes. We plan to offer Pro and Enterprise tiers with additional integrations and team features.</p></div>
+      </div>
+
+      <div class="faq-item r">
+        <div class="faq-q"><h3>How do I sign up for the beta?</h3><span class="icon"></span></div>
+        <div class="faq-a"><p>Download the app from our <a href="/download" style="color:var(--accent);text-decoration:none;border-bottom:1px solid rgba(138,180,212,0.3)">download page</a>. No waitlist.</p></div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="w">
+    <div class="foot-grid">
+      <div class="foot-brand">
+        <svg viewBox="4350 5050 3150 1900" xmlns="http://www.w3.org/2000/svg"><g transform="translate(0,12000) scale(1,-1)" fill="#ffffff"><path d="M6216 6740 c-39 -31 -42 -42 -21 -88 45 -98 184 -49 157 55 -15 63 -80 79 -136 33z"/><path d="M4524 6666 c5 -47 18 -57 93 -72 416 -82 402 -753 -18 -824 -71 -12 -79 -19 -79 -74 0 -59 1 -59 85 -45 506 84 610 789 151 1017 -145 72 -241 71 -232 -2z"/><path d="M6220 5944 c0 -495 -11 -564 -91 -564 -19 0 -29 -21 -29 -60 0 -69 30 -76 118 -31 111 57 122 117 122 649 l0 482 -60 0 -60 0 0 -476z"/><path d="M5400 6360 c-119 -64 -170 -163 -170 -330 0 -324 329 -496 592 -308 l62 43 -42 42 c-35 35 -48 38 -77 18 -119 -85 -259 -81 -347 9 -121 123 -102 135 219 142 l288 5 -9 108 c-21 251 -291 393 -516 271z m345 -139 c109 -122 86 -141 -175 -141 -249 0 -252 2 -184 102 92 136 256 154 359 39z"/><path d="M6745 6361 c-91 -42 -99 -55 -60 -108 23 -32 30 -31 105 8 145 76 310 16 310 -113 0 -46 -5 -48 -151 -48 -190 0 -278 -35 -322 -128 -125 -261 282 -444 519 -233 80 72 108 398 45 519 -71 137 -269 183 -446 103z m355 -432 c0 -143 -190 -226 -316 -138 -128 90 -25 209 180 209 l136 0 0 -71z"/></g><path d="M 4520 5530 A 280 280 0 0 1 4520 6090" fill="none" stroke="#ffffff" stroke-width="90" stroke-linecap="round"/></svg>
+        <p>Feed your work into the AI tools you already use. Local, private, always up to date.</p>
+      </div>
+      <div class="foot-col">
+        <h4>Product</h4>
+        <ul>
+          <li><a href="/#features">Features</a></li>
+          <li><a href="/#use-cases">Use cases</a></li>
+          <li><a href="/#pricing">Pricing</a></li>
+          <li><a href="/faq">FAQ</a></li>
+          <li><a href="/download">Download</a></li>
+        </ul>
+      </div>
+      <div class="foot-col">
+        <h4>Company</h4>
+        <ul>
+          <li><a href="/about">About</a></li>
+          <li><a href="/privacy">Privacy</a></li>
+          <li><a href="/changelog">Changelog</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="foot-bottom">macOS 14+ &middot; Apple Silicon &amp; Intel</div>
+  </div>
+</footer>
+
+<script>
+// ─── Reveal on scroll/load ───
+const obs = new IntersectionObserver((entries) => {
+  entries.forEach(e => { if (e.isIntersecting) { e.target.classList.add('v'); obs.unobserve(e.target); } });
+}, { threshold: 0.1 });
+document.querySelectorAll('.r').forEach(el => obs.observe(el));
+
+// ─── FAQ toggle ───
+document.querySelectorAll('.faq-q').forEach(q => {
+  q.addEventListener('click', () => {
+    const item = q.parentElement;
+    const wasOpen = item.classList.contains('open');
+    // Close all others (optional — remove these two lines for multi-open)
+    // document.querySelectorAll('.faq-item.open').forEach(i => i.classList.remove('open'));
+    if (wasOpen) {
+      item.classList.remove('open');
+    } else {
+      item.classList.add('open');
+    }
+  });
+});
+
+// ─── Nav scroll state ───
+const nav = document.querySelector('nav');
+window.addEventListener('scroll', () => {
+  if (window.scrollY > 80) nav.classList.add('scrolled');
+  else nav.classList.remove('scrolled');
+});
+</script>
+</body>
+</html>

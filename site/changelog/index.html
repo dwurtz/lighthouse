@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Changelog — Déjà</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;1,300;1,400&family=DM+Mono:wght@300;400&family=Inter:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+
+:root{
+  --bg:#050507;
+  --bg2:#0a0a0f;
+  --bg3:#101018;
+  --border:rgba(255,255,255,0.06);
+  --border-b:rgba(255,255,255,0.10);
+  --text:#ece8e1;
+  --text2:rgba(255,255,255,0.50);
+  --text3:rgba(255,255,255,0.22);
+  --accent:#8ab4d4;
+  --serif:'Cormorant Garamond',Georgia,serif;
+  --sans:'Inter',system-ui,sans-serif;
+  --mono:'DM Mono',monospace;
+  --ease:cubic-bezier(0.16,1,0.3,1);
+}
+
+html{scroll-behavior:smooth}
+body{
+  background:var(--bg);color:var(--text);
+  font-family:var(--sans);font-size:16px;line-height:1.6;
+  -webkit-font-smoothing:antialiased;
+  min-height:100vh;
+}
+
+/* Noise */
+body::after{content:'';position:fixed;inset:0;background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 512 512' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");pointer-events:none;z-index:50}
+
+.w{max-width:1100px;margin:0 auto;padding:0 32px;position:relative;z-index:1}
+
+/* Reveal animation */
+.r{opacity:0;transform:translateY(20px);transition:opacity 0.9s var(--ease),transform 0.9s var(--ease)}
+.r.v{opacity:1;transform:translateY(0)}
+
+/* ─── Nav ─── */
+nav{
+  padding:20px 0;
+  background:rgba(5,5,7,0.8);
+  backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);
+  border-bottom:1px solid var(--border);
+  position:fixed;top:0;left:0;right:0;z-index:200;
+}
+.nav-i{display:flex;align-items:center;justify-content:space-between}
+.logo{display:flex;align-items:center;text-decoration:none}
+.logo-t{font-family:var(--serif);font-size:22px;font-weight:400;color:var(--text);letter-spacing:-0.01em}
+.nav-l{display:flex;gap:36px;list-style:none}
+.nav-l a{color:var(--text2);text-decoration:none;font-size:13px;font-weight:400;letter-spacing:0.02em;transition:color 0.2s}
+.nav-l a:hover{color:var(--text)}
+.btn-nav{font-size:13px;font-weight:500;color:var(--bg);background:var(--text);padding:8px 20px;border-radius:100px;text-decoration:none;letter-spacing:0.01em;transition:all 0.3s var(--ease)}
+.btn-nav:hover{transform:translateY(-1px);box-shadow:0 8px 24px rgba(236,232,225,0.12)}
+
+/* ─── Header ─── */
+.cl-header{
+  padding:160px 0 64px;
+}
+.cl-label{
+  font-family:var(--mono);font-size:11px;letter-spacing:0.14em;
+  text-transform:uppercase;color:var(--text3);margin-bottom:24px;
+}
+.cl-header h1{
+  font-family:var(--serif);
+  font-size:clamp(48px,6vw,72px);
+  font-weight:300;
+  letter-spacing:-0.02em;
+}
+
+/* ─── Timeline ─── */
+.timeline{
+  padding:0 0 100px;
+}
+.tl-entry{
+  display:grid;
+  grid-template-columns:200px 1fr;
+  gap:0;
+  position:relative;
+  min-height:120px;
+}
+.tl-entry + .tl-entry{margin-top:0}
+
+/* Date column */
+.tl-date{
+  font-family:var(--mono);
+  font-size:13px;
+  color:var(--text3);
+  padding:32px 40px 32px 0;
+  text-align:right;
+  position:relative;
+  letter-spacing:0.02em;
+  font-weight:300;
+}
+
+/* Vertical line + dot */
+.tl-content{
+  padding:32px 0 48px 40px;
+  border-left:1px solid var(--border);
+  position:relative;
+}
+.tl-content::before{
+  content:'';
+  position:absolute;
+  left:-4px;top:38px;
+  width:7px;height:7px;
+  border-radius:50%;
+  background:var(--accent);
+  box-shadow:0 0 12px rgba(138,180,212,0.3);
+}
+
+/* First entry gets a brighter dot */
+.tl-entry:first-child .tl-content::before{
+  background:var(--accent);
+  box-shadow:0 0 20px rgba(138,180,212,0.4);
+}
+
+.tl-tag{
+  display:inline-block;
+  font-family:var(--mono);
+  font-size:11px;
+  letter-spacing:0.06em;
+  color:var(--accent);
+  background:rgba(138,180,212,0.08);
+  border:1px solid rgba(138,180,212,0.12);
+  padding:4px 12px;
+  border-radius:100px;
+  margin-bottom:20px;
+}
+
+.tl-content ul{
+  list-style:none;
+  padding:0;
+}
+.tl-content ul li{
+  font-size:14px;
+  color:var(--text2);
+  font-weight:300;
+  line-height:1.8;
+  padding-left:20px;
+  position:relative;
+}
+.tl-content ul li::before{
+  content:'';
+  position:absolute;
+  left:0;top:11px;
+  width:5px;height:1px;
+  background:var(--text3);
+}
+
+/* ─── Footer ─── */
+footer{border-top:1px solid var(--border);padding:64px 0}
+.foot-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:48px}
+.foot-brand svg{height:16px;width:auto;opacity:0.4;margin-bottom:16px;display:block}
+.foot-brand p{font-size:13px;color:var(--text3);font-weight:300;line-height:1.7;max-width:240px}
+.foot-col h4{font-size:11px;font-family:var(--mono);letter-spacing:0.12em;text-transform:uppercase;color:var(--text3);margin-bottom:20px;font-weight:400}
+.foot-col ul{list-style:none;padding:0}
+.foot-col ul li{margin-bottom:12px}
+.foot-col ul a{color:var(--text2);text-decoration:none;font-size:13px;font-weight:300;transition:color 0.2s}
+.foot-col ul a:hover{color:var(--text)}
+.foot-bottom{margin-top:48px;padding-top:24px;border-top:1px solid var(--border);font-size:12px;color:var(--text3);font-weight:300}
+
+/* ─── Responsive ─── */
+@media(max-width:768px){
+  .tl-entry{grid-template-columns:1fr;gap:0}
+  .tl-date{text-align:left;padding:24px 0 0 24px}
+  .tl-content{margin-left:0;padding-left:24px}
+  .tl-content::before{left:-4px}
+  .nav-l{display:none}
+  .btn-nav{display:none}
+  .foot-grid{grid-template-columns:1fr;gap:32px}
+  .cl-header h1{font-size:40px}
+}
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="w nav-i">
+    <a href="/" class="logo">
+      <span class="logo-t">Déjà</span>
+    </a>
+    <ul class="nav-l">
+      <li><a href="/#features">Features</a></li>
+      <li><a href="/#use-cases">Use cases</a></li>
+      <li><a href="/#testimonials">Testimonials</a></li>
+      <li><a href="/#pricing">Pricing</a></li>
+      <li><a href="/faq">FAQ</a></li>
+    </ul>
+    <a href="/download" class="btn-nav">Get Started</a>
+  </div>
+</nav>
+
+<section class="cl-header">
+  <div class="w">
+    <div class="cl-label r">// Changelog</div>
+    <h1 class="r" style="transition-delay:0.1s">What's new</h1>
+  </div>
+</section>
+
+<section class="timeline">
+  <div class="w">
+
+    <div class="tl-entry r">
+      <div class="tl-date">April 2026</div>
+      <div class="tl-content">
+        <div class="tl-tag">v0.4</div>
+        <ul>
+          <li>Notch-based UI with persistent chat</li>
+          <li>Meeting transcription via Granola and system audio</li>
+          <li>Improved contact enrichment and alias resolution</li>
+          <li>Wiki reflection and stale-fact cleanup</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="tl-entry r">
+      <div class="tl-date">March 2026</div>
+      <div class="tl-content">
+        <div class="tl-tag">v0.3</div>
+        <ul>
+          <li>MCP server for Claude and Cursor</li>
+          <li>Onboarding pipeline with 30-day email backfill</li>
+          <li>Commitment and goal extraction from signals</li>
+          <li>Project tracking from email and calendar</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="tl-entry r">
+      <div class="tl-date">February 2026</div>
+      <div class="tl-content">
+        <div class="tl-tag">v0.2</div>
+        <ul>
+          <li>Gmail and Calendar sync</li>
+          <li>Contact extraction and people profiles</li>
+          <li>Local knowledge base (Markdown wiki)</li>
+          <li>Setup wizard</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="tl-entry r">
+      <div class="tl-date">January 2026</div>
+      <div class="tl-content">
+        <div class="tl-tag">v0.1</div>
+        <ul>
+          <li>Initial beta release</li>
+          <li>Basic email ingestion</li>
+          <li>Local-first architecture</li>
+        </ul>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<footer>
+  <div class="w">
+    <div class="foot-grid">
+      <div class="foot-brand">
+        <svg viewBox="4350 5050 3150 1900" xmlns="http://www.w3.org/2000/svg"><g transform="translate(0,12000) scale(1,-1)" fill="#ffffff"><path d="M6216 6740 c-39 -31 -42 -42 -21 -88 45 -98 184 -49 157 55 -15 63 -80 79 -136 33z"/><path d="M4524 6666 c5 -47 18 -57 93 -72 416 -82 402 -753 -18 -824 -71 -12 -79 -19 -79 -74 0 -59 1 -59 85 -45 506 84 610 789 151 1017 -145 72 -241 71 -232 -2z"/><path d="M6220 5944 c0 -495 -11 -564 -91 -564 -19 0 -29 -21 -29 -60 0 -69 30 -76 118 -31 111 57 122 117 122 649 l0 482 -60 0 -60 0 0 -476z"/><path d="M5400 6360 c-119 -64 -170 -163 -170 -330 0 -324 329 -496 592 -308 l62 43 -42 42 c-35 35 -48 38 -77 18 -119 -85 -259 -81 -347 9 -121 123 -102 135 219 142 l288 5 -9 108 c-21 251 -291 393 -516 271z m345 -139 c109 -122 86 -141 -175 -141 -249 0 -252 2 -184 102 92 136 256 154 359 39z"/><path d="M6745 6361 c-91 -42 -99 -55 -60 -108 23 -32 30 -31 105 8 145 76 310 16 310 -113 0 -46 -5 -48 -151 -48 -190 0 -278 -35 -322 -128 -125 -261 282 -444 519 -233 80 72 108 398 45 519 -71 137 -269 183 -446 103z m355 -432 c0 -143 -190 -226 -316 -138 -128 90 -25 209 180 209 l136 0 0 -71z"/></g><path d="M 4520 5530 A 280 280 0 0 1 4520 6090" fill="none" stroke="#ffffff" stroke-width="90" stroke-linecap="round"/></svg>
+        <p>Feed your work into the AI tools you already use. Local, private, always up to date.</p>
+      </div>
+      <div class="foot-col">
+        <h4>Product</h4>
+        <ul>
+          <li><a href="/#features">Features</a></li>
+          <li><a href="/#use-cases">Use cases</a></li>
+          <li><a href="/#pricing">Pricing</a></li>
+          <li><a href="/faq">FAQ</a></li>
+          <li><a href="/download">Download</a></li>
+        </ul>
+      </div>
+      <div class="foot-col">
+        <h4>Company</h4>
+        <ul>
+          <li><a href="/about">About</a></li>
+          <li><a href="/privacy">Privacy</a></li>
+          <li><a href="/changelog">Changelog</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="foot-bottom">macOS 14+ &middot; Apple Silicon &amp; Intel</div>
+  </div>
+</footer>
+
+<script>
+// Reveal on scroll
+const obs = new IntersectionObserver((entries) => {
+  entries.forEach(e => {
+    if (e.isIntersecting) {
+      e.target.classList.add('v');
+      obs.unobserve(e.target);
+    }
+  });
+}, { threshold: 0.1, rootMargin: '0px 0px -40px 0px' });
+
+document.querySelectorAll('.r').forEach(el => obs.observe(el));
+
+// Stagger timeline entries
+document.querySelectorAll('.tl-entry.r').forEach((el, i) => {
+  el.style.transitionDelay = (0.15 * i) + 's';
+});
+</script>
+
+</body>
+</html>

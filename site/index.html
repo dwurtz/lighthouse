@@ -70,6 +70,8 @@ nav.scrolled{background:rgba(5,5,7,0.95);padding:14px 0;border-bottom-color:var(
 .nav-l{display:flex;gap:36px;list-style:none}
 .nav-l a{color:var(--text2);text-decoration:none;font-size:13px;font-weight:400;letter-spacing:0.02em;transition:color 0.2s}
 .nav-l a:hover{color:var(--text)}
+.btn-nav{font-size:13px;font-weight:500;color:var(--bg);background:var(--text);padding:8px 20px;border-radius:100px;text-decoration:none;letter-spacing:0.01em;transition:all 0.3s var(--ease)}
+.btn-nav:hover{transform:translateY(-1px);box-shadow:0 8px 24px rgba(236,232,225,0.12)}
 
 /* ─── Hero ─── */
 .hero{padding:120px 0 80px}
@@ -171,12 +173,63 @@ nav.scrolled{background:rgba(5,5,7,0.95);padding:14px 0;border-bottom-color:var(
 .inst h2 em{font-style:italic;font-weight:400}
 .inst>div>p{color:var(--text2);font-size:16px;margin-bottom:48px;font-weight:300}
 
+/* ─── Use cases ─── */
+.use-cases{text-align:center}
+.use-cases .label{font-family:var(--mono);font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:var(--text3);margin-bottom:24px}
+.use-cases h2{font-family:var(--serif);font-size:clamp(36px,5vw,52px);font-weight:300;margin-bottom:80px;letter-spacing:-0.01em}
+.uc-grid{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--border);border-radius:20px;overflow:hidden;border:1px solid var(--border)}
+.uc-card{background:var(--bg2);padding:48px 40px;text-align:left;transition:background 0.4s}
+.uc-card:hover{background:var(--bg3)}
+.uc-icon{font-size:28px;margin-bottom:20px;opacity:0.7}
+.uc-card h3{font-family:var(--serif);font-size:22px;font-weight:400;letter-spacing:-0.01em;margin-bottom:14px;line-height:1.3}
+.uc-card p{color:var(--text2);font-size:14px;line-height:1.7;font-weight:300}
+
+/* ─── Testimonials ─── */
+.testimonials{text-align:center}
+.testimonials .label{font-family:var(--mono);font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:var(--text3);margin-bottom:24px}
+.testimonials h2{font-family:var(--serif);font-size:clamp(36px,5vw,52px);font-weight:300;margin-bottom:80px;letter-spacing:-0.01em}
+.test-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--border);border-radius:20px;overflow:hidden;border:1px solid var(--border)}
+.test-card{background:var(--bg2);padding:36px 32px;text-align:left;transition:background 0.4s}
+.test-card:hover{background:var(--bg3)}
+.test-card blockquote{font-size:15px;line-height:1.7;font-weight:300;color:var(--text);margin-bottom:24px;font-style:normal}
+.test-who{display:flex;align-items:center;gap:12px}
+.test-avatar{width:36px;height:36px;border-radius:50%;background:var(--bg3);border:1px solid var(--border-b);display:flex;align-items:center;justify-content:center;font-family:var(--serif);font-size:16px;color:var(--text2);font-weight:400}
+.test-name{font-size:13px;font-weight:500;color:var(--text)}
+.test-title{font-size:12px;color:var(--text3);font-weight:300}
+
+/* ─── Pricing ─── */
+.pricing{text-align:center}
+.pricing .label{font-family:var(--mono);font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:var(--text3);margin-bottom:24px}
+.pricing h2{font-family:var(--serif);font-size:clamp(36px,5vw,52px);font-weight:300;margin-bottom:20px;letter-spacing:-0.01em}
+.pricing>div>p.pricing-sub{color:var(--text2);font-size:16px;font-weight:300;margin-bottom:64px}
+.price-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--border);border-radius:20px;overflow:hidden;border:1px solid var(--border);text-align:left}
+.price-card{background:var(--bg2);padding:40px 36px;transition:background 0.4s}
+.price-card:hover{background:var(--bg3)}
+.price-card.featured{background:var(--bg3)}
+.price-tier{font-size:14px;font-weight:500;color:var(--text);margin-bottom:8px}
+.price-badge{display:inline-block;font-family:var(--mono);font-size:10px;letter-spacing:0.08em;text-transform:uppercase;color:var(--accent);border:1px solid rgba(138,180,212,0.3);padding:2px 8px;border-radius:100px;margin-left:8px;vertical-align:middle}
+.price-amount{font-family:var(--serif);font-size:48px;font-weight:300;letter-spacing:-0.02em;margin-bottom:4px}
+.price-period{font-size:13px;color:var(--text3);font-weight:300;margin-bottom:24px}
+.price-btn{display:inline-block;padding:12px 28px;font-size:13px;font-weight:500;border-radius:100px;text-decoration:none;transition:all 0.3s var(--ease);letter-spacing:0.01em;margin-bottom:32px}
+.price-btn-p{background:var(--text);color:var(--bg)}
+.price-btn-p:hover{transform:translateY(-2px);box-shadow:0 12px 40px rgba(236,232,225,0.15)}
+.price-btn-s{background:transparent;color:var(--text2);border:1px solid var(--border-b)}
+.price-btn-s:hover{border-color:var(--text2);color:var(--text)}
+.price-features{list-style:none;padding:0}
+.price-features li{font-size:13px;color:var(--text2);font-weight:300;padding:8px 0;border-top:1px solid var(--border);display:flex;align-items:center;gap:8px}
+.price-features li svg{width:14px;height:14px;stroke:var(--text3);stroke-width:2;fill:none;flex-shrink:0}
+
 /* ─── Footer ─── */
-footer{border-top:1px solid var(--border);padding:48px 0}
-.foot{display:flex;justify-content:space-between;align-items:center}
-.foot-l{display:flex;align-items:center;gap:12px}
-.foot-l svg{height:16px;width:auto;opacity:0.4}
-.foot-r{font-size:12px;color:var(--text3);font-weight:300}
+footer{border-top:1px solid var(--border);padding:64px 0;scroll-snap-align:end}
+.foot-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:48px}
+.foot-brand svg{height:16px;width:auto;opacity:0.4;margin-bottom:16px;display:block}
+.foot-brand p{font-size:13px;color:var(--text3);font-weight:300;line-height:1.7;max-width:240px}
+.foot-col h4{font-size:11px;font-family:var(--mono);letter-spacing:0.12em;text-transform:uppercase;color:var(--text3);margin-bottom:20px;font-weight:400}
+.foot-col ul{list-style:none;padding:0}
+.foot-col ul li{margin-bottom:12px}
+.foot-col ul a{color:var(--text2);text-decoration:none;font-size:13px;font-weight:300;transition:color 0.2s}
+.foot-col ul a:hover{color:var(--text)}
+.foot-bottom{margin-top:48px;padding-top:24px;border-top:1px solid var(--border);font-size:12px;color:var(--text3);font-weight:300}
 
 /* Responsive */
 @media(max-width:768px){
@@ -184,7 +237,12 @@ footer{border-top:1px solid var(--border);padding:48px 0}
   .hero h1{font-size:40px}
   .cards{grid-template-columns:1fr}
   .step-grid{grid-template-columns:1fr;gap:48px}
+  .uc-grid{grid-template-columns:1fr}
+  .test-grid{grid-template-columns:1fr}
+  .price-grid{grid-template-columns:1fr}
+  .foot-grid{grid-template-columns:1fr;gap:32px}
   .nav-l{display:none}
+  .btn-nav{display:none}
   .compat{font-size:12px}
 }
 </style>
@@ -199,13 +257,16 @@ footer{border-top:1px solid var(--border);padding:48px 0}
 <nav>
   <div class="w nav-i">
     <a href="#" class="logo">
-      <svg class="logo-svg" viewBox="4400 5100 3000 1800" xmlns="http://www.w3.org/2000/svg"><g transform="translate(0,12000) scale(1,-1)" fill="#ffffff"><path d="M6216 6740 c-39 -31 -42 -42 -21 -88 45 -98 184 -49 157 55 -15 63 -80 79 -136 33z"/><path d="M4524 6666 c5 -47 18 -57 93 -72 416 -82 402 -753 -18 -824 -71 -12 -79 -19 -79 -74 0 -59 1 -59 85 -45 506 84 610 789 151 1017 -145 72 -241 71 -232 -2z"/><path d="M6220 5944 c0 -495 -11 -564 -91 -564 -19 0 -29 -21 -29 -60 0 -69 30 -76 118 -31 111 57 122 117 122 649 l0 482 -60 0 -60 0 0 -476z"/><path d="M5400 6360 c-119 -64 -170 -163 -170 -330 0 -324 329 -496 592 -308 l62 43 -42 42 c-35 35 -48 38 -77 18 -119 -85 -259 -81 -347 9 -121 123 -102 135 219 142 l288 5 -9 108 c-21 251 -291 393 -516 271z m345 -139 c109 -122 86 -141 -175 -141 -249 0 -252 2 -184 102 92 136 256 154 359 39z"/><path d="M6745 6361 c-91 -42 -99 -55 -60 -108 23 -32 30 -31 105 8 145 76 310 16 310 -113 0 -46 -5 -48 -151 -48 -190 0 -278 -35 -322 -128 -125 -261 282 -444 519 -233 80 72 108 398 45 519 -71 137 -269 183 -446 103z m355 -432 c0 -143 -190 -226 -316 -138 -128 90 -25 209 180 209 l136 0 0 -71z"/></g></svg>
+      <svg class="logo-svg" viewBox="4350 5050 3150 1900" xmlns="http://www.w3.org/2000/svg"><g transform="translate(0,12000) scale(1,-1)" fill="#ffffff"><path d="M6216 6740 c-39 -31 -42 -42 -21 -88 45 -98 184 -49 157 55 -15 63 -80 79 -136 33z"/><path d="M4524 6666 c5 -47 18 -57 93 -72 416 -82 402 -753 -18 -824 -71 -12 -79 -19 -79 -74 0 -59 1 -59 85 -45 506 84 610 789 151 1017 -145 72 -241 71 -232 -2z"/><path d="M6220 5944 c0 -495 -11 -564 -91 -564 -19 0 -29 -21 -29 -60 0 -69 30 -76 118 -31 111 57 122 117 122 649 l0 482 -60 0 -60 0 0 -476z"/><path d="M5400 6360 c-119 -64 -170 -163 -170 -330 0 -324 329 -496 592 -308 l62 43 -42 42 c-35 35 -48 38 -77 18 -119 -85 -259 -81 -347 9 -121 123 -102 135 219 142 l288 5 -9 108 c-21 251 -291 393 -516 271z m345 -139 c109 -122 86 -141 -175 -141 -249 0 -252 2 -184 102 92 136 256 154 359 39z"/><path d="M6745 6361 c-91 -42 -99 -55 -60 -108 23 -32 30 -31 105 8 145 76 310 16 310 -113 0 -46 -5 -48 -151 -48 -190 0 -278 -35 -322 -128 -125 -261 282 -444 519 -233 80 72 108 398 45 519 -71 137 -269 183 -446 103z m355 -432 c0 -143 -190 -226 -316 -138 -128 90 -25 209 180 209 l136 0 0 -71z"/></g><path d="M 4520 5530 A 280 280 0 0 1 4520 6090" fill="none" stroke="#ffffff" stroke-width="90" stroke-linecap="round"/></svg>
     </a>
     <ul class="nav-l">
       <li><a href="#features">Features</a></li>
-      <li><a href="#how">How it works</a></li>
-      <li><a href="/download">Download</a></li>
+      <li><a href="#use-cases">Use cases</a></li>
+      <li><a href="#testimonials">Testimonials</a></li>
+      <li><a href="#pricing">Pricing</a></li>
+      <li><a href="/faq">FAQ</a></li>
     </ul>
+    <a href="/download" class="btn-nav">Get Started</a>
   </div>
 </nav>
 </header>
@@ -271,52 +332,170 @@ footer{border-top:1px solid var(--border);padding:48px 0}
       </div>
     </div>
   </div>
-  <a href="#how" class="scroll-hint"><svg viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg></a>
+  <a href="#use-cases" class="scroll-hint"><svg viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg></a>
 </section>
 
-<section class="steps" id="how">
+<section class="use-cases" id="use-cases">
   <a href="#features" class="scroll-hint-up"><svg viewBox="0 0 24 24"><polyline points="6 15 12 9 18 15"/></svg></a>
   <div class="w">
-    <div class="label r">How it works</div>
-    <h2 class="r">Set up once. It takes it from there.</h2>
-    <div class="step-grid r" style="transition-delay:0.1s">
-      <div class="step">
-        <div class="num">1</div>
-        <h4>Download</h4>
-        <p>Guided setup connects your accounts and your AI tools.</p>
+    <div class="label r">Use cases</div>
+    <h2 class="r">Built for people who <em style="font-style:italic">live in context</em></h2>
+    <div class="uc-grid r" style="transition-delay:0.1s">
+      <div class="uc-card">
+        <div class="uc-icon">&lt;/&gt;</div>
+        <h3>Developers</h3>
+        <p>Your coding assistant knows the people, projects, and decisions behind the codebase. Ask Cursor about the meeting where a feature was specced, or who owns a dependency.</p>
       </div>
-      <div class="step">
-        <div class="num">2</div>
-        <h4>It catches up</h4>
-        <p>Catches up on your recent history. Builds a full picture of your people and projects.</p>
+      <div class="uc-card">
+        <div class="uc-icon">&varr;</div>
+        <h3>Founders &amp; executives</h3>
+        <p>Never drop a commitment. Déjà tracks what you promised across email, meetings, and messages. Your AI drafts the follow-ups before you forget.</p>
       </div>
-      <div class="step">
-        <div class="num">3</div>
-        <h4>It keeps going</h4>
-        <p>Every new email, message, and meeting makes your AI smarter. Automatically, forever.</p>
+      <div class="uc-card">
+        <div class="uc-icon">&equiv;</div>
+        <h3>Product managers</h3>
+        <p>Meeting notes, stakeholder requests, and project context flow into your AI tools automatically. Stop copying and pasting between apps.</p>
+      </div>
+      <div class="uc-card">
+        <div class="uc-icon">&oplus;</div>
+        <h3>Teams</h3>
+        <p>Everyone's AI has the same context. Shared projects and contacts mean your team's AI assistants are always on the same page.</p>
       </div>
     </div>
   </div>
-  <a href="#install" class="scroll-hint"><svg viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg></a>
+  <a href="#testimonials" class="scroll-hint"><svg viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg></a>
 </section>
 
-<section class="inst" id="install">
-  <a href="#how" class="scroll-hint-up"><svg viewBox="0 0 24 24"><polyline points="6 15 12 9 18 15"/></svg></a>
+<section class="testimonials" id="testimonials">
+  <a href="#use-cases" class="scroll-hint-up"><svg viewBox="0 0 24 24"><polyline points="6 15 12 9 18 15"/></svg></a>
   <div class="w">
-    <h2 class="r">Try <em>Déjà</em></h2>
-    <p class="r">Download for Mac. Set up in minutes.</p>
-    <div class="r" style="transition-delay:0.1s">
-      <a href="#" class="btn btn-p">Download for Mac</a>
+    <div class="label r">Testimonials</div>
+    <h2 class="r">From our <em style="font-style:italic">early users</em></h2>
+    <div class="test-grid r" style="transition-delay:0.1s">
+      <div class="test-card">
+        <blockquote>I used to spend 20 minutes before every meeting re-reading old threads. Now Claude just knows. It's like having a second brain that actually remembers.</blockquote>
+        <div class="test-who">
+          <div class="test-avatar">J</div>
+          <div><div class="test-name">Jake F.</div><div class="test-title">Engineering Manager</div></div>
+        </div>
+      </div>
+      <div class="test-card">
+        <blockquote>The commitment tracking alone is worth it. Déjà caught three things I promised in a meeting that I would have completely forgotten about.</blockquote>
+        <div class="test-who">
+          <div class="test-avatar">S</div>
+          <div><div class="test-name">Sarah K.</div><div class="test-title">Founder &amp; CEO</div></div>
+        </div>
+      </div>
+      <div class="test-card">
+        <blockquote>I switched from ChatGPT to Claude because of Déjà. Having my full work context piped into the model changes everything about how useful it is.</blockquote>
+        <div class="test-who">
+          <div class="test-avatar">M</div>
+          <div><div class="test-name">Marcus R.</div><div class="test-title">Senior Product Manager</div></div>
+        </div>
+      </div>
+      <div class="test-card">
+        <blockquote>Setup took five minutes and by the time I opened Cursor the next morning, it already knew my entire project landscape. Unreal.</blockquote>
+        <div class="test-who">
+          <div class="test-avatar">A</div>
+          <div><div class="test-name">Alex T.</div><div class="test-title">Full-stack Developer</div></div>
+        </div>
+      </div>
+      <div class="test-card">
+        <blockquote>The fact that everything stays local sealed it for me. I'm feeding sensitive investor emails through this — I need to know it's not leaving my machine.</blockquote>
+        <div class="test-who">
+          <div class="test-avatar">R</div>
+          <div><div class="test-name">Rachel P.</div><div class="test-title">VP of Operations</div></div>
+        </div>
+      </div>
+      <div class="test-card">
+        <blockquote>I've tried every AI meeting tool out there. Déjà is different because it doesn't just take notes — it makes every other AI tool I use smarter.</blockquote>
+        <div class="test-who">
+          <div class="test-avatar">D</div>
+          <div><div class="test-name">Daniel W.</div><div class="test-title">Technical Program Manager</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <a href="#pricing" class="scroll-hint"><svg viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg></a>
+</section>
+
+<section class="pricing" id="pricing">
+  <a href="#testimonials" class="scroll-hint-up"><svg viewBox="0 0 24 24"><polyline points="6 15 12 9 18 15"/></svg></a>
+  <div class="w">
+    <div class="label r">Pricing</div>
+    <h2 class="r">Start now. <em style="font-style:italic;color:var(--text2)">Scale as you grow.</em></h2>
+    <p class="pricing-sub r">Free during the beta. No credit card required.</p>
+    <div class="price-grid r" style="transition-delay:0.1s">
+      <div class="price-card">
+        <div class="price-tier">Starter</div>
+        <div class="price-amount">Free</div>
+        <div class="price-period">During the beta</div>
+        <a href="/download" class="price-btn price-btn-s">Download</a>
+        <ul class="price-features">
+          <li><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg> Gmail &amp; Calendar sync</li>
+          <li><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg> Meeting transcripts</li>
+          <li><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg> Local knowledge base</li>
+          <li><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg> MCP for Claude &amp; Cursor</li>
+          <li><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg> Commitment tracking</li>
+        </ul>
+      </div>
+      <div class="price-card featured">
+        <div class="price-tier">Pro <span class="price-badge">Coming soon</span></div>
+        <div class="price-amount">$20</div>
+        <div class="price-period">per month</div>
+        <a href="/download" class="price-btn price-btn-p">Join waitlist</a>
+        <ul class="price-features">
+          <li><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg> Everything in Starter</li>
+          <li><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg> Slack &amp; iMessage sync</li>
+          <li><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg> Unlimited contacts</li>
+          <li><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg> Priority onboarding</li>
+          <li><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg> Advanced enrichment</li>
+        </ul>
+      </div>
+      <div class="price-card">
+        <div class="price-tier">Enterprise</div>
+        <div class="price-amount">Custom</div>
+        <div class="price-period">for teams</div>
+        <a href="mailto:david@trydeja.com" class="price-btn price-btn-s">Contact us</a>
+        <ul class="price-features">
+          <li><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg> Everything in Pro</li>
+          <li><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg> Team shared context</li>
+          <li><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg> Admin controls</li>
+          <li><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg> Custom integrations</li>
+          <li><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg> Dedicated support</li>
+        </ul>
+      </div>
     </div>
   </div>
 </section>
 
 <footer>
-  <div class="w foot">
-    <div class="foot-l">
-      <svg viewBox="4400 5100 3000 1800" xmlns="http://www.w3.org/2000/svg"><g transform="translate(0,12000) scale(1,-1)" fill="#ffffff"><path d="M6216 6740 c-39 -31 -42 -42 -21 -88 45 -98 184 -49 157 55 -15 63 -80 79 -136 33z"/><path d="M4524 6666 c5 -47 18 -57 93 -72 416 -82 402 -753 -18 -824 -71 -12 -79 -19 -79 -74 0 -59 1 -59 85 -45 506 84 610 789 151 1017 -145 72 -241 71 -232 -2z"/><path d="M6220 5944 c0 -495 -11 -564 -91 -564 -19 0 -29 -21 -29 -60 0 -69 30 -76 118 -31 111 57 122 117 122 649 l0 482 -60 0 -60 0 0 -476z"/><path d="M5400 6360 c-119 -64 -170 -163 -170 -330 0 -324 329 -496 592 -308 l62 43 -42 42 c-35 35 -48 38 -77 18 -119 -85 -259 -81 -347 9 -121 123 -102 135 219 142 l288 5 -9 108 c-21 251 -291 393 -516 271z m345 -139 c109 -122 86 -141 -175 -141 -249 0 -252 2 -184 102 92 136 256 154 359 39z"/><path d="M6745 6361 c-91 -42 -99 -55 -60 -108 23 -32 30 -31 105 8 145 76 310 16 310 -113 0 -46 -5 -48 -151 -48 -190 0 -278 -35 -322 -128 -125 -261 282 -444 519 -233 80 72 108 398 45 519 -71 137 -269 183 -446 103z m355 -432 c0 -143 -190 -226 -316 -138 -128 90 -25 209 180 209 l136 0 0 -71z"/></g></svg>
+  <div class="w">
+    <div class="foot-grid">
+      <div class="foot-brand">
+        <svg viewBox="4350 5050 3150 1900" xmlns="http://www.w3.org/2000/svg"><g transform="translate(0,12000) scale(1,-1)" fill="#ffffff"><path d="M6216 6740 c-39 -31 -42 -42 -21 -88 45 -98 184 -49 157 55 -15 63 -80 79 -136 33z"/><path d="M4524 6666 c5 -47 18 -57 93 -72 416 -82 402 -753 -18 -824 -71 -12 -79 -19 -79 -74 0 -59 1 -59 85 -45 506 84 610 789 151 1017 -145 72 -241 71 -232 -2z"/><path d="M6220 5944 c0 -495 -11 -564 -91 -564 -19 0 -29 -21 -29 -60 0 -69 30 -76 118 -31 111 57 122 117 122 649 l0 482 -60 0 -60 0 0 -476z"/><path d="M5400 6360 c-119 -64 -170 -163 -170 -330 0 -324 329 -496 592 -308 l62 43 -42 42 c-35 35 -48 38 -77 18 -119 -85 -259 -81 -347 9 -121 123 -102 135 219 142 l288 5 -9 108 c-21 251 -291 393 -516 271z m345 -139 c109 -122 86 -141 -175 -141 -249 0 -252 2 -184 102 92 136 256 154 359 39z"/><path d="M6745 6361 c-91 -42 -99 -55 -60 -108 23 -32 30 -31 105 8 145 76 310 16 310 -113 0 -46 -5 -48 -151 -48 -190 0 -278 -35 -322 -128 -125 -261 282 -444 519 -233 80 72 108 398 45 519 -71 137 -269 183 -446 103z m355 -432 c0 -143 -190 -226 -316 -138 -128 90 -25 209 180 209 l136 0 0 -71z"/></g><path d="M 4520 5530 A 280 280 0 0 1 4520 6090" fill="none" stroke="#ffffff" stroke-width="90" stroke-linecap="round"/></svg>
+        <p>Feed your work into the AI tools you already use. Local, private, always up to date.</p>
+      </div>
+      <div class="foot-col">
+        <h4>Product</h4>
+        <ul>
+          <li><a href="#features">Features</a></li>
+          <li><a href="#use-cases">Use cases</a></li>
+          <li><a href="#pricing">Pricing</a></li>
+          <li><a href="/faq">FAQ</a></li>
+          <li><a href="/download">Download</a></li>
+        </ul>
+      </div>
+      <div class="foot-col">
+        <h4>Company</h4>
+        <ul>
+          <li><a href="/about">About</a></li>
+          <li><a href="/privacy">Privacy</a></li>
+          <li><a href="/changelog">Changelog</a></li>
+        </ul>
+      </div>
     </div>
-    <span class="foot-r">macOS</span>
+    <div class="foot-bottom">macOS 14+ &middot; Apple Silicon &amp; Intel</div>
   </div>
 </footer>
 
