@@ -10,21 +10,31 @@ persistent memory across sessions.
 
 ## Install
 
+**Download the DMG** from the [latest release](https://github.com/dwurtz/deja/releases/latest)
+or from [trydeja.com/download](https://trydeja.com/download). Open the DMG
+and drag Deja to Applications.
+
+On first launch, Deja runs a guided setup:
+
+1. Prompts for your Gemini API key (stored in macOS Keychain)
+2. Creates your identity self-page
+3. Copies default prompts into `~/Deja/prompts/`
+4. Auto-configures itself as an MCP server on Claude, Cursor, Windsurf,
+   and any other detected AI clients
+5. Runs a health check
+
+The app starts the monitor and web server as background processes.
+On first run it also kicks off onboarding — ingesting your recent email,
+messages, calendar, meeting notes, and transcripts to bootstrap the wiki.
+
+**Developer install (from source):**
+
 ```bash
 git clone https://github.com/dwurtz/deja.git
 cd deja
-./setup.sh
-```
-
-`setup.sh` checks prereqs (Python 3.10+, macOS, Node.js), creates a venv,
-installs the package, installs and authenticates the `gws` CLI for Google
-Workspace, prompts for your Gemini API key (stored in macOS Keychain via
-`security add-generic-password`), creates your identity self-page, copies
-default prompts into `~/Deja/prompts/`, and runs a health check.
-Safe to re-run.
-
-```bash
-./venv/bin/python -m deja monitor   # headless CLI
+python -m venv venv && ./venv/bin/pip install -e .
+./venv/bin/python -m deja configure
+./venv/bin/python -m deja monitor
 ```
 
 
@@ -360,11 +370,17 @@ Grant each in **System Settings > Privacy & Security**. Run
 
 ## Privacy
 
-Everything runs on your Mac. The only network traffic is Gemini API calls
-carrying observation and wiki context for that specific LLM request. No
-telemetry, no analytics, no third parties. The wiki is a local git repo --
-every change is versioned and reversible. The API key lives only in your
-macOS Keychain, never written to any file, never committed to git.
+Deja runs on your Mac. Your wiki, observations, and configuration are
+local files. Network traffic consists of:
+
+- **Gemini API calls** — observation context and wiki pages are sent to
+  Google's Gemini models for analysis, integration, and reflection.
+- **Google Workspace API calls** — Gmail, Calendar, Drive, and Tasks
+  are accessed via the `gws` CLI authenticated as your Google account.
+
+No telemetry, no analytics, no third-party services beyond Google.
+The wiki is a local git repo — every change is versioned and reversible.
+The API key lives only in your macOS Keychain.
 
 
 ## Tests
