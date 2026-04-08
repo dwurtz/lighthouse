@@ -6,6 +6,11 @@ options:
   xcodeVersion: "15.0"
   minimumXcodeGenVersion: "2.35"
 
+packages:
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle.git
+    from: "2.6.0"
+
 settings:
   base:
     SWIFT_VERSION: "5.0"
@@ -50,6 +55,8 @@ targets:
       - target: DejaRecorder
         copy:
           destination: executables
+      - package: Sparkle
+        product: Sparkle
       - sdk: AppKit.framework
       - sdk: Foundation.framework
       - sdk: SwiftUI.framework

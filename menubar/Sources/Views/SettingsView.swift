@@ -2,6 +2,7 @@ import SwiftUI
 import AppKit
 import CoreGraphics
 import ServiceManagement
+import Sparkle
 
 // MARK: - Settings View
 
@@ -44,6 +45,19 @@ struct SettingsView: View {
                             }
                         }
                         .toggleStyle(SwitchToggleStyle(tint: .orange))
+
+                        Button(action: {
+                            (NSApp.delegate as? AppDelegate)?.updaterController.checkForUpdates(nil)
+                        }) {
+                            HStack(spacing: 6) {
+                                Image(systemName: "arrow.triangle.2.circlepath")
+                                    .font(.system(size: 12))
+                                Text("Check for Updates…")
+                                    .font(.system(size: 13))
+                            }
+                            .foregroundColor(.white.opacity(0.7))
+                        }
+                        .buttonStyle(.plain)
                     }
                     .padding(16)
 

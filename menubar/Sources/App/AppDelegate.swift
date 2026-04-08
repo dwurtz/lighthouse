@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import ScreenCaptureKit
+import Sparkle
 
 // MARK: - App Delegate
 //
@@ -18,6 +19,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var micToggleItem: NSMenuItem!
     var isRecording: Bool = false
     var micStatusTimer: Timer?
+    var updaterController: SPUStandardUpdaterController!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -25,6 +27,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         setupPopover()
         setupStatusItem()
         startMicStatusPolling()
+
+        // Sparkle auto-updater — checks for updates on launch and periodically
+        updaterController = SPUStandardUpdaterController(
+            startingUpdater: true,
+            updaterDelegate: nil,
+            userDriverDelegate: nil
+        )
 
         // Auto-open popover on first launch. Poll until the web server
         // is ready, then check what's already configured and skip steps.
@@ -209,6 +218,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         wikiItem.target = self
         menu.addItem(wikiItem)
         menu.addItem(NSMenuItem.separator())
+        let updateItem = NSMenuItem(title: "Check for Updates…", action: #selector(checkForUpdates), keyEquivalent: "u")
+        updateItem.target = self
+        menu.addItem(updateItem)
+        menu.addItem(NSMenuItem.separator())
         let restartItem = NSMenuItem(title: "Restart Monitor", action: #selector(restartMonitor), keyEquivalent: "r")
         restartItem.target = self
         menu.addItem(restartItem)
@@ -296,6 +309,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func openWiki() {
         let path = NSString(string: "~/Deja").expandingTildeInPath
         NSWorkspace.shared.open(URL(fileURLWithPath: path))
+    }
+
+    @objc private func checkForUpdates() {
+        updaterController.checkForUpdates(nil)
     }
 
     @objc private func restartMonitor() {

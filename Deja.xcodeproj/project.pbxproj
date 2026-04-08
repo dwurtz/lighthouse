@@ -14,6 +14,7 @@
 		222D3A7333DB15AC31B0D93D /* ScreenCaptureKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = EFF72E223E893D4D84DE66CD /* ScreenCaptureKit.framework */; };
 		26EF2D41EF33FF9682E58319 /* ChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3024499F04CAB34515366957 /* ChatView.swift */; };
 		2BB909BD53EAFA57BE316649 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78A8FC28E10F34A2E91C7923 /* AppDelegate.swift */; };
+		30EBCF81C0F2B19A20A82E7C /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 6EE364908535709A817F0EBF /* Sparkle */; };
 		32DEBC6FCAE27D0A5887E829 /* CoreMedia.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 511117673C0D6E68362ACC2F /* CoreMedia.framework */; };
 		41A94BA85426F5525FBCDC9E /* BackendProcessManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8ACEA8F312916A3DB10B6583 /* BackendProcessManager.swift */; };
 		4932CD8F57C136EC18EBD81A /* ImageIO.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5FBB5CB7483B90FD0ADB9A4A /* ImageIO.framework */; };
@@ -121,6 +122,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				30EBCF81C0F2B19A20A82E7C /* Sparkle in Frameworks */,
 				BC654C23332F7A07702D26E6 /* AppKit.framework in Frameworks */,
 				62A958FF0371CBDBFFD3919C /* Foundation.framework in Frameworks */,
 				D029A72970BEE1DA98ECF8B3 /* SwiftUI.framework in Frameworks */,
@@ -286,6 +288,7 @@
 			);
 			name = Deja;
 			packageProductDependencies = (
+				6EE364908535709A817F0EBF /* Sparkle */,
 			);
 			productName = Deja;
 			productReference = 6657279FEB277AA5D969A150 /* Deja.app */;
@@ -317,6 +320,9 @@
 			);
 			mainGroup = EA1B51C0C7B7CE2CA8C0600E;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				C9A9CCA21D6433264DCC3BDF /* XCRemoteSwiftPackageReference "Sparkle" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 25B1CC28E3DE5EE3BB432AF7 /* Products */;
 			projectDirPath = "";
@@ -636,6 +642,25 @@
 			defaultConfigurationName = Debug;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		C9A9CCA21D6433264DCC3BDF /* XCRemoteSwiftPackageReference "Sparkle" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/sparkle-project/Sparkle.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.6.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		6EE364908535709A817F0EBF /* Sparkle */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = C9A9CCA21D6433264DCC3BDF /* XCRemoteSwiftPackageReference "Sparkle" */;
+			productName = Sparkle;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 86140A3D25A756123167315D /* Project object */;
 }

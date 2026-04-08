@@ -65,6 +65,56 @@ jobs:
           name: Deja.dmg
           path: Deja.dmg
 
+      - name: Sign DMG for Sparkle and update appcast
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          SPARKLE_KEY: ${{ secrets.SPARKLE_ED25519_KEY }}
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          FILE_SIZE=$(stat -f%z Deja.dmg)
+          DOWNLOAD_URL="https://github.com/dwurtz/deja/releases/download/v${VERSION}/Deja.dmg"
+          PUB_DATE=$(date -u '+%a, %d %b %Y %H:%M:%S +0000')
+
+          # Download Sparkle tools
+          curl -sL https://github.com/sparkle-project/Sparkle/releases/download/2.6.0/Sparkle-2.6.0.tar.xz -o sparkle.tar.xz
+          mkdir sparkle-tools && tar xf sparkle.tar.xz -C sparkle-tools
+
+          # Sign the DMG with Ed25519
+          SIGNATURE=$(echo "$SPARKLE_KEY" | sparkle-tools/bin/sign_update Deja.dmg)
+
+          # Build the new appcast entry
+          ENTRY=$(cat <<APPCAST_EOF
+      <item>
+        <title>Version ${VERSION}</title>
+        <sparkle:version>${VERSION}</sparkle:version>
+        <sparkle:shortVersionString>${VERSION}</sparkle:shortVersionString>
+        <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+        <pubDate>${PUB_DATE}</pubDate>
+        <enclosure
+          url="${DOWNLOAD_URL}"
+          type="application/x-apple-diskimage"
+          ${SIGNATURE}
+          length="${FILE_SIZE}"
+        />
+      </item>
+    APPCAST_EOF
+          )
+
+          # Insert the new entry into appcast.xml (before closing </channel>)
+          sed -i '' "s|</channel>|${ENTRY}\n  </channel>|" site/appcast.xml
+
+          echo "Appcast updated for v${VERSION}"
+          cat site/appcast.xml
+
+      - name: Commit updated appcast
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add site/appcast.xml
+          git commit -m "release: update appcast.xml for v${GITHUB_REF#refs/tags/v}" || true
+          git push origin HEAD:main || true
+
       - name: Create GitHub Release (tags only)
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
