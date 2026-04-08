@@ -190,6 +190,16 @@ class MonitorState: ObservableObject {
 
     func completeSetup() {
         setupNeeded = false
+
+        // Tell the backend to write the setup_done marker so the
+        // wizard doesn't reappear on next launch.
+        if let url = URL(string: "http://localhost:5055/api/setup/complete") {
+            var req = URLRequest(url: url)
+            req.httpMethod = "POST"
+            req.timeoutInterval = 5
+            URLSession.shared.dataTask(with: req) { _, _, _ in }.resume()
+        }
+
         startScreenshotCapture()
         startDatabaseReaders()
 
