@@ -102,6 +102,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         meetingPillPopover = nil
     }
 
+    private func showWizardPopover() {
+        guard let button = statusItem?.button else { return }
+        if !popover.isShown {
+            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+            NSApp.activate(ignoringOtherApps: true)
+            popover.contentViewController?.view.window?.makeKey()
+        }
+    }
+
     @objc private func handleMeetingDismissed() {
         dismissMeetingPill()
     }
@@ -130,12 +139,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
                 // Give the status check a moment to update setupStep
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                    guard let button = self.statusItem?.button else { return }
-                    if !self.popover.isShown {
-                        self.popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-                        NSApp.activate(ignoringOtherApps: true)
-                        self.popover.contentViewController?.view.window?.makeKey()
-                    }
+                    self.showWizardPopover()
                 }
             }
         }.resume()
@@ -206,19 +210,23 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func loadPreferredIcon() -> NSImage? {
-        // Prefer the user-provided icon at ~/.deja/icon.png
+        // 1. User-provided icon at ~/.deja/icon.png
         if FileManager.default.fileExists(atPath: iconPath.path),
            let img = NSImage(contentsOf: iconPath) {
-            img.isTemplate = true
-            // Menu bar expects a ~22pt image; PIL renders it at 22×22 native
+            img.isTemplate = true  // macOS auto-colors for light/dark menu bar
             img.size = NSSize(width: 22, height: 22)
             return img
         }
-        for name in Self.fallbackSymbolNames {
-            if let img = NSImage(systemSymbolName: name, accessibilityDescription: "Déjà") {
+        // 2. Bundled icon in app Resources
+        if let resourcePath = Bundle.main.resourcePath {
+            let bundledIcon = URL(fileURLWithPath: resourcePath).appendingPathComponent("tray-icon.png")
+            if let img = NSImage(contentsOf: bundledIcon) {
+                img.isTemplate = true
+                img.size = NSSize(width: 22, height: 22)
                 return img
             }
         }
+        // 3. Text fallback
         return nil
     }
 
@@ -229,7 +237,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 img.isTemplate = true
                 button.image = img
             } else {
-                button.title = "L"
+                button.title = "✦"
             }
             button.toolTip = "Déjà"
             button.target = self
@@ -333,7 +341,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: Menu actions
 
     @objc private func openWiki() {
-        let path = NSString(string: "~/Deja Wiki").expandingTildeInPath
+        let path = NSString(string: "~/Deja").expandingTildeInPath
         NSWorkspace.shared.open(URL(fileURLWithPath: path))
     }
 
@@ -972,7 +980,7 @@ struct SetupWizardView: View {
                     .foregroundColor(.white.opacity(0.9))
                 Spacer()
                 // Step indicator
-                Text("Step \(monitor.setupStep + 1) of 6")
+                Text("Step \(monitor.setupStep + 1) of 5")
                     .font(.system(size: 10))
                     .foregroundColor(.white.opacity(0.3))
             }
@@ -987,9 +995,8 @@ struct SetupWizardView: View {
                     case 0: welcomeStep
                     case 1: apiKeyStep
                     case 2: googleAuthStep
-                    case 3: identityStep
-                    case 4: permissionsStep
-                    case 5: doneStep
+                    case 3: permissionsStep
+                    case 4: doneStep
                     default: doneStep
                     }
                 }
@@ -1123,24 +1130,33 @@ struct SetupWizardView: View {
         }.resume()
     }
 
-    // MARK: Step 2 — Google Workspace
+    // MARK: Step 2 — Sign in with Google
+
+    @State private var gwsName: String = ""
 
     var googleAuthStep: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Connect Google Workspace")
+            Text("Sign in with Google")
                 .font(.system(size: 18, weight: .semibold))
                 .foregroundColor(.white)
-            Text("Déjà reads your Gmail, Calendar, and Drive to keep your wiki up to date. This opens Google's sign-in page in your browser.")
+            Text("Déjà uses your Google account to read Gmail, Calendar, and Drive. This also tells Déjà who you are.")
                 .font(.system(size: 12))
                 .foregroundColor(.white.opacity(0.5))
 
             if !gwsEmail.isEmpty {
-                HStack(spacing: 8) {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundColor(.green)
-                    Text("Connected as \(gwsEmail)")
-                        .font(.system(size: 12))
-                        .foregroundColor(.green)
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundColor(.green)
+                        Text("Signed in as \(gwsEmail)")
+                            .font(.system(size: 12))
+                            .foregroundColor(.green)
+                    }
+                    if !gwsName.isEmpty {
+                        Text("Welcome, \(gwsName.components(separatedBy: " ").first ?? gwsName)!")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundColor(.white.opacity(0.7))
+                    }
                 }
             }
 
@@ -1221,6 +1237,7 @@ struct SetupWizardView: View {
                 }
                 if ok {
                     gwsEmail = obj["email"] as? String ?? "Connected"
+                    gwsName = obj["name"] as? String ?? ""
                     if gwsEmail.isEmpty { gwsEmail = "Connected" }
                 } else {
                     error = obj["error"] as? String ?? "Auth failed"
@@ -1327,12 +1344,12 @@ struct SetupWizardView: View {
         req.timeoutInterval = 10
         URLSession.shared.dataTask(with: req) { _, _, _ in
             DispatchQueue.main.async {
-                monitor.setupStep = 5
+                monitor.setupStep = 4
             }
         }.resume()
     }
 
-    // MARK: Step 4 — Permissions
+    // MARK: Step 3 — Permissions
 
     @State private var screenRecordingGranted = false
     @State private var fullDiskGranted = false
@@ -1351,11 +1368,16 @@ struct SetupWizardView: View {
                 permissionRow(
                     icon: "rectangle.dashed.badge.record",
                     title: "Screen Recording",
-                    description: "Tap +, find Deja in Applications, toggle on",
+                    description: "See what's on your screen to build context",
                     granted: screenRecordingGranted,
                     action: {
-                        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") {
-                            NSWorkspace.shared.open(url)
+                        // Trigger the macOS Screen Recording prompt
+                        Task {
+                            _ = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
+                            // Re-check after a delay (user may need to allow + restart)
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                                screenRecordingGranted = CGPreflightScreenCaptureAccess()
+                            }
                         }
                     }
                 )
@@ -1363,11 +1385,20 @@ struct SetupWizardView: View {
                 permissionRow(
                     icon: "lock.open.fill",
                     title: "Full Disk Access",
-                    description: "Tap +, find Deja in Applications, toggle on",
+                    description: "Read your iMessage and WhatsApp conversations",
                     granted: fullDiskGranted,
                     action: {
-                        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") {
-                            NSWorkspace.shared.open(url)
+                        // Try to read iMessage db — triggers FDA prompt on macOS 26
+                        let dbPath = NSHomeDirectory() + "/Library/Messages/chat.db"
+                        let _ = FileManager.default.contents(atPath: dbPath)
+                        // If no prompt, open Settings as fallback
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                            fullDiskGranted = FileManager.default.isReadableFile(atPath: dbPath)
+                            if !fullDiskGranted {
+                                if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") {
+                                    NSWorkspace.shared.open(url)
+                                }
+                            }
                         }
                     }
                 )
@@ -1375,11 +1406,14 @@ struct SetupWizardView: View {
                 permissionRow(
                     icon: "person.crop.circle",
                     title: "Contacts",
-                    description: "Tap +, find Deja in Applications, toggle on",
+                    description: "Match phone numbers to names",
                     granted: contactsGranted,
                     action: {
-                        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Contacts") {
-                            NSWorkspace.shared.open(url)
+                        // Try to read AddressBook — triggers Contacts prompt
+                        let abPath = NSHomeDirectory() + "/Library/Application Support/AddressBook/AddressBook-v22.abcddb"
+                        let _ = FileManager.default.contents(atPath: abPath)
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                            contactsGranted = FileManager.default.isReadableFile(atPath: abPath)
                         }
                     }
                 )
@@ -1415,9 +1449,6 @@ struct SetupWizardView: View {
         }
         .onAppear {
             checkPermissions()
-            // Start the screenshot timer so the first capture triggers
-            // the macOS Screen Recording prompt
-            monitor.startScreenshotCapture()
         }
     }
 
@@ -1478,37 +1509,164 @@ struct SetupWizardView: View {
         }
     }
 
-    // MARK: Step 5 — Done
+    // MARK: Step 4 — Building your wiki
+
+    @State private var backfillRunning = false
+    @State private var backfillStep = ""
+    @State private var backfillStepIndex = 0
+    @State private var backfillTotalSteps = 0
+    @State private var backfillBatch = 0
+    @State private var backfillTotalBatches = 0
+    @State private var backfillPages = 0
+    @State private var backfillDone = false
+    @State private var backfillTimer: Timer?
 
     var doneStep: some View {
-        VStack(spacing: 20) {
-            Spacer().frame(height: 30)
-            Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 48))
-                .foregroundColor(.green)
-            Text("You're all set")
-                .font(.system(size: 20, weight: .semibold))
-                .foregroundColor(.white)
-            Text("Déjà is now watching your screen, messages, and calendar. Your wiki lives at ~/Deja Wiki — open it in Obsidian or any Markdown editor.")
-                .font(.system(size: 13))
-                .foregroundColor(.white.opacity(0.5))
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 20)
+        VStack(spacing: 16) {
+            if !backfillRunning && !backfillDone {
+                // Initial "Start" screen
+                Spacer().frame(height: 20)
+                Image(systemName: "sparkles")
+                    .font(.system(size: 48))
+                    .foregroundColor(.white.opacity(0.6))
+                Text("Ready to build your wiki")
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundColor(.white)
+                Text("Déjà will scan your last 30 days of email, messages, and calendar to build a complete picture of your people, projects, and events.")
+                    .font(.system(size: 13))
+                    .foregroundColor(.white.opacity(0.5))
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 20)
+                Text("This takes a few minutes. You can watch pages appear in real time.")
+                    .font(.system(size: 12))
+                    .foregroundColor(.white.opacity(0.3))
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 20)
 
-            Button(action: {
-                monitor.completeSetup()
-            }) {
-                Text("Start Déjà")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(.black)
-                    .padding(.horizontal, 32)
-                    .padding(.vertical, 10)
-                    .background(Color.white)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                Button(action: { startBackfill() }) {
+                    Text("Start Déjà")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.black)
+                        .padding(.horizontal, 32)
+                        .padding(.vertical, 10)
+                        .background(Color.white)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                }
+                .buttonStyle(.plain)
+
+            } else if backfillRunning {
+                // Progress screen
+                Spacer().frame(height: 20)
+                ProgressView()
+                    .scaleEffect(1.2)
+                    .padding(.bottom, 8)
+                Text("Building your wiki...")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundColor(.white)
+
+                if !backfillStep.isEmpty {
+                    Text(backfillStep)
+                        .font(.system(size: 13))
+                        .foregroundColor(.white.opacity(0.6))
+                }
+
+                if backfillTotalBatches > 0 {
+                    VStack(spacing: 6) {
+                        ProgressView(value: Double(backfillBatch), total: Double(backfillTotalBatches))
+                            .progressViewStyle(.linear)
+                            .tint(.green)
+                        HStack {
+                            Text("Step \(backfillStepIndex)/\(backfillTotalSteps)")
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundColor(.white.opacity(0.3))
+                            Spacer()
+                            Text("Batch \(backfillBatch)/\(backfillTotalBatches)")
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundColor(.white.opacity(0.3))
+                        }
+                    }
+                    .padding(.horizontal, 30)
+                }
+
+                if backfillPages > 0 {
+                    Text("\(backfillPages) wiki pages created")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.green)
+                }
+
+            } else {
+                // Done
+                Spacer().frame(height: 20)
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 48))
+                    .foregroundColor(.green)
+                Text("Your wiki is ready")
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundColor(.white)
+                if backfillPages > 0 {
+                    Text("\(backfillPages) pages created from your last 30 days")
+                        .font(.system(size: 13))
+                        .foregroundColor(.white.opacity(0.5))
+                }
+                Text("Open ~/Deja in Obsidian to browse your wiki.")
+                    .font(.system(size: 12))
+                    .foregroundColor(.white.opacity(0.3))
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 20)
+
+                Button(action: { monitor.completeSetup() }) {
+                    Text("Open Déjà")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.black)
+                        .padding(.horizontal, 32)
+                        .padding(.vertical, 10)
+                        .background(Color.white)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
         }
         .frame(maxWidth: .infinity)
+    }
+
+    func startBackfill() {
+        // Complete setup first (writes setup_done, starts monitor)
+        monitor.completeSetup()
+
+        // Trigger the backfill
+        guard let url = URL(string: "http://localhost:5055/api/setup/start-backfill") else { return }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.timeoutInterval = 10
+        URLSession.shared.dataTask(with: req) { _, _, _ in }.resume()
+
+        backfillRunning = true
+
+        // Poll for progress every 3 seconds
+        backfillTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: true) { [self] timer in
+            guard let url = URL(string: "http://localhost:5055/api/setup/backfill-status") else { return }
+            var req = URLRequest(url: url)
+            req.timeoutInterval = 3
+            URLSession.shared.dataTask(with: req) { data, _, _ in
+                guard let data = data,
+                      let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+                DispatchQueue.main.async {
+                    let running = obj["running"] as? Bool ?? false
+                    self.backfillStep = obj["current_step"] as? String ?? ""
+                    self.backfillStepIndex = obj["step_index"] as? Int ?? 0
+                    self.backfillTotalSteps = obj["total_steps"] as? Int ?? 0
+                    self.backfillBatch = obj["batch"] as? Int ?? 0
+                    self.backfillTotalBatches = obj["total_batches"] as? Int ?? 0
+                    self.backfillPages = obj["pages_written"] as? Int ?? 0
+
+                    if !running && self.backfillStep == "done" {
+                        self.backfillRunning = false
+                        self.backfillDone = true
+                        timer.invalidate()
+                    }
+                }
+            }.resume()
+        }
     }
 }
 
@@ -1917,15 +2075,12 @@ class MonitorState: ObservableObject {
         // Always start web server (setup wizard needs it for API calls)
         startWeb()
 
-        // Start screenshot capture timer (runs regardless of setup state
-        // so the Python observer can read screenshots immediately)
-        startScreenshotCapture()
-
-        // Start database readers (iMessage, WhatsApp, Contacts)
-        // Runs regardless of setup state so buffers are ready when Python starts
-        startDatabaseReaders()
-
         if setupDone {
+            // Only start TCC-triggering operations after setup is complete.
+            // During setup, these are started explicitly by the permissions
+            // step so the user controls when each prompt fires.
+            startScreenshotCapture()
+            startDatabaseReaders()
             startMonitor()
             statsTimer = Timer.scheduledTimer(withTimeInterval: 10.0, repeats: true) { [weak self] _ in
                 self?.updateStats()
@@ -2021,11 +2176,9 @@ class MonitorState: ObservableObject {
                 // permissions step if Screen Recording isn't granted
                 let hasScreenRecording = CGPreflightScreenCaptureAccess()
                 if hasKey && gwsAuth && hasIdentity && hasScreenRecording {
-                    self.setupStep = 5  // done screen
+                    self.setupStep = 4  // done screen
                 } else if hasKey && gwsAuth && hasIdentity {
-                    self.setupStep = 4  // permissions
-                } else if hasKey && gwsAuth {
-                    self.setupStep = 3  // identity
+                    self.setupStep = 3  // permissions
                 } else if hasKey {
                     self.setupStep = 2  // google auth
                 } else {
@@ -2037,6 +2190,9 @@ class MonitorState: ObservableObject {
 
     func completeSetup() {
         setupNeeded = false
+        // NOW start all TCC-triggering operations — setup is done
+        startScreenshotCapture()
+        startDatabaseReaders()
         startMonitor()
         statsTimer = Timer.scheduledTimer(withTimeInterval: 10.0, repeats: true) { [weak self] _ in
             self?.updateStats()

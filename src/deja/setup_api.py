@@ -122,35 +122,95 @@ def set_api_key(body: dict) -> dict:
 def start_gws_auth() -> dict:
     """Start Google Workspace OAuth flow.
 
-    Opens the browser for Google sign-in. Returns when auth completes
-    or after timeout.
+    Opens the browser for Google sign-in. On success, extracts the
+    user's email and name, creates the identity self-page, and
+    initializes the wiki — combining what used to be separate
+    "Google auth" and "identity" steps into one.
     """
+    already_authed = False
     try:
-        # Check if already authenticated
         r = subprocess.run(
             ["gws", "auth", "status"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True, text=True, timeout=10,
         )
-        if r.returncode == 0 and "authenticated" in r.stdout.lower():
-            return {"ok": True, "already": True}
+        if r.returncode == 0:
+            import json as _json
+            try:
+                status = _json.loads(r.stdout)
+                already_authed = status.get("token_valid", False)
+            except _json.JSONDecodeError:
+                pass
     except FileNotFoundError:
-        return {"ok": False, "error": "gws CLI not found. Install with: npm install -g @anthropic/gws-cli"}
+        return {"ok": False, "error": "gws CLI not found"}
     except Exception:
         pass
 
-    # Start OAuth flow (opens browser)
+    if not already_authed:
+        # Start OAuth flow (opens browser)
+        try:
+            r = subprocess.run(
+                ["gws", "auth", "login"],
+                capture_output=True, text=True, timeout=120,
+            )
+            if r.returncode != 0:
+                return {"ok": False, "error": r.stderr[:200] or "Auth failed"}
+        except subprocess.TimeoutExpired:
+            return {"ok": False, "error": "Auth timed out — try again"}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    # Extract user email from gws auth status
+    email = ""
     try:
         r = subprocess.run(
-            ["gws", "auth", "login"],
-            capture_output=True, text=True, timeout=120,
+            ["gws", "auth", "status"],
+            capture_output=True, text=True, timeout=10,
         )
         if r.returncode == 0:
-            return {"ok": True}
-        return {"ok": False, "error": r.stderr[:200] or "Auth failed"}
-    except subprocess.TimeoutExpired:
-        return {"ok": False, "error": "Auth timed out — try again"}
-    except Exception as e:
-        return {"ok": False, "error": str(e)}
+            import json as _json
+            try:
+                status = _json.loads(r.stdout)
+                email = status.get("user", "")
+            except _json.JSONDecodeError:
+                pass
+    except Exception:
+        pass
+
+    # Try to get display name from Gmail profile
+    name = ""
+    if email:
+        # Derive name from email: david@example.com → David
+        local_part = email.split("@")[0]
+        # Handle first.last format
+        parts = local_part.replace(".", " ").replace("-", " ").replace("_", " ").split()
+        name = " ".join(p.capitalize() for p in parts)
+
+    # Also try macOS Contacts for a better name
+    if email:
+        try:
+            r = subprocess.run(
+                ["gws", "gmail", "users", "getProfile",
+                 "--params", json.dumps({"userId": "me"})],
+                capture_output=True, text=True, timeout=10,
+            )
+        except Exception:
+            pass
+
+    # Auto-create identity if we have email
+    if email:
+        result = set_identity({
+            "name": name,
+            "email": email,
+        })
+        return {
+            "ok": True,
+            "email": email,
+            "name": name,
+            "identity_created": result.get("ok", False),
+            "already": already_authed,
+        }
+
+    return {"ok": True, "email": "", "name": "", "already": already_authed}
 
 
 @router.post("/identity")
@@ -249,3 +309,122 @@ def complete_setup() -> dict:
         log.debug("MCP auto-install failed", exc_info=True)
 
     return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Backfill progress
+# ---------------------------------------------------------------------------
+
+_backfill_progress: dict = {
+    "running": False,
+    "current_step": "",
+    "step_index": 0,
+    "total_steps": 0,
+    "batch": 0,
+    "total_batches": 0,
+    "pages_written": 0,
+    "completed_steps": [],
+}
+
+
+@router.get("/backfill-status")
+def backfill_status() -> dict:
+    """Return current backfill progress."""
+    return _backfill_progress
+
+
+@router.post("/start-backfill")
+async def start_backfill() -> dict:
+    """Start the 30-day backfill in the background.
+
+    Returns immediately. Poll /api/setup/backfill-status for progress.
+    """
+    import asyncio
+
+    if _backfill_progress["running"]:
+        return {"ok": True, "already_running": True}
+
+    asyncio.create_task(_run_backfill())
+    return {"ok": True}
+
+
+async def _run_backfill() -> None:
+    """Run all onboarding steps with progress tracking."""
+    from deja.onboarding import ALL_STEPS, is_step_done
+    from deja.onboarding.runner import run_step
+    from deja.llm_client import GeminiClient
+    import asyncio
+
+    pending = [(name, desc) for name, desc in ALL_STEPS if not is_step_done(name)]
+    if not pending:
+        _backfill_progress["running"] = False
+        _backfill_progress["current_step"] = "done"
+        return
+
+    _backfill_progress["running"] = True
+    _backfill_progress["total_steps"] = len(pending)
+    _backfill_progress["completed_steps"] = []
+
+    gemini = GeminiClient()
+    wiki_lock = asyncio.Lock()
+
+    for i, (name, desc) in enumerate(pending):
+        _backfill_progress["step_index"] = i + 1
+        _backfill_progress["current_step"] = desc
+        _backfill_progress["batch"] = 0
+        _backfill_progress["total_batches"] = 0
+
+        def on_progress(info: dict) -> None:
+            _backfill_progress["batch"] = info.get("batch", 0)
+            _backfill_progress["total_batches"] = info.get("total_batches", 0)
+            _backfill_progress["pages_written"] = info.get("pages_written", 0)
+
+        # Import the fetch function for each step
+        fetch_fn = _get_fetch_fn(name)
+        if fetch_fn is None:
+            continue
+
+        try:
+            summary = await run_step(
+                name=name,
+                fetch_fn=fetch_fn,
+                wiki_lock=wiki_lock,
+                gemini=gemini,
+                on_progress=on_progress,
+            )
+            _backfill_progress["completed_steps"].append({
+                "name": name,
+                "desc": desc,
+                "pages": summary.get("pages_written", 0),
+            })
+        except Exception:
+            log.exception("Backfill step %s failed", name)
+
+    _backfill_progress["running"] = False
+    _backfill_progress["current_step"] = "done"
+
+    # Commit wiki changes
+    try:
+        from deja.wiki_git import commit_changes
+        from deja.wiki_catalog import rebuild_index
+        rebuild_index()
+        commit_changes("onboarding: 30-day backfill complete")
+    except Exception:
+        pass
+
+
+def _get_fetch_fn(step_name: str):
+    """Return the fetch function for a given onboarding step."""
+    if step_name == "sent_email_backfill":
+        from deja.observations.email import fetch_sent_threads_backfill
+        return lambda: fetch_sent_threads_backfill(days=30)
+    elif step_name == "imessage_backfill":
+        from deja.observations.imessage import fetch_imessage_contacts_backfill
+        return lambda: fetch_imessage_contacts_backfill(days=30)
+    elif step_name == "whatsapp_backfill":
+        from deja.observations.whatsapp import fetch_whatsapp_contacts_backfill
+        return lambda: fetch_whatsapp_contacts_backfill(days=30)
+    elif step_name == "calendar_backfill":
+        from deja.observations.calendar import fetch_calendar_backfill
+        return lambda: fetch_calendar_backfill(days=30)
+    return None
