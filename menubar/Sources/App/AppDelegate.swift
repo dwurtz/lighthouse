@@ -204,28 +204,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         }
 
-        // Context menu shown on right-click (assigned programmatically when needed)
+        // Right-click menu — just Quit. Everything else is in Settings.
         let menu = NSMenu()
-
-        // Mic toggle — label flips based on recording state, updated live
-        // by startMicStatusPolling().
-        micToggleItem = NSMenuItem(title: "Start Listening", action: #selector(toggleMic), keyEquivalent: "l")
-        micToggleItem.target = self
-        menu.addItem(micToggleItem)
-        menu.addItem(NSMenuItem.separator())
-
-        let wikiItem = NSMenuItem(title: "Open Wiki in Finder", action: #selector(openWiki), keyEquivalent: "")
-        wikiItem.target = self
-        menu.addItem(wikiItem)
-        menu.addItem(NSMenuItem.separator())
-        let updateItem = NSMenuItem(title: "Check for Updates…", action: #selector(checkForUpdates), keyEquivalent: "u")
-        updateItem.target = self
-        menu.addItem(updateItem)
-        menu.addItem(NSMenuItem.separator())
-        let restartItem = NSMenuItem(title: "Restart Monitor", action: #selector(restartMonitor), keyEquivalent: "r")
-        restartItem.target = self
-        menu.addItem(restartItem)
-        menu.addItem(NSMenuItem.separator())
         let quitItem = NSMenuItem(title: "Quit Déjà", action: #selector(quitApp), keyEquivalent: "q")
         quitItem.target = self
         menu.addItem(quitItem)

@@ -90,6 +90,44 @@ struct SettingsView: View {
 
                     Divider().background(Color.white.opacity(0.1))
 
+                    // Wiki & Monitor
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Wiki")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(.white.opacity(0.4))
+                            .textCase(.uppercase)
+
+                        Button(action: {
+                            let wikiPath = NSHomeDirectory() + "/Deja"
+                            NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: wikiPath)
+                        }) {
+                            HStack(spacing: 6) {
+                                Image(systemName: "folder")
+                                    .font(.system(size: 12))
+                                Text("Open Wiki in Finder")
+                                    .font(.system(size: 13))
+                            }
+                            .foregroundColor(.white.opacity(0.7))
+                        }
+                        .buttonStyle(.plain)
+
+                        Button(action: {
+                            monitor.restart()
+                        }) {
+                            HStack(spacing: 6) {
+                                Image(systemName: "arrow.clockwise")
+                                    .font(.system(size: 12))
+                                Text("Restart Monitor")
+                                    .font(.system(size: 13))
+                            }
+                            .foregroundColor(.white.opacity(0.7))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(16)
+
+                    Divider().background(Color.white.opacity(0.1))
+
                     // Account
                     VStack(alignment: .leading, spacing: 16) {
                         Text("Account")
