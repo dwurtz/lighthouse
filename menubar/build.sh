@@ -41,10 +41,6 @@ CLIENT_SECRET="$DIR/../src/deja/default_assets/client_secret.json"
 if [ -f "$CLIENT_SECRET" ]; then
     cp "$CLIENT_SECRET" "$RESOURCES/client_secret.json"
 fi
-# Bundled API key
-if [ -f "$DIR/../Resources/default_api_key.txt" ]; then
-    cp "$DIR/../Resources/default_api_key.txt" "$RESOURCES/default_api_key.txt"
-fi
 
 echo "Bundling Python environment..."
 "$DIR/bundle-python.sh"

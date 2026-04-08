@@ -20,7 +20,6 @@ targets:
       - path: Resources/AppIcon.icns
       - path: Resources/tray-icon.png
       - path: Resources/client_secret.json
-      - path: Resources/default_api_key.txt
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.deja.app

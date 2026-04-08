@@ -15,7 +15,6 @@ dist/
 *.key
 *.p12
 secrets/
-Resources/default_api_key.txt
 
 # macOS / Swift build artifacts
 menubar/Deja
