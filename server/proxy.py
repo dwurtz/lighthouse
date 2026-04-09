@@ -163,7 +163,7 @@ async def generate(
         sdk_tools = _deserialize_tools(tools)
     except Exception as exc:
         logger.exception("Failed to deserialize request")
-        raise HTTPException(status_code=400, detail=f"Deserialization error: {exc}")
+        raise HTTPException(status_code=400, detail="Invalid request format")
 
     try:
         gen_config = types.GenerateContentConfig(**(config or {}))
@@ -173,7 +173,7 @@ async def generate(
             gen_config.tools = sdk_tools
     except Exception as exc:
         logger.exception("Failed to build GenerateContentConfig")
-        raise HTTPException(status_code=400, detail=f"Config error: {exc}")
+        raise HTTPException(status_code=400, detail="Invalid configuration")
 
     # Log the contents structure for debugging tool-call round-trips
     import json as _json
@@ -207,10 +207,10 @@ async def generate(
         )
     except genai.errors.ClientError as exc:
         logger.error("Gemini ClientError: %s", exc)
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=400, detail="LLM request failed — check model and parameters")
     except Exception as exc:
         logger.exception("Gemini generate failed")
-        raise HTTPException(status_code=502, detail=f"Gemini error: {exc}")
+        raise HTTPException(status_code=502, detail="LLM service temporarily unavailable")
 
     return _serialize_response(response)
 

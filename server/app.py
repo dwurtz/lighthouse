@@ -17,11 +17,22 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Deja API", version="0.2.0")
 
+# Rate limiting
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# CORS restricted — native macOS client doesn't need CORS, but keep
+# trydeja.com for the admin dashboard and potential web client.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=["https://trydeja.com", "http://localhost:5055"],
+    allow_methods=["GET", "POST"],
+    allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
 )
 
 
@@ -57,8 +68,17 @@ async def config():
     }
 
 
+ALLOWED_MODELS = {
+    "gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-2.5-pro",
+    "gemini-2.0-flash", "gemini-2.0-flash-lite",
+}
+MAX_AUDIO_SIZE = 25 * 1024 * 1024  # 25MB
+
+
 @app.post("/v1/generate")
+@limiter.limit("60/minute")
 async def generate_endpoint(
+    request: Request,
     body: GenerateRequest,
     authorization: str = Header(...),
     x_request_id: str | None = Header(None),
@@ -66,6 +86,12 @@ async def generate_endpoint(
     request_id = x_request_id or "no-id"
     token = authorization.removeprefix("Bearer ").strip()
     user = await validate_token(token)
+
+    if body.model not in ALLOWED_MODELS:
+        raise JSONResponse(
+            status_code=400,
+            content={"error": f"Model not allowed: {body.model}"},
+        )
 
     start = time.time()
     result = await generate(
@@ -79,7 +105,7 @@ async def generate_endpoint(
     output_tokens = result.get("usage_metadata", {}).get("candidates_token_count", 0)
 
     logger.info(
-        "generate rid=%s user=%s model=%s in_tokens=%d out_tokens=%d latency_ms=%d",
+        "generate rid=%s user=%s model=%s in=%d out=%d ms=%d",
         request_id, user["email"], body.model, input_tokens, output_tokens, latency_ms,
     )
 
@@ -87,7 +113,9 @@ async def generate_endpoint(
 
 
 @app.post("/v1/transcribe")
+@limiter.limit("10/minute")
 async def transcribe_endpoint(
+    request: Request,
     file: UploadFile = File(...),
     authorization: str = Header(...),
 ):
@@ -95,20 +123,25 @@ async def transcribe_endpoint(
     user = await validate_token(token)
 
     audio_bytes = await file.read()
+    if len(audio_bytes) > MAX_AUDIO_SIZE:
+        return JSONResponse(status_code=413, content={"error": "File too large (25MB max)"})
+
     start = time.time()
     text = await transcribe(audio_bytes, file.filename or "audio.wav")
     latency_ms = round((time.time() - start) * 1000)
 
     logger.info(
-        "transcribe user=%s size=%d latency_ms=%d text=%r",
-        user["email"], len(audio_bytes), latency_ms, text[:100],
+        "transcribe user=%s size=%d ms=%d",
+        user["email"], len(audio_bytes), latency_ms,
     )
 
     return {"text": text}
 
 
 @app.post("/v1/telemetry")
+@limiter.limit("120/minute")
 async def telemetry_endpoint(
+    request: Request,
     body: TelemetryRequest,
     authorization: str | None = Header(None),
 ):
@@ -128,26 +161,33 @@ async def telemetry_endpoint(
 # -- Admin Dashboard ----------------------------------------------------------
 
 import os
+import html as _html
 from fastapi.responses import HTMLResponse
 from db import search_events, get_stats
 
-ADMIN_KEY = os.environ.get("DEJA_ADMIN_KEY", "admin")
+def _esc(s) -> str:
+    """HTML-escape user-controlled strings for safe rendering."""
+    return _html.escape(str(s)) if s else ""
+
+ADMIN_KEY = os.environ.get("DEJA_ADMIN_KEY")
+if not ADMIN_KEY:
+    logger.warning("DEJA_ADMIN_KEY not set — admin dashboard disabled")
 
 
 @app.get("/admin")
 async def admin_dashboard(key: str = ""):
-    if key != ADMIN_KEY:
-        return HTMLResponse("<h1>Unauthorized</h1><p>Add ?key=YOUR_ADMIN_KEY</p>", status_code=401)
+    if not ADMIN_KEY or key != ADMIN_KEY:
+        return HTMLResponse("<h1>Unauthorized</h1>", status_code=401)
 
     stats = get_stats()
     errors_html = ""
     for e in stats["recent_errors"]:
-        props = e.get("properties", "{}")
-        errors_html += f"<tr><td>{e['timestamp'][:19]}</td><td>{e['user_email'] or '—'}</td><td>{props}</td></tr>"
+        props = _esc(e.get("properties", "{}"))
+        errors_html += f"<tr><td>{_esc(e['timestamp'][:19])}</td><td>{_esc(e['user_email']) or '—'}</td><td>{props}</td></tr>"
 
     users_html = ""
     for u in stats["active_users"]:
-        users_html += f"<tr><td>{u['user_email']}</td><td>{u['event_count']}</td><td>{u['last_seen'][:19]}</td></tr>"
+        users_html += f"<tr><td>{_esc(u['user_email'])}</td><td>{u['event_count']}</td><td>{_esc(u['last_seen'][:19])}</td></tr>"
 
     return HTMLResponse(f"""<!DOCTYPE html>
 <html><head><title>Déjà Admin</title>
@@ -200,9 +240,9 @@ async def admin_search(key: str = "", q: str = "", event: str = ""):
     rows_html = ""
     for r in results:
         rows_html += (
-            f"<tr><td>{r['timestamp'][:19]}</td><td>{r['event']}</td>"
-            f"<td>{r['user_email'] or '—'}</td><td>{r['request_id'] or '—'}</td>"
-            f"<td><small>{r['properties'][:200]}</small></td></tr>"
+            f"<tr><td>{_esc(r['timestamp'][:19])}</td><td>{_esc(r['event'])}</td>"
+            f"<td>{_esc(r['user_email']) or '—'}</td><td>{_esc(r['request_id']) or '—'}</td>"
+            f"<td><small>{_esc(r['properties'][:200])}</small></td></tr>"
         )
 
     return HTMLResponse(f"""<!DOCTYPE html>
@@ -218,11 +258,11 @@ async def admin_search(key: str = "", q: str = "", event: str = ""):
   th {{ color: #888; font-weight: 600; }}
   .error {{ color: #f66; }}
 </style></head><body>
-<h1><a href="/admin?key={key}">← Déjà Admin</a> — Search: "{q or event}"</h1>
+<h1><a href="/admin?key={_esc(key)}">← Déjà Admin</a> — Search: "{_esc(q or event)}"</h1>
 
 <form action="/admin/search" method="get">
-  <input type="hidden" name="key" value="{key}">
-  <input type="text" name="q" placeholder="Request ID, email, or keyword..." value="{q}">
+  <input type="hidden" name="key" value="{_esc(key)}">
+  <input type="text" name="q" placeholder="Request ID, email, or keyword..." value="{_esc(q)}">
   <button type="submit">Search</button>
 </form>
 
