@@ -103,7 +103,7 @@ _BRANDED_CALLBACK_HTML = """<!DOCTYPE html>
     <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
   </div>
   <h1>You're signed in</h1>
-  <p>Your Google account is connected. Déjà is setting up your personal wiki and will start observing your workspace.</p>
+  <p>Your Google account is connected. You can return to the app.</p>
   <div class="close-hint">You can close this tab</div>
 </div>
 </body>
