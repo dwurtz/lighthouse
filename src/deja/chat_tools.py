@@ -257,12 +257,119 @@ def rename_page(category: str, old_slug: str, new_slug: str, reason: str) -> Too
 # Dispatch + SDK bindings
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Google Workspace tools (direct API, no gws CLI dependency)
+# ---------------------------------------------------------------------------
+
+def _google_api(method: str, url: str, json_body: dict | None = None) -> tuple[int, dict]:
+    """Make an authenticated Google API call using the stored OAuth token."""
+    import httpx
+    from deja.auth import get_auth_token
+
+    token = get_auth_token()
+    if not token:
+        return 401, {"error": "Not authenticated — sign in first"}
+
+    headers = {"Authorization": f"Bearer {token}"}
+    try:
+        with httpx.Client(timeout=15) as client:
+            if method == "GET":
+                resp = client.get(url, headers=headers)
+            elif method == "POST":
+                resp = client.post(url, headers=headers, json=json_body)
+            elif method == "PATCH":
+                resp = client.patch(url, headers=headers, json=json_body)
+            else:
+                return 400, {"error": f"unsupported method {method}"}
+            return resp.status_code, resp.json() if resp.content else {}
+    except Exception as e:
+        return 500, {"error": str(e)}
+
+
+def create_calendar_event(summary: str, start: str, end: str,
+                          description: str = "", location: str = "") -> ToolResult:
+    """Create a Google Calendar event."""
+    if not summary or not start or not end:
+        return ToolResult(ok=False, message="summary, start, and end are required")
+
+    body = {
+        "summary": summary,
+        "start": {"dateTime": start},
+        "end": {"dateTime": end},
+    }
+    if description:
+        body["description"] = description
+    if location:
+        body["location"] = location
+
+    status, data = _google_api(
+        "POST",
+        "https://www.googleapis.com/calendar/v3/calendars/primary/events",
+        body,
+    )
+    if 200 <= status < 300:
+        link = data.get("htmlLink", "")
+        append_log_entry("chat", f"created calendar event: {summary} at {start}")
+        return ToolResult(ok=True, message=f"Created '{summary}' — {link}", data={"link": link})
+    return ToolResult(ok=False, message=f"Calendar API error {status}: {data.get('error', {}).get('message', str(data))}")
+
+
+def draft_email(to: str, subject: str, body: str) -> ToolResult:
+    """Create a Gmail draft (does NOT send — user reviews in Gmail)."""
+    import base64 as b64
+
+    if not to or not subject:
+        return ToolResult(ok=False, message="to and subject are required")
+
+    from deja.identity import load_user
+    user = load_user()
+    from_addr = user.email or "me"
+
+    raw_msg = f"From: {from_addr}\nTo: {to}\nSubject: {subject}\n\n{body}"
+    encoded = b64.urlsafe_b64encode(raw_msg.encode()).decode()
+
+    status, data = _google_api(
+        "POST",
+        "https://www.googleapis.com/gmail/v1/users/me/drafts",
+        {"message": {"raw": encoded}},
+    )
+    if 200 <= status < 300:
+        append_log_entry("chat", f"drafted email to {to}: {subject}")
+        return ToolResult(ok=True, message=f"Draft created — to: {to}, subject: {subject}")
+    return ToolResult(ok=False, message=f"Gmail API error {status}: {data.get('error', {}).get('message', str(data))}")
+
+
+def create_task(title: str, notes: str = "", due: str = "") -> ToolResult:
+    """Add a task to Google Tasks."""
+    if not title:
+        return ToolResult(ok=False, message="title is required")
+
+    task_body: dict = {"title": title}
+    if notes:
+        task_body["notes"] = notes
+    if due:
+        task_body["due"] = due
+
+    status, data = _google_api(
+        "POST",
+        "https://tasks.googleapis.com/tasks/v1/lists/@default/tasks",
+        task_body,
+    )
+    if 200 <= status < 300:
+        append_log_entry("chat", f"created task: {title}")
+        return ToolResult(ok=True, message=f"Task created: {title}")
+    return ToolResult(ok=False, message=f"Tasks API error {status}: {data.get('error', {}).get('message', str(data))}")
+
+
 _TOOLS = {
     "list_pages": list_pages,
     "read_page": read_page,
     "write_page": write_page,
     "delete_page": delete_page,
     "rename_page": rename_page,
+    "create_calendar_event": create_calendar_event,
+    "draft_email": draft_email,
+    "create_task": create_task,
 }
 
 
@@ -361,6 +468,53 @@ _TOOL_SCHEMAS = [
                 "reason": {"type": "string"},
             },
             "required": ["category", "old_slug", "new_slug", "reason"],
+        },
+    },
+    {
+        "name": "create_calendar_event",
+        "description": (
+            "Create a Google Calendar event. Times must be ISO 8601 with timezone "
+            "(e.g. 2026-04-10T15:45:00-07:00). Infer the user's timezone from context."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "summary": {"type": "string", "description": "Event title"},
+                "start": {"type": "string", "description": "ISO 8601 start datetime with timezone"},
+                "end": {"type": "string", "description": "ISO 8601 end datetime with timezone"},
+                "description": {"type": "string", "description": "Optional event description"},
+                "location": {"type": "string", "description": "Optional location"},
+            },
+            "required": ["summary", "start", "end"],
+        },
+    },
+    {
+        "name": "draft_email",
+        "description": (
+            "Create a Gmail draft (does NOT send — user reviews in Gmail before sending). "
+            "Use this when the user asks to email someone."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "to": {"type": "string", "description": "Recipient email address"},
+                "subject": {"type": "string"},
+                "body": {"type": "string", "description": "Plain text email body"},
+            },
+            "required": ["to", "subject", "body"],
+        },
+    },
+    {
+        "name": "create_task",
+        "description": "Add a task to Google Tasks.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string"},
+                "notes": {"type": "string", "description": "Optional notes/details"},
+                "due": {"type": "string", "description": "Optional due date in RFC 3339 format"},
+            },
+            "required": ["title"],
         },
     },
 ]
