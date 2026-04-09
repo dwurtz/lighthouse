@@ -36,6 +36,8 @@ async def post_chat(body: dict):
     ``delete_page`` / ``rename_page`` directly. The agentic loop runs
     until Pro stops emitting function calls, then its final text reply
     is streamed to the client.
+
+    Works through the proxy server (no local GEMINI_API_KEY needed).
     """
     from starlette.responses import StreamingResponse
 
@@ -51,19 +53,6 @@ async def post_chat(body: dict):
         }
     )
     save_conversation(messages)
-
-    from deja.llm_client import GeminiClient, _USE_DIRECT
-
-    if not _USE_DIRECT:
-        # Chat with tool calling requires the full genai SDK.
-        # TODO: Support tool calling through the proxy server.
-        from starlette.responses import JSONResponse
-        return JSONResponse(
-            {"error": "Chat requires GEMINI_API_KEY (tool calling not yet supported through proxy)"},
-            status_code=501,
-        )
-
-    gemini = GeminiClient()
 
     # Relevant wiki pages via QMD
     from deja.llm.search import search as qmd_search
@@ -101,35 +90,32 @@ async def post_chat(body: dict):
         **user_fields,
     )
 
-    from deja.chat_tools import build_tool_declarations, execute_tool_call
-    from google.genai import types as genai_types
+    from deja.chat_tools import build_tool_declarations_json, execute_tool_call
 
-    tools = build_tool_declarations()
+    tools_json = build_tool_declarations_json()
 
     contents: list = [
-        genai_types.Content(
-            role="user",
-            parts=[genai_types.Part.from_text(text=user_message)],
-        ),
+        {"role": "user", "parts": [{"text": user_message}]},
     ]
 
     MAX_TOOL_ROUNDS = 8
 
     async def stream_response():
+        nonlocal contents
         full_text_response = ""
         tool_events: list[dict] = []
 
         for round_idx in range(MAX_TOOL_ROUNDS):
             try:
-                resp = await gemini.client.aio.models.generate_content(
+                result = await _call_generate(
                     model=REFLECT_MODEL,
                     contents=contents,
-                    config=genai_types.GenerateContentConfig(
-                        system_instruction=system_instruction,
-                        tools=tools,
-                        max_output_tokens=4096,
-                        temperature=0.4,
-                    ),
+                    system_instruction=system_instruction,
+                    tools=tools_json,
+                    config={
+                        "max_output_tokens": 4096,
+                        "temperature": 0.4,
+                    },
                 )
             except Exception as e:
                 err = f"chat LLM call failed: {e}"
@@ -137,22 +123,19 @@ async def post_chat(body: dict):
                 yield f"data: {json.dumps({'chunk': f'[error] {err}'})}\n\n"
                 break
 
+            parts = result.get("parts", [])
             function_calls = []
             round_text = ""
-            candidate = resp.candidates[0] if resp.candidates else None
-            parts = (
-                (candidate.content.parts if candidate and candidate.content else [])
-                or []
-            )
-            for part in parts:
-                if getattr(part, "function_call", None):
-                    fc = part.function_call
-                    function_calls.append(fc)
-                elif getattr(part, "text", None):
-                    round_text += part.text
 
+            for part in parts:
+                if "function_call" in part:
+                    function_calls.append(part["function_call"])
+                elif "text" in part:
+                    round_text += part["text"]
+
+            # Add model response to contents for multi-round
             if parts:
-                contents.append(genai_types.Content(role="model", parts=parts))
+                contents.append({"role": "model", "parts": parts})
 
             if round_text:
                 full_text_response += round_text
@@ -163,9 +146,9 @@ async def post_chat(body: dict):
 
             response_parts = []
             for fc in function_calls:
-                name = fc.name
-                args = dict(fc.args) if fc.args else {}
-                result = execute_tool_call(name, args)
+                name = fc["name"]
+                args = fc.get("args", {})
+                result_obj = execute_tool_call(name, args)
                 tool_events.append(
                     {
                         "tool": name,
@@ -177,22 +160,20 @@ async def post_chat(body: dict):
                             )
                             for k, v in args.items()
                         },
-                        "ok": result.ok,
-                        "message": result.message,
+                        "ok": result_obj.ok,
+                        "message": result_obj.message,
                     }
                 )
                 yield f"data: {json.dumps({'tool_call': tool_events[-1]})}\n\n"
 
-                response_parts.append(
-                    genai_types.Part.from_function_response(
-                        name=name,
-                        response=result.as_response_dict(),
-                    )
-                )
+                response_parts.append({
+                    "function_response": {
+                        "name": name,
+                        "response": result_obj.as_response_dict(),
+                    }
+                })
 
-            contents.append(
-                genai_types.Content(role="user", parts=response_parts)
-            )
+            contents.append({"role": "user", "parts": response_parts})
         else:
             warning = f"[chat tool loop hit {MAX_TOOL_ROUNDS}-round ceiling]"
             log.warning(warning)
@@ -273,3 +254,109 @@ async def post_chat(body: dict):
         yield f"data: {json.dumps({'done': True})}\n\n"
 
     return StreamingResponse(stream_response(), media_type="text/event-stream")
+
+
+async def _call_generate(
+    model: str,
+    contents: list,
+    system_instruction: str,
+    tools: list,
+    config: dict,
+) -> dict:
+    """Call the Gemini proxy server for a generate request with tool support.
+
+    Falls back to direct SDK if GEMINI_API_KEY is set locally.
+    """
+    from deja.llm_client import _USE_DIRECT
+
+    if _USE_DIRECT:
+        return await _call_generate_direct(model, contents, system_instruction, tools, config)
+
+    import httpx
+    from deja.llm_client import DEJA_API_URL
+    from deja.auth import get_auth_token
+
+    token = get_auth_token()
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+
+    async with httpx.AsyncClient(timeout=120) as client:
+        resp = await client.post(
+            f"{DEJA_API_URL}/v1/generate",
+            json={
+                "model": model,
+                "contents": contents,
+                "config": config,
+                "system_instruction": system_instruction,
+                "tools": tools,
+            },
+            headers=headers,
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+
+async def _call_generate_direct(
+    model: str,
+    contents: list,
+    system_instruction: str,
+    tools: list,
+    config: dict,
+) -> dict:
+    """Direct SDK fallback when GEMINI_API_KEY is set locally."""
+    from deja.llm_client import GeminiClient
+    from google.genai import types as genai_types
+
+    gemini = GeminiClient()
+
+    # Rebuild SDK types from JSON
+    sdk_contents = []
+    for c in contents:
+        parts = []
+        for p in c.get("parts", []):
+            if "text" in p:
+                parts.append(genai_types.Part.from_text(text=p["text"]))
+            elif "function_call" in p:
+                fc = p["function_call"]
+                parts.append(genai_types.Part.from_function_call(
+                    name=fc["name"], args=fc.get("args", {}),
+                ))
+            elif "function_response" in p:
+                fr = p["function_response"]
+                parts.append(genai_types.Part.from_function_response(
+                    name=fr["name"], response=fr.get("response", {}),
+                ))
+        sdk_contents.append(genai_types.Content(role=c["role"], parts=parts))
+
+    # Rebuild tool declarations
+    from deja.chat_tools import build_tool_declarations
+    sdk_tools = build_tool_declarations()
+
+    resp = await gemini.client.aio.models.generate_content(
+        model=model,
+        contents=sdk_contents,
+        config=genai_types.GenerateContentConfig(
+            system_instruction=system_instruction,
+            tools=sdk_tools,
+            **config,
+        ),
+    )
+
+    # Serialize response
+    parts_data = []
+    text = ""
+    candidate = resp.candidates[0] if resp.candidates else None
+    if candidate and candidate.content and candidate.content.parts:
+        for part in candidate.content.parts:
+            if getattr(part, "function_call", None):
+                fc = part.function_call
+                parts_data.append({
+                    "function_call": {
+                        "name": fc.name,
+                        "args": dict(fc.args) if fc.args else {},
+                    }
+                })
+            elif getattr(part, "text", None):
+                text += part.text
+                parts_data.append({"text": part.text})
+
+    return {"text": text, "parts": parts_data}

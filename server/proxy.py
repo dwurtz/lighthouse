@@ -1,4 +1,4 @@
-"""Deja API proxy — Gemini LLM + Groq Whisper transcription."""
+"""Deja API proxy — Gemini LLM (with tool calling) + Groq Whisper transcription."""
 
 import base64
 import os
@@ -19,60 +19,147 @@ def _get_client() -> genai.Client:
 def _deserialize_contents(contents):
     """Convert JSON-serialized contents back to SDK types.
 
-    Handles base64-encoded binary parts (audio, images) sent by the client
-    as {"type": "bytes", "data": "<base64>", "mime_type": "audio/wav"}.
+    Handles:
+    - Plain strings
+    - base64-encoded binary parts: {"type": "bytes", "data": "<b64>", "mime_type": "..."}
+    - Role-based content: {"role": "user"|"model", "parts": [...]}
+    - Function call parts: {"function_call": {"name": "...", "args": {...}}}
+    - Function response parts: {"function_response": {"name": "...", "response": {...}}}
     """
     if isinstance(contents, str):
         return contents
     if not isinstance(contents, list):
         return contents
 
-    parts = []
+    result = []
     for item in contents:
         if isinstance(item, str):
-            parts.append(item)
+            result.append(item)
         elif isinstance(item, dict) and item.get("type") == "bytes":
             data = base64.b64decode(item["data"])
-            parts.append(types.Part.from_bytes(data=data, mime_type=item["mime_type"]))
+            result.append(types.Part.from_bytes(data=data, mime_type=item["mime_type"]))
+        elif isinstance(item, dict) and "role" in item and "parts" in item:
+            # Content with role + parts
+            parts = []
+            for p in (item.get("parts") or []):
+                parts.append(_deserialize_part(p))
+            result.append(types.Content(role=item["role"], parts=parts))
         elif isinstance(item, dict):
-            parts.append(item)
+            result.append(item)
         else:
-            parts.append(item)
-    return parts
+            result.append(item)
+    return result
 
 
-async def generate(model: str, contents, config: dict) -> dict:
-    """Proxy a generateContent call to Gemini. Returns the raw response dict."""
+def _deserialize_part(p):
+    """Deserialize a single part dict into an SDK Part."""
+    if isinstance(p, str):
+        return types.Part.from_text(text=p)
+    if isinstance(p, dict):
+        if "text" in p:
+            return types.Part.from_text(text=p["text"])
+        if "function_call" in p:
+            fc = p["function_call"]
+            return types.Part.from_function_call(
+                name=fc["name"],
+                args=fc.get("args", {}),
+            )
+        if "function_response" in p:
+            fr = p["function_response"]
+            return types.Part.from_function_response(
+                name=fr["name"],
+                response=fr.get("response", {}),
+            )
+        if p.get("type") == "bytes":
+            data = base64.b64decode(p["data"])
+            return types.Part.from_bytes(data=data, mime_type=p["mime_type"])
+    return p
+
+
+def _deserialize_tools(tools_data):
+    """Convert JSON tool declarations to SDK Tool objects."""
+    if not tools_data:
+        return None
+
+    all_decls = []
+    for tool_group in tools_data:
+        decls = tool_group.get("function_declarations", [])
+        for d in decls:
+            all_decls.append(types.FunctionDeclaration(
+                name=d["name"],
+                description=d.get("description", ""),
+                parameters=d.get("parameters"),
+            ))
+
+    if all_decls:
+        return [types.Tool(function_declarations=all_decls)]
+    return None
+
+
+def _serialize_response(response) -> dict:
+    """Serialize a Gemini response to JSON, including function_call parts."""
+    candidate = response.candidates[0] if response.candidates else None
+    parts_data = []
+    text = ""
+
+    if candidate and candidate.content and candidate.content.parts:
+        for part in candidate.content.parts:
+            if getattr(part, "function_call", None):
+                fc = part.function_call
+                parts_data.append({
+                    "function_call": {
+                        "name": fc.name,
+                        "args": dict(fc.args) if fc.args else {},
+                    }
+                })
+            elif getattr(part, "text", None):
+                text += part.text
+                parts_data.append({"text": part.text})
+
+    usage = {}
+    if hasattr(response, "usage_metadata") and response.usage_metadata:
+        try:
+            usage = response.usage_metadata.model_dump()
+        except Exception:
+            usage = {}
+
+    return {
+        "text": text,
+        "parts": parts_data,
+        "usage_metadata": usage,
+    }
+
+
+async def generate(
+    model: str,
+    contents,
+    config: dict,
+    system_instruction: str | None = None,
+    tools: list | None = None,
+) -> dict:
+    """Proxy a generateContent call to Gemini. Returns serialized response."""
     client = _get_client()
     contents = _deserialize_contents(contents)
+    sdk_tools = _deserialize_tools(tools)
+
+    gen_config = types.GenerateContentConfig(**(config or {}))
+    if system_instruction:
+        gen_config.system_instruction = system_instruction
+    if sdk_tools:
+        gen_config.tools = sdk_tools
 
     try:
         response = client.models.generate_content(
             model=model,
             contents=contents,
-            config=config or None,
+            config=gen_config,
         )
     except genai.errors.ClientError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Gemini error: {exc}")
 
-    # Serialize the response to a dict the client can consume.
-    # The genai SDK response has a model_dump or to_dict depending on version.
-    if hasattr(response, "model_dump"):
-        return response.model_dump()
-    elif hasattr(response, "to_json_dict"):
-        return response.to_json_dict()
-    else:
-        # Fallback: pull the essential fields
-        return {
-            "text": response.text if hasattr(response, "text") else str(response),
-            "usage_metadata": (
-                response.usage_metadata.model_dump()
-                if hasattr(response, "usage_metadata") and response.usage_metadata
-                else {}
-            ),
-        }
+    return _serialize_response(response)
 
 
 async def transcribe(audio_bytes: bytes, filename: str = "audio.wav") -> str:

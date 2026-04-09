@@ -285,6 +285,92 @@ def execute_tool_call(name: str, args: dict) -> ToolResult:
         return ToolResult(ok=False, message=f"{name} failed: {e}")
 
 
+_TOOL_SCHEMAS = [
+    {
+        "name": "list_pages",
+        "description": (
+            "List every wiki page with its category, slug, and title. "
+            "Optionally filter by category ('people' or 'projects'). "
+            "Call this first when you need to find pages matching a description."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "category": {
+                    "type": "string",
+                    "enum": ["people", "projects"],
+                    "description": "Optional filter — omit to list both categories.",
+                },
+            },
+        },
+    },
+    {
+        "name": "read_page",
+        "description": (
+            "Read the current full markdown content of one wiki page, "
+            "including YAML frontmatter."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "category": {"type": "string", "enum": ["people", "projects"]},
+                "slug": {"type": "string", "description": "kebab-case identifier"},
+            },
+            "required": ["category", "slug"],
+        },
+    },
+    {
+        "name": "write_page",
+        "description": (
+            "Create or overwrite a wiki page with new markdown content. "
+            "Always read_page first if the page might exist."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "category": {"type": "string", "enum": ["people", "projects"]},
+                "slug": {"type": "string", "description": "kebab-case identifier"},
+                "content": {"type": "string", "description": "full markdown body"},
+                "reason": {"type": "string", "description": "why this change is being made"},
+            },
+            "required": ["category", "slug", "content", "reason"],
+        },
+    },
+    {
+        "name": "delete_page",
+        "description": "Remove a wiki page. Reversible via git revert.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "category": {"type": "string", "enum": ["people", "projects"]},
+                "slug": {"type": "string"},
+                "reason": {"type": "string"},
+            },
+            "required": ["category", "slug", "reason"],
+        },
+    },
+    {
+        "name": "rename_page",
+        "description": "Atomically rename a page from old_slug to new_slug.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "category": {"type": "string", "enum": ["people", "projects"]},
+                "old_slug": {"type": "string"},
+                "new_slug": {"type": "string"},
+                "reason": {"type": "string"},
+            },
+            "required": ["category", "old_slug", "new_slug", "reason"],
+        },
+    },
+]
+
+
+def build_tool_declarations_json() -> list[dict]:
+    """Return tool declarations as JSON-serializable dicts for the proxy."""
+    return [{"function_declarations": _TOOL_SCHEMAS}]
+
+
 def build_tool_declarations() -> list[types.Tool]:
     """Return the ``google-genai`` Tool list to pass to ``generate_content``.
 

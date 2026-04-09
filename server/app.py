@@ -31,6 +31,8 @@ class GenerateRequest(BaseModel):
     model: str
     contents: str | list
     config: dict = {}
+    system_instruction: str | None = None
+    tools: list | None = None
 
 
 class TelemetryRequest(BaseModel):
@@ -64,7 +66,11 @@ async def generate_endpoint(
     user = await validate_token(token)
 
     start = time.time()
-    result = await generate(body.model, body.contents, body.config)
+    result = await generate(
+        body.model, body.contents, body.config,
+        system_instruction=body.system_instruction,
+        tools=body.tools,
+    )
     latency_ms = round((time.time() - start) * 1000)
 
     input_tokens = result.get("usage_metadata", {}).get("prompt_token_count", 0)

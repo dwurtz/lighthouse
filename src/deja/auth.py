@@ -20,16 +20,16 @@ log = logging.getLogger(__name__)
 _DEJA_TOKEN_PATH = Path.home() / ".deja" / "google_token.json"
 _GWS_TOKEN_PATH = Path.home() / ".config" / "gws" / "token.json"
 
-# Scopes needed for Google Workspace observation collectors
+# Scopes for Google Workspace — read for observation, write for actions
 SCOPES = [
     "openid",
     "https://www.googleapis.com/auth/userinfo.email",
     "https://www.googleapis.com/auth/userinfo.profile",
-    "https://www.googleapis.com/auth/gmail.readonly",
-    "https://www.googleapis.com/auth/calendar.readonly",
-    "https://www.googleapis.com/auth/drive.readonly",
-    "https://www.googleapis.com/auth/tasks.readonly",
-    "https://www.googleapis.com/auth/contacts.readonly",
+    "https://www.googleapis.com/auth/gmail.modify",           # read + draft/send
+    "https://www.googleapis.com/auth/calendar",                # read + create/edit events
+    "https://www.googleapis.com/auth/drive",                   # read + create/edit files
+    "https://www.googleapis.com/auth/tasks",                   # read + create/edit tasks
+    "https://www.googleapis.com/auth/contacts",                # read + create/edit contacts
 ]
 
 
