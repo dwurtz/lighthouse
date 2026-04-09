@@ -138,15 +138,27 @@ async def generate(
     tools: list | None = None,
 ) -> dict:
     """Proxy a generateContent call to Gemini. Returns serialized response."""
-    client = _get_client()
-    contents = _deserialize_contents(contents)
-    sdk_tools = _deserialize_tools(tools)
+    import logging
+    logger = logging.getLogger("proxy")
 
-    gen_config = types.GenerateContentConfig(**(config or {}))
-    if system_instruction:
-        gen_config.system_instruction = system_instruction
-    if sdk_tools:
-        gen_config.tools = sdk_tools
+    client = _get_client()
+
+    try:
+        contents = _deserialize_contents(contents)
+        sdk_tools = _deserialize_tools(tools)
+    except Exception as exc:
+        logger.exception("Failed to deserialize request")
+        raise HTTPException(status_code=400, detail=f"Deserialization error: {exc}")
+
+    try:
+        gen_config = types.GenerateContentConfig(**(config or {}))
+        if system_instruction:
+            gen_config.system_instruction = system_instruction
+        if sdk_tools:
+            gen_config.tools = sdk_tools
+    except Exception as exc:
+        logger.exception("Failed to build GenerateContentConfig")
+        raise HTTPException(status_code=400, detail=f"Config error: {exc}")
 
     try:
         response = client.models.generate_content(
@@ -155,8 +167,10 @@ async def generate(
             config=gen_config,
         )
     except genai.errors.ClientError as exc:
+        logger.error("Gemini ClientError: %s", exc)
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
+        logger.exception("Gemini generate failed")
         raise HTTPException(status_code=502, detail=f"Gemini error: {exc}")
 
     return _serialize_response(response)
