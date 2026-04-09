@@ -118,8 +118,14 @@ async def post_chat(body: dict):
                     },
                 )
             except Exception as e:
-                log.exception("chat LLM call failed: %s", e)
-                yield f"data: {json.dumps({'chunk': 'Sorry, I had trouble processing that. Please try again.'})}\n\n"
+                request_id = getattr(e, 'request_id', None)
+                if not request_id:
+                    from deja.telemetry import new_request_id, track_error
+                    request_id = new_request_id()
+                    track_error("chat", str(e)[:200], request_id=request_id)
+                log.exception("chat LLM call failed (rid=%s): %s", request_id, e)
+                error_msg = f"Something went wrong. If this persists, contact support with code: {request_id}"
+                yield f"data: {json.dumps({'chunk': error_msg})}\n\n"
                 break
 
             parts = result.get("parts", [])

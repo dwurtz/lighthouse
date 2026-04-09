@@ -27,9 +27,11 @@ class MonitorState: ObservableObject {
     @Published var voicePillEnabled: Bool = true
     @Published var voicePillActive: Bool = false
     @Published var voicePillProcessing: Bool = false
+    @Published var voicePillStatus: String = ""  // "Listening..." or "Transcribing..."
     @Published var voicePillTranscript: String = ""
     @Published var voicePillHovered: Bool = false
-    @Published var audioLevel: CGFloat = 0
+    @Published var waveformPhase: Double = 0
+    private var waveformTimer: Timer?
 
     // Permission state — checked on launch and periodically
     @Published var hasScreenRecording: Bool = false
@@ -75,7 +77,6 @@ class MonitorState: ObservableObject {
     private let databaseReader = DatabaseReader()
     private let setupManager = SetupManager()
     private let meetingCoordinator = MeetingCoordinator()
-    private let audioLevelMonitor = AudioLevelMonitor()
 
     // MARK: - Static paths (used by extracted services)
 
@@ -585,37 +586,49 @@ class MonitorState: ObservableObject {
     // MARK: - Voice Pill (hold-to-talk)
 
     func startVoiceCapture() {
-        guard !voicePillActive else { return }
-        NSLog("deja: startVoiceCapture called")
-        voicePillActive = true
+        guard !voicePillActive, !voicePillProcessing else { return }
 
-        // Start ffmpeg recording via the existing mic API
-        guard let url = URL(string: "http://localhost:5055/api/mic/start") else { return }
+        // Show "warming up" state — mic needs ~1.5s to activate (especially Bluetooth)
+        voicePillProcessing = true
+        voicePillStatus = "Listening..."
+        voicePillTranscript = ""
+
+        // Start ffmpeg recording — the mic takes a moment to activate
+        guard let url = URL(string: "http://localhost:5055/api/mic/start") else {
+            voicePillProcessing = false
+            return
+        }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.timeoutInterval = 5
-        URLSession.shared.dataTask(with: req) { data, _, error in
+        URLSession.shared.dataTask(with: req) { [weak self] data, _, error in
             if let error = error {
                 NSLog("deja: mic/start error: \(error)")
-            } else {
-                NSLog("deja: mic/start OK")
+                DispatchQueue.main.async { self?.voicePillProcessing = false }
+                return
+            }
+            // Wait for mic warmup, then show waveform (ready to talk)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                guard let self = self else { return }
+                self.voicePillProcessing = false
+                self.voicePillActive = true
+                self.waveformTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
+                    self?.waveformPhase += 0.15
+                }
             }
         }.resume()
-
-        // Start audio level monitoring for waveform
-        audioLevelMonitor.start { [weak self] level in
-            self?.audioLevel = level
-        }
     }
 
     func stopVoiceCapture() {
         guard voicePillActive else { return }
         voicePillActive = false
-        audioLevel = 0
-        audioLevelMonitor.stop()
+        waveformPhase = 0
+        waveformTimer?.invalidate()
+        waveformTimer = nil
 
         // Show processing state
         voicePillProcessing = true
+        voicePillStatus = "Transcribing..."
         voicePillTranscript = ""
 
         // Stop recording and get transcript

@@ -61,7 +61,9 @@ async def config():
 async def generate_endpoint(
     body: GenerateRequest,
     authorization: str = Header(...),
+    x_request_id: str | None = Header(None),
 ):
+    request_id = x_request_id or "no-id"
     token = authorization.removeprefix("Bearer ").strip()
     user = await validate_token(token)
 
@@ -77,8 +79,8 @@ async def generate_endpoint(
     output_tokens = result.get("usage_metadata", {}).get("candidates_token_count", 0)
 
     logger.info(
-        "generate user=%s model=%s in_tokens=%d out_tokens=%d latency_ms=%d",
-        user["email"], body.model, input_tokens, output_tokens, latency_ms,
+        "generate rid=%s user=%s model=%s in_tokens=%d out_tokens=%d latency_ms=%d",
+        request_id, user["email"], body.model, input_tokens, output_tokens, latency_ms,
     )
 
     return result

@@ -1,8 +1,12 @@
-"""Client-side telemetry for Déjà.
+"""Client-side telemetry and request tracing for Déjà.
 
 Sends lightweight operational events to the Deja API server for
 debugging and usage analytics. All calls are fire-and-forget —
 failures are silent and never affect app behavior.
+
+Every request gets a unique request ID (UUID) that flows from client
+to server to logs. When errors are shown to users, they include this
+ID so support can trace the full chain.
 
 Privacy principles:
   - NO message content, wiki text, email bodies, or screenshot data
@@ -19,6 +23,7 @@ import os
 import platform
 import threading
 import time
+import uuid
 from typing import Any
 
 log = logging.getLogger(__name__)
@@ -104,26 +109,58 @@ def _get_token() -> str | None:
 
 
 # ---------------------------------------------------------------------------
+# Request IDs
+# ---------------------------------------------------------------------------
+
+def new_request_id() -> str:
+    """Generate a short, user-friendly request ID.
+
+    Format: 8-char hex (e.g. 'a3f2b91c'). Short enough to read over
+    the phone or paste into a support email. Collision probability is
+    negligible for our scale.
+    """
+    return uuid.uuid4().hex[:8]
+
+
+def format_error_for_user(message: str, request_id: str | None = None) -> str:
+    """Format an error message that includes the request ID for support.
+
+    This is what users see. The request ID lets support trace the full
+    chain in server logs.
+    """
+    rid = request_id or new_request_id()
+    return f"{message}\n\nIf this persists, contact support with code: {rid}"
+
+
+# ---------------------------------------------------------------------------
 # Convenience helpers for common events
 # ---------------------------------------------------------------------------
 
 def track_setup_step(step: str, **extra: Any) -> None:
-    """Track a setup funnel step.
-
-    Steps: setup_started, google_auth_completed, screen_recording_granted,
-           fda_granted, setup_completed
-    """
+    """Track a setup funnel step."""
     track(f"setup.{step}", extra)
 
 
-def track_error(component: str, error: str, **extra: Any) -> None:
-    """Track an error event.
+def track_error(
+    component: str,
+    error: str,
+    request_id: str | None = None,
+    **extra: Any,
+) -> None:
+    """Track an error event with request ID for tracing.
 
     Args:
         component: Where the error happened (e.g. 'llm', 'vision', 'auth')
         error: Error type/message (sanitized — no PII)
+        request_id: Request ID to correlate with user-facing error
     """
-    track("error", {"component": component, "error": error[:200], **extra})
+    rid = request_id or new_request_id()
+    track("error", {
+        "component": component,
+        "error": error[:200],
+        "request_id": rid,
+        **extra,
+    })
 
 
 def track_llm_call(model: str, duration_ms: int, ok: bool, **extra: Any) -> None:

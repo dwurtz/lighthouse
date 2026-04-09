@@ -112,10 +112,16 @@ class GeminiClient:
         return resp.json()
 
     async def _generate(self, model: str, contents, config_dict: dict) -> str:
-        """Unified generate call: proxy or direct SDK."""
-        import time as _time
-        from deja.telemetry import track_llm_call
+        """Unified generate call: proxy or direct SDK.
 
+        Every call gets a request_id for end-to-end tracing. The ID is
+        sent to the server as a header and logged in telemetry, so
+        errors can be correlated between client and server logs.
+        """
+        import time as _time
+        from deja.telemetry import track_llm_call, new_request_id
+
+        request_id = new_request_id()
         t0 = _time.time()
         try:
             if self._direct_client:
@@ -126,11 +132,15 @@ class GeminiClient:
                     config=types.GenerateContentConfig(**config_dict),
                 )
                 duration = int((_time.time() - t0) * 1000)
-                track_llm_call(model=model, duration_ms=duration, ok=True)
+                track_llm_call(model=model, duration_ms=duration, ok=True, request_id=request_id)
                 return resp.text
 
             token = get_auth_token()
-            headers = {"Authorization": f"Bearer {token}"} if token else {}
+            headers = {
+                "X-Request-ID": request_id,
+            }
+            if token:
+                headers["Authorization"] = f"Bearer {token}"
             serialized = self._serialize_contents(contents)
             resp = await self._http.post("/v1/generate", json={
                 "model": model,
@@ -139,11 +149,13 @@ class GeminiClient:
             }, headers=headers)
             resp.raise_for_status()
             duration = int((_time.time() - t0) * 1000)
-            track_llm_call(model=model, duration_ms=duration, ok=True)
+            track_llm_call(model=model, duration_ms=duration, ok=True, request_id=request_id)
             return resp.json()["text"]
         except Exception as e:
             duration = int((_time.time() - t0) * 1000)
-            track_llm_call(model=model, duration_ms=duration, ok=False, error=type(e).__name__)
+            track_llm_call(model=model, duration_ms=duration, ok=False, error=type(e).__name__, request_id=request_id)
+            # Attach request_id to the exception so callers can show it
+            e.request_id = request_id  # type: ignore[attr-defined]
             raise
 
     @staticmethod
