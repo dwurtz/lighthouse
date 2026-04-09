@@ -31,6 +31,15 @@ DEJA_HOME = Path(
     or os.environ.get("WORKAGENT_HOME")  # legacy env var
     or (Path.home() / ".deja")
 )
+
+# Ensure ~/.deja/ exists with restricted permissions (owner-only).
+# This runs once at import time before any data is written.
+if not DEJA_HOME.exists():
+    DEJA_HOME.mkdir(parents=True, exist_ok=True)
+    DEJA_HOME.chmod(0o700)
+elif DEJA_HOME.stat().st_mode & 0o077:
+    # Fix permissions if they're too open
+    DEJA_HOME.chmod(0o700)
 WIKI_DIR = Path(
     os.environ.get("DEJA_WIKI")
     or os.environ.get("LIGHTHOUSE_WIKI")  # legacy env var

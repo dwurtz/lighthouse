@@ -174,10 +174,7 @@ struct SetupPanelView: View {
     func connectGoogle() {
         gwsLoading = true
         gwsError = ""
-        guard let url = URL(string: "http://localhost:5055/api/setup/gws-auth") else { return }
-        var req = URLRequest(url: url)
-        req.httpMethod = "POST"
-        req.timeoutInterval = 120
+        var req = localAPIRequest("/api/setup/gws-auth", method: "POST", timeoutInterval: 120)
 
         URLSession.shared.dataTask(with: req) { data, _, err in
             DispatchQueue.main.async {
@@ -246,9 +243,7 @@ struct SetupPanelView: View {
     }
 
     func checkExistingAuth() {
-        guard let url = URL(string: "http://localhost:5055/api/setup/status") else { return }
-        var req = URLRequest(url: url)
-        req.timeoutInterval = 3
+        let req = localAPIRequest("/api/setup/status", timeoutInterval: 3)
         URLSession.shared.dataTask(with: req) { data, _, _ in
             guard let data = data,
                   let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }

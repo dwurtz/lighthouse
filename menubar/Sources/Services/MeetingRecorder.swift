@@ -15,14 +15,18 @@ class MeetingRecorder {
 
     private static var recorderPath: String {
         // Bundled inside the app, next to the main executable
-        let bundled = Bundle.main.executableURL!
-            .deletingLastPathComponent()
-            .appendingPathComponent("DejaRecorder").path
-        if FileManager.default.fileExists(atPath: bundled) {
-            return bundled
+        if let execURL = Bundle.main.executableURL {
+            let bundled = execURL.deletingLastPathComponent()
+                .appendingPathComponent("DejaRecorder").path
+            if FileManager.default.fileExists(atPath: bundled) {
+                return bundled
+            }
         }
-        // Dev fallback
+        #if DEBUG
         return NSHomeDirectory() + "/projects/deja/menubar/DejaRecorder"
+        #else
+        fatalError("DejaRecorder not found in app bundle")
+        #endif
     }
 
     func startRecording(sessionId: String, outputDirPath: String) {

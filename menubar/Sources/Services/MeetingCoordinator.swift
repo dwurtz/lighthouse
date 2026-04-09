@@ -19,9 +19,7 @@ class MeetingCoordinator {
         onDismiss: @escaping () -> Void
     ) {
         guard !isRecording else { return }
-        guard let url = URL(string: "http://localhost:5055/api/meeting/prompt") else { return }
-        var req = URLRequest(url: url)
-        req.timeoutInterval = 2
+        let req = localAPIRequest("/api/meeting/prompt", timeoutInterval: 2)
         URLSession.shared.dataTask(with: req) { [weak self] data, _, _ in
             guard let self = self, let data = data,
                   let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -54,9 +52,7 @@ class MeetingCoordinator {
     }
 
     func refreshMeetingStatus(onElapsed: @escaping (TimeInterval) -> Void) {
-        guard let url = URL(string: "http://localhost:5055/api/meeting/status") else { return }
-        var req = URLRequest(url: url)
-        req.timeoutInterval = 2
+        let req = localAPIRequest("/api/meeting/status", timeoutInterval: 2)
         URLSession.shared.dataTask(with: req) { data, _, _ in
             guard let data = data,
                   let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
@@ -80,9 +76,7 @@ class MeetingCoordinator {
             recordedEventIds.insert(lastPromptedEventId)
         }
 
-        guard let url = URL(string: "http://localhost:5055/api/meeting/start") else { return }
-        var req = URLRequest(url: url)
-        req.httpMethod = "POST"
+        var req = localAPIRequest("/api/meeting/start", method: "POST", timeoutInterval: 10)
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
         let body: [String: Any] = [
@@ -90,7 +84,6 @@ class MeetingCoordinator {
             "attendees": attendees.map { ["name": $0] },
         ]
         req.httpBody = try? JSONSerialization.data(withJSONObject: body)
-        req.timeoutInterval = 10
 
         URLSession.shared.dataTask(with: req) { [weak self] data, _, error in
             if let error = error {
@@ -115,12 +108,9 @@ class MeetingCoordinator {
     func stopRecording(notes: String, onProcessed: @escaping () -> Void) {
         recorder.stopRecording { [weak self] in
             guard self != nil else { return }
-            guard let url = URL(string: "http://localhost:5055/api/meeting/stop") else { return }
-            var req = URLRequest(url: url)
-            req.httpMethod = "POST"
+            var req = localAPIRequest("/api/meeting/stop", method: "POST", timeoutInterval: 300)
             req.setValue("application/json", forHTTPHeaderField: "Content-Type")
             req.httpBody = try? JSONSerialization.data(withJSONObject: ["notes": notes])
-            req.timeoutInterval = 300
 
             URLSession.shared.dataTask(with: req) { data, _, error in
                 DispatchQueue.main.async {
@@ -166,10 +156,7 @@ class MeetingCoordinator {
     // MARK: - Unlink
 
     func unlinkMeeting() {
-        guard let url = URL(string: "http://localhost:5055/api/meeting/unlink") else { return }
-        var req = URLRequest(url: url)
-        req.httpMethod = "POST"
-        req.timeoutInterval = 5
+        let req = localAPIRequest("/api/meeting/unlink", method: "POST", timeoutInterval: 5)
         URLSession.shared.dataTask(with: req) { _, _, _ in }.resume()
     }
 

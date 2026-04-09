@@ -14,10 +14,15 @@ class BackendProcessManager {
         monitorProcess?.isRunning ?? false
     }
 
+    // IPC secret — generated once at app startup, shared with Python via env var.
+    // All HTTP requests to localhost:5055 must include this as X-Deja-Secret header.
+    static let ipcSecret: String = UUID().uuidString
+
     // MARK: - Environment
 
     private func makeEnv() -> [String: String] {
         var env = ProcessInfo.processInfo.environment
+        env["DEJA_IPC_SECRET"] = Self.ipcSecret
         if MonitorState.isBundledPython {
             if let resourceURL = Bundle.main.resourceURL {
                 env["PYTHONPATH"] = resourceURL.appendingPathComponent("python-env/src").path

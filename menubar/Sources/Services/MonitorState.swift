@@ -89,7 +89,11 @@ class MonitorState: ObservableObject {
                 return bundled
             }
         }
+        #if DEBUG
         return NSHomeDirectory() + "/projects/deja/venv/bin/python3"
+        #else
+        fatalError("Bundled Python not found in app bundle — cannot start backend")
+        #endif
     }
 
     static var isBundledPython: Bool {
@@ -226,12 +230,8 @@ class MonitorState: ObservableObject {
 
         // Tell the backend to write the setup_done marker so the
         // wizard doesn't reappear on next launch.
-        if let url = URL(string: "http://localhost:5055/api/setup/complete") {
-            var req = URLRequest(url: url)
-            req.httpMethod = "POST"
-            req.timeoutInterval = 5
-            URLSession.shared.dataTask(with: req) { _, _, _ in }.resume()
-        }
+        let req = localAPIRequest("/api/setup/complete", method: "POST", timeoutInterval: 5)
+        URLSession.shared.dataTask(with: req) { _, _, _ in }.resume()
 
         startScreenshotCapture()
         startDatabaseReaders()
@@ -557,8 +557,8 @@ class MonitorState: ObservableObject {
             return
         }
         let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query
-        guard let url = URL(string: "http://localhost:5055/api/contacts/search?q=\(encoded)&limit=5") else { return }
-        URLSession.shared.dataTask(with: url) { [weak self] data, _, _ in
+        let req = localAPIRequest("/api/contacts/search?q=\(encoded)&limit=5")
+        URLSession.shared.dataTask(with: req) { [weak self] data, _, _ in
             guard let data = data,
                   let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return }
             let results = arr.map { c in
@@ -591,13 +591,7 @@ class MonitorState: ObservableObject {
         voicePillTranscript = ""
 
         // Start ffmpeg recording immediately
-        guard let url = URL(string: "http://localhost:5055/api/mic/start") else {
-            voicePillActive = false
-            return
-        }
-        var req = URLRequest(url: url)
-        req.httpMethod = "POST"
-        req.timeoutInterval = 5
+        let req = localAPIRequest("/api/mic/start", method: "POST", timeoutInterval: 5)
         URLSession.shared.dataTask(with: req) { _, _, _ in }.resume()
 
         // Animate waveform
@@ -619,13 +613,7 @@ class MonitorState: ObservableObject {
         voicePillTranscript = ""
 
         // Stop recording and get transcript
-        guard let url = URL(string: "http://localhost:5055/api/mic/stop") else {
-            voicePillProcessing = false
-            return
-        }
-        var req = URLRequest(url: url)
-        req.httpMethod = "POST"
-        req.timeoutInterval = 30
+        let req = localAPIRequest("/api/mic/stop", method: "POST", timeoutInterval: 30)
         URLSession.shared.dataTask(with: req) { [weak self] data, _, error in
             guard let self = self else { return }
             guard let data = data,
@@ -667,12 +655,9 @@ class MonitorState: ObservableObject {
         chatMessages.append(ChatMessage(role: "agent", content: ""))
 
         DispatchQueue.global().async { [weak self] in
-            guard let url = URL(string: "http://localhost:5055/api/chat") else { return }
-            var request = URLRequest(url: url)
-            request.httpMethod = "POST"
+            var request = localAPIRequest("/api/chat", method: "POST", timeoutInterval: 120)
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.httpBody = try? JSONSerialization.data(withJSONObject: ["message": message])
-            request.timeoutInterval = 120
 
             let session = URLSession(configuration: .default)
             let task = session.dataTask(with: request) { data, response, error in

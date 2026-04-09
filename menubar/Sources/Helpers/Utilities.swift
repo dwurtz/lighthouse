@@ -48,3 +48,16 @@ func formatDuration(_ seconds: TimeInterval) -> String {
     let secs = Int(seconds) % 60
     return String(format: "%d:%02d", mins, secs)
 }
+
+// MARK: - Authenticated Local API Requests
+
+/// Create a URLRequest to the local Python backend with the IPC secret header.
+/// All calls to localhost:5055 MUST use this instead of raw URLRequest.
+func localAPIRequest(_ path: String, method: String = "GET", timeoutInterval: TimeInterval = 10) -> URLRequest {
+    let url = URL(string: "http://localhost:5055\(path)")!
+    var req = URLRequest(url: url)
+    req.httpMethod = method
+    req.timeoutInterval = timeoutInterval
+    req.setValue(BackendProcessManager.ipcSecret, forHTTPHeaderField: "X-Deja-Secret")
+    return req
+}

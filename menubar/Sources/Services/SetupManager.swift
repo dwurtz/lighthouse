@@ -16,9 +16,7 @@ class SetupManager {
 
     /// Check backend setup status and determine which wizard step to show.
     func checkSetupStatus(completion: @escaping (Int) -> Void) {
-        guard let url = URL(string: "http://localhost:5055/api/setup/status") else { return }
-        var req = URLRequest(url: url)
-        req.timeoutInterval = 5
+        let req = localAPIRequest("/api/setup/status", timeoutInterval: 5)
         URLSession.shared.dataTask(with: req) { data, _, _ in
             guard let data = data,
                   let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
@@ -62,9 +60,7 @@ class SetupManager {
     // MARK: - Backfill
 
     func checkBackfillStatus(completion: @escaping (Bool, String, Int) -> Void) {
-        guard let url = URL(string: "http://localhost:5055/api/setup/backfill-status") else { return }
-        var req = URLRequest(url: url)
-        req.timeoutInterval = 3
+        let req = localAPIRequest("/api/setup/backfill-status", timeoutInterval: 3)
         URLSession.shared.dataTask(with: req) { data, _, _ in
             guard let data = data,
                   let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
@@ -78,10 +74,7 @@ class SetupManager {
     }
 
     func startBackfill() {
-        guard let url = URL(string: "http://localhost:5055/api/setup/start-backfill") else { return }
-        var req = URLRequest(url: url)
-        req.httpMethod = "POST"
-        req.timeoutInterval = 10
+        let req = localAPIRequest("/api/setup/start-backfill", method: "POST", timeoutInterval: 10)
         URLSession.shared.dataTask(with: req) { _, _, _ in }.resume()
     }
 }

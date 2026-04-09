@@ -19,12 +19,35 @@ from deja.web.status_routes import router as status_router
 
 def create_app() -> FastAPI:
     """Build and return the fully-configured FastAPI application."""
+    import os
+    from starlette.middleware.base import BaseHTTPMiddleware
+    from starlette.responses import JSONResponse
+
     application = FastAPI(title="deja", version="0.2.0")
 
-    # CORS — wide-open for local notch app
+    # IPC authentication — the Swift app passes a random secret via
+    # DEJA_IPC_SECRET env var. All requests must include it as
+    # X-Deja-Secret header. This prevents other local processes from
+    # accessing the backend.
+    ipc_secret = os.environ.get("DEJA_IPC_SECRET")
+
+    class IPCAuthMiddleware(BaseHTTPMiddleware):
+        async def dispatch(self, request, call_next):
+            if ipc_secret:
+                provided = request.headers.get("x-deja-secret", "")
+                if provided != ipc_secret:
+                    return JSONResponse(
+                        {"error": "Unauthorized"},
+                        status_code=401,
+                    )
+            return await call_next(request)
+
+    application.add_middleware(IPCAuthMiddleware)
+
+    # CORS — localhost only (Swift app + admin)
     application.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=["http://localhost:5055"],
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],

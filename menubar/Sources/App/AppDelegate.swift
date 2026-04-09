@@ -334,6 +334,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func quitApp() {
         hotkeyManager.stop()
         monitor.stop()
+        cleanupSensitiveFiles()
         NSApp.terminate(nil)
+    }
+
+    /// Remove screenshots and other sensitive transient files on quit.
+    private func cleanupSensitiveFiles() {
+        let home = MonitorState.home
+        let fm = FileManager.default
+        // Delete all screenshot files
+        for pattern in ["latest_screen.png", "screen_1.png", "screen_2.png", "screen_3.png", "screen_4.png"] {
+            try? fm.removeItem(atPath: home + "/" + pattern)
+        }
     }
 }

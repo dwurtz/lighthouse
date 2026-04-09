@@ -220,8 +220,6 @@ struct SettingsView: View {
                 logContent += "=== deja.log (last 500 lines) ===\n\(tail)\n\n"
             }
 
-            // Upload to server
-            guard let url = URL(string: "http://localhost:5055/api/setup/status") else { return }
             // For now, compose an email with the logs attached
             let encoded = logContent.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
             let mailto = "mailto:david@trydeja.com?subject=Déjà%20Support%20Logs&body=\(encoded)"
