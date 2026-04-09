@@ -18,6 +18,8 @@ class SetupPanelWindow: NSPanel {
         isMovableByWindowBackground = false
 
         let hostView = NSHostingView(rootView: SetupPanelView(monitor: monitor))
+        hostView.layer?.cornerRadius = 16
+        hostView.layer?.masksToBounds = true
         contentView = hostView
 
         positionAbovePill()
@@ -38,9 +40,10 @@ class SetupPanelWindow: NSPanel {
     }
 
     private func positionAbovePill() {
-        // Anchor at bottom-center, just above the voice pill position.
+        // Anchor at bottom-center of the screen where the mouse cursor is.
         // The pill sits at y=24 from the bottom; we stack above it.
-        guard let screen = NSScreen.main else { return }
+        let mouseLocation = NSEvent.mouseLocation
+        let screen = NSScreen.screens.first(where: { $0.frame.contains(mouseLocation) }) ?? NSScreen.main ?? NSScreen.screens[0]
         let screenFrame = screen.visibleFrame
         let x = screenFrame.origin.x + (screenFrame.width - frame.width) / 2
         let y = screenFrame.origin.y + 80  // above the pill (pill is at y=24, height ~56)

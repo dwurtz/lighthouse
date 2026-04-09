@@ -154,9 +154,13 @@ class MonitorState: ObservableObject {
 
         startWeb()
 
+        // Always start database readers — even during setup.
+        // The sqlite3 access to chat.db triggers macOS to add Deja
+        // to the Full Disk Access list in System Settings.
+        startDatabaseReaders()
+
         if !setupNeeded {
             startScreenshotCapture()
-            startDatabaseReaders()
 
             DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
                 self?.startMonitor()

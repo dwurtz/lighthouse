@@ -1,6 +1,5 @@
 import SwiftUI
 import CoreGraphics
-import SQLite3
 
 struct SetupPanelView: View {
     @ObservedObject var monitor: MonitorState
@@ -208,14 +207,21 @@ struct SetupPanelView: View {
     }
 
     func grantFullDisk() {
-        // Try to access the protected database — this triggers macOS
-        // to add Deja to the Full Disk Access list (user still needs
-        // to toggle it on). Using sqlite3 open which is what the
-        // DatabaseReader uses in production.
-        var db: OpaquePointer?
-        let dbPath = NSHomeDirectory() + "/Library/Messages/chat.db"
-        sqlite3_open_v2(dbPath, &db, 0x00000001, nil)  // SQLITE_OPEN_READONLY
-        if db != nil { sqlite3_close(db) }
+        // Use low-level open() syscall on protected files — this is the
+        // most reliable way to trigger macOS TCC to add the app to the
+        // Full Disk Access list.
+        let paths = [
+            (NSHomeDirectory() as NSString).appendingPathComponent("Library/Messages/chat.db"),
+            (NSHomeDirectory() as NSString).appendingPathComponent("Library/Safari/History.db"),
+        ]
+        for path in paths {
+            let fd = Darwin.open(path, O_RDONLY)
+            if fd >= 0 { Darwin.close(fd) }
+        }
+
+        // Also try NSFileHandle which goes through a different TCC path
+        let chatDB = NSHomeDirectory() + "/Library/Messages/chat.db"
+        let _ = try? FileHandle(forReadingFrom: URL(fileURLWithPath: chatDB))
 
         // Open System Settings to the FDA pane
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") {

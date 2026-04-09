@@ -27,15 +27,16 @@ class VoicePillWindow: NSPanel {
 
         // Container holds the SwiftUI view + transparent tracking overlay
         let container = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 56))
+        container.autoresizesSubviews = false
 
         let hostView = NSHostingView(rootView: VoicePillView(monitor: monitor))
-        hostView.frame = container.bounds
-        hostView.autoresizingMask = [.width, .height]
+        // Pin to fixed size — prevents constraint updates that crash borderless panels
+        hostView.frame = NSRect(x: 0, y: 0, width: 300, height: 56)
+        hostView.sizingOptions = []
         container.addSubview(hostView)
 
         let trackingOverlay = PillTrackingOverlay(monitor: monitor)
-        trackingOverlay.frame = container.bounds
-        trackingOverlay.autoresizingMask = [.width, .height]
+        trackingOverlay.frame = NSRect(x: 0, y: 0, width: 300, height: 56)
         container.addSubview(trackingOverlay)
 
         contentView = container
