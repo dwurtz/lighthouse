@@ -18,6 +18,96 @@ from pathlib import Path
 log = logging.getLogger(__name__)
 
 _DEJA_TOKEN_PATH = Path.home() / ".deja" / "google_token.json"
+
+_BRANDED_CALLBACK_HTML = """<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Déjà — Signed In</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600&family=Inter:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #050507;
+    color: #ece8e1;
+    font-family: 'Inter', sans-serif;
+    height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
+  .container {
+    text-align: center;
+    max-width: 440px;
+    padding: 48px;
+  }
+  .logo {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 36px;
+    font-weight: 500;
+    letter-spacing: -0.5px;
+    margin-bottom: 32px;
+    color: #ece8e1;
+  }
+  .checkmark {
+    width: 64px;
+    height: 64px;
+    margin: 0 auto 24px;
+    border-radius: 50%;
+    background: rgba(138, 180, 212, 0.1);
+    border: 2px solid rgba(138, 180, 212, 0.3);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    animation: fadeIn 0.5s ease-out;
+  }
+  .checkmark svg {
+    width: 28px;
+    height: 28px;
+    stroke: #8ab4d4;
+    stroke-width: 2.5;
+    fill: none;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  h1 {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 28px;
+    font-weight: 500;
+    margin-bottom: 12px;
+    letter-spacing: -0.3px;
+  }
+  p {
+    color: rgba(236, 232, 225, 0.5);
+    font-size: 14px;
+    line-height: 1.6;
+  }
+  .close-hint {
+    margin-top: 32px;
+    font-size: 12px;
+    color: rgba(236, 232, 225, 0.25);
+    font-family: 'DM Mono', monospace, monospace;
+  }
+  @keyframes fadeIn {
+    from { opacity: 0; transform: scale(0.8); }
+    to { opacity: 1; transform: scale(1); }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="logo">Déjà</div>
+  <div class="checkmark">
+    <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
+  </div>
+  <h1>You're signed in</h1>
+  <p>Your Google account is connected. Déjà is setting up your personal wiki and will start observing your workspace.</p>
+  <div class="close-hint">You can close this tab</div>
+</div>
+</body>
+</html>"""
 _GWS_TOKEN_PATH = Path.home() / ".config" / "gws" / "token.json"
 
 # Scopes for Google Workspace — read for observation, write for actions
@@ -213,16 +303,61 @@ def run_oauth_flow(port: int = 0) -> dict:
         return {"ok": False, "error": "client_secret.json not found"}
 
     try:
+        import os
+        os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"  # allow localhost HTTP
+
         from google_auth_oauthlib.flow import InstalledAppFlow
+        import webbrowser
+        import wsgiref.simple_server
 
         flow = InstalledAppFlow.from_client_secrets_file(
             str(client_secret), scopes=SCOPES
         )
-        creds = flow.run_local_server(
-            port=port,
+
+        # Custom local server with branded callback page
+        flow.redirect_uri = f"http://localhost:{port or 0}/"
+        auth_url, _ = flow.authorization_url(
+            access_type="offline",
             prompt="consent",
-            success_message="Signed in to Déjà! You can close this tab.",
         )
+
+        # Collect the authorization response
+        auth_response_url = [None]
+
+        class _CallbackHandler(wsgiref.simple_server.WSGIRequestHandler):
+            def log_message(self, format, *args):
+                pass  # suppress request logging
+
+        def _wsgi_app(environ, start_response):
+            from urllib.parse import urlparse, parse_qs
+            query = parse_qs(environ.get("QUERY_STRING", ""))
+            if "code" in query:
+                auth_response_url[0] = (
+                    f"http://localhost:{server.server_port}"
+                    f"{environ.get('PATH_INFO', '/')}?{environ.get('QUERY_STRING', '')}"
+                )
+            start_response("200 OK", [("Content-Type", "text/html; charset=utf-8")])
+            return [_BRANDED_CALLBACK_HTML.encode()]
+
+        wsgiref.simple_server.WSGIServer.allow_reuse_address = True
+        server = wsgiref.simple_server.make_server(
+            "localhost", port or 0, _wsgi_app, handler_class=_CallbackHandler
+        )
+        flow.redirect_uri = f"http://localhost:{server.server_port}/"
+        auth_url, _ = flow.authorization_url(
+            access_type="offline",
+            prompt="consent",
+        )
+
+        webbrowser.open(auth_url)
+        server.handle_request()
+        server.server_close()
+
+        if not auth_response_url[0]:
+            return {"ok": False, "error": "No authorization response received"}
+
+        flow.fetch_token(authorization_response=auth_response_url[0])
+        creds = flow.credentials
 
         # Build token data
         client_config = json.loads(client_secret.read_text())
