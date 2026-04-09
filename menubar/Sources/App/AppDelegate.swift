@@ -20,12 +20,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var isRecording: Bool = false
     var micStatusTimer: Timer?
     var updaterController: SPUStandardUpdaterController!
+    var voicePillWindow: VoicePillWindow?
+    let hotkeyManager = HotkeyManager()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
-        monitor.start()
+        setupStatusItem()       // First — before any work that could trigger menu bar layout
         setupPopover()
-        setupStatusItem()
+        monitor.start()         // After UI is set up
         startMicStatusPolling()
 
         // Sparkle auto-updater — checks for updates on launch and periodically
@@ -40,6 +42,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if monitor.setupNeeded {
             pollForWebServerThenShowWizard()
         }
+
+        // Voice pill — persistent floating capsule at bottom of screen
+        setupVoicePill()
 
         // Show floating pill when a meeting is about to start
         NotificationCenter.default.addObserver(
@@ -181,9 +186,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func setupStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = statusItem.button {
-            // Load tray icon from the app bundle. No fallback — if
-            // this fails, the icon is missing from the build and we
-            // need to know about it immediately.
             if let resourcePath = Bundle.main.resourcePath {
                 let iconURL = URL(fileURLWithPath: resourcePath).appendingPathComponent("tray-icon.png")
                 if let img = NSImage(contentsOf: iconURL) {
@@ -191,7 +193,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     img.size = NSSize(width: 22, height: 22)
                     button.image = img
                 } else {
-                    NSLog("deja: ERROR — tray-icon.png not found in app bundle at \(iconURL.path)")
+                    NSLog("deja: ERROR — tray-icon.png not found at \(iconURL.path)")
                     button.title = "Déjà"
                 }
             } else {
@@ -233,8 +235,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             if let resourcePath = Bundle.main.resourcePath {
                 let iconURL = URL(fileURLWithPath: resourcePath).appendingPathComponent("tray-icon.png")
                 if let img = NSImage(contentsOf: iconURL) {
-                    img.isTemplate = false
-                    img.size = NSSize(width: 22, height: 22)
+                    img.isTemplate = true
+                    img.size = NSSize(width: 18, height: 18)
                     button.image = img
                 }
             }
@@ -299,7 +301,54 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         monitor.restart()
     }
 
+    // MARK: Voice pill + hotkey
+
+    private func setupVoicePill() {
+        monitor.loadVoicePillState()
+
+        if monitor.voicePillEnabled {
+            showVoicePill()
+        }
+
+        hotkeyManager.onKeyDown = { [weak self] in
+            self?.monitor.startVoiceCapture()
+        }
+        hotkeyManager.onKeyUp = { [weak self] in
+            self?.monitor.stopVoiceCapture()
+        }
+        hotkeyManager.start()
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(voicePillToggled),
+            name: .voicePillToggled,
+            object: nil
+        )
+    }
+
+    private func showVoicePill() {
+        guard voicePillWindow == nil else { return }
+        let window = VoicePillWindow(monitor: monitor)
+        window.orderFront(nil)
+        voicePillWindow = window
+    }
+
+    private func hideVoicePill() {
+        voicePillWindow?.close()
+        voicePillWindow = nil
+    }
+
+    @objc private func voicePillToggled(_ notification: Foundation.Notification) {
+        let enabled = notification.userInfo?["enabled"] as? Bool ?? true
+        if enabled {
+            showVoicePill()
+        } else {
+            hideVoicePill()
+        }
+    }
+
     @objc private func quitApp() {
+        hotkeyManager.stop()
         monitor.stop()
         NSApp.terminate(nil)
     }

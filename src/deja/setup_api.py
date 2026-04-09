@@ -42,26 +42,10 @@ def setup_status() -> dict:
         except Exception:
             pass
 
-    # Check gws auth — output is JSON with token_valid and user fields
-    gws_authed = False
-    gws_email = ""
-    try:
-        r = subprocess.run(
-            ["gws", "auth", "status"],
-            capture_output=True, text=True, timeout=10,
-        )
-        if r.returncode == 0:
-            import json as _json
-            try:
-                status = _json.loads(r.stdout)
-                gws_authed = status.get("token_valid", False) and status.get("has_refresh_token", False)
-                gws_email = status.get("user", "")
-            except _json.JSONDecodeError:
-                # Fallback: check for keywords
-                if "token_valid" in r.stdout and "true" in r.stdout.lower():
-                    gws_authed = True
-    except Exception:
-        pass
+    # Check auth — native token or legacy gws
+    from deja.auth import get_auth_token, get_user_email
+    gws_authed = get_auth_token() is not None
+    gws_email = get_user_email() if gws_authed else ""
 
     # Check identity
     has_identity = False
@@ -93,174 +77,46 @@ def setup_status() -> dict:
 
 @router.post("/gws-auth")
 def start_gws_auth() -> dict:
-    """Start Google Workspace OAuth flow.
+    """Start Google OAuth flow using native google-auth-oauthlib.
 
     Opens the browser for Google sign-in. On success, extracts the
     user's email and name, creates the identity self-page, and
-    initializes the wiki — combining what used to be separate
-    "Google auth" and "identity" steps into one.
+    initializes the wiki.
 
-    The OAuth client_secret.json is bundled inside the app. On first
-    run, it's copied to ~/.config/gws/ so gws CLI can find it.
+    No external CLI dependency — uses the bundled client_secret.json
+    and stores tokens at ~/.deja/google_token.json.
     """
-    # Ensure client_secret.json exists for gws CLI
-    import shutil
-    import sys
-    gws_config = Path.home() / ".config" / "gws"
-    client_secret = gws_config / "client_secret.json"
-    if not client_secret.exists():
-        gws_config.mkdir(parents=True, exist_ok=True)
-        # Try bundled client_secret from multiple locations:
-        # 1. Package default_assets (development / pip install -e)
-        # 2. App bundle Resources (macOS .app distribution)
-        candidates = [
-            Path(__file__).parent / "default_assets" / "client_secret.json",
-        ]
-        # When running inside Deja.app, the bundle Resources dir is two levels
-        # up from Contents/MacOS/deja-backend: .../Contents/Resources/
-        if getattr(sys, 'frozen', False):
-            bundle_resources = Path(sys.executable).parent.parent / "Resources" / "client_secret.json"
-            candidates.append(bundle_resources)
-        else:
-            # Development: check relative to project root
-            candidates.append(Path(__file__).parents[3] / "Deja.app" / "Contents" / "Resources" / "client_secret.json")
-        for bundled in candidates:
-            if bundled.exists():
-                shutil.copy(bundled, client_secret)
-                log.info("Copied client_secret.json from %s to ~/.config/gws/", bundled)
-                break
+    from deja.auth import get_auth_token, run_oauth_flow
 
-    already_authed = False
-    try:
-        r = subprocess.run(
-            ["gws", "auth", "status"],
-            capture_output=True, text=True, timeout=10,
-        )
-        if r.returncode == 0:
-            import json as _json
-            try:
-                status = _json.loads(r.stdout)
-                already_authed = status.get("token_valid", False)
-            except _json.JSONDecodeError:
-                pass
-    except FileNotFoundError:
-        return {"ok": False, "error": "gws CLI not found"}
-    except Exception:
-        pass
+    # Check if already authenticated
+    if get_auth_token():
+        from deja.auth import get_user_email
+        email = get_user_email()
+        return {"ok": True, "email": email, "name": "", "already": True}
 
-    if not already_authed:
-        # Start OAuth flow — capture the auth URL and open the browser
-        # explicitly, since the frozen backend runs headless.
-        try:
-            proc = subprocess.Popen(
-                ["gws", "auth", "login"],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,  # merge stderr into stdout
-                text=True,
-            )
-            # gws prints the auth URL to stderr. We merged it into
-            # stdout so we only need to read one stream.
-            auth_url = None
-            import time
-            start = time.time()
-            while time.time() - start < 15:
-                line = proc.stdout.readline()
-                if not line:
-                    if proc.poll() is not None:
-                        break  # process exited
-                    continue
-                log.info("gws auth output: %s", line.rstrip())
-                if "accounts.google.com" in line:
-                    auth_url = line.strip()
-                    break
-            if auth_url:
-                # Rewrite the redirect_uri to point to our own callback server
-                # so we can show a branded success page instead of the plain gws one.
-                # Extract the port gws is listening on from the URL.
-                import urllib.parse
-                parsed = urllib.parse.urlparse(auth_url)
-                params = urllib.parse.parse_qs(parsed.query)
-                gws_redirect = params.get("redirect_uri", [""])[0]
-                gws_port = gws_redirect.split(":")[-1] if gws_redirect else ""
+    # Run native OAuth flow (opens browser, handles callback)
+    result = run_oauth_flow()
+    if not result.get("ok"):
+        return result
 
-                # Try branded callback page (optional — falls back to plain gws)
-                try:
-                    from deja._oauth_callback import start_branded_callback
-                    our_port = start_branded_callback(gws_port=int(gws_port) if gws_port.isdigit() else 0)
-                    if our_port:
-                        new_redirect = f"http://localhost:{our_port}"
-                        auth_url = auth_url.replace(gws_redirect, new_redirect)
-                        log.info("Rewrote OAuth redirect to branded callback on port %d", our_port)
-                except ImportError:
-                    pass  # branded callback not available — use plain gws redirect
-
-                subprocess.run(["open", auth_url])
-                log.info("Opened Google auth URL in browser")
-            # Wait for the callback (user signs in → gws receives the code)
-            try:
-                proc.wait(timeout=120)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                return {"ok": False, "error": "Auth timed out — try again"}
-            if proc.returncode != 0:
-                return {"ok": False, "error": "Auth failed"}
-        except FileNotFoundError:
-            return {"ok": False, "error": "gws CLI not found"}
-        except Exception as e:
-            return {"ok": False, "error": str(e)}
-
-    # Extract user email from gws auth status
-    email = ""
-    try:
-        r = subprocess.run(
-            ["gws", "auth", "status"],
-            capture_output=True, text=True, timeout=10,
-        )
-        if r.returncode == 0:
-            import json as _json
-            try:
-                status = _json.loads(r.stdout)
-                email = status.get("user", "")
-            except _json.JSONDecodeError:
-                pass
-    except Exception:
-        pass
-
-    # Try to get display name from Gmail profile
-    name = ""
-    if email:
-        # Derive name from email: david@example.com → David
-        local_part = email.split("@")[0]
-        # Handle first.last format
-        parts = local_part.replace(".", " ").replace("-", " ").replace("_", " ").split()
-        name = " ".join(p.capitalize() for p in parts)
-
-    # Also try macOS Contacts for a better name
-    if email:
-        try:
-            r = subprocess.run(
-                ["gws", "gmail", "users", "getProfile",
-                 "--params", json.dumps({"userId": "me"})],
-                capture_output=True, text=True, timeout=10,
-            )
-        except Exception:
-            pass
+    email = result.get("email", "")
+    name = result.get("name", "")
 
     # Auto-create identity if we have email
     if email:
-        result = set_identity({
-            "name": name,
+        identity_result = set_identity({
+            "name": name or email.split("@")[0].replace(".", " ").title(),
             "email": email,
         })
         return {
             "ok": True,
             "email": email,
             "name": name,
-            "identity_created": result.get("ok", False),
-            "already": already_authed,
+            "identity_created": identity_result.get("ok", False),
+            "already": False,
         }
 
-    return {"ok": True, "email": "", "name": "", "already": already_authed}
+    return {"ok": True, "email": "", "name": "", "already": False}
 
 
 @router.post("/identity")

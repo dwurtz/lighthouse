@@ -23,6 +23,14 @@ class MonitorState: ObservableObject {
     @Published var activeTab: NotchTab = .chat
     @Published var isRecording: Bool = false
 
+    // Voice pill state
+    @Published var voicePillEnabled: Bool = true
+    @Published var voicePillActive: Bool = false
+    @Published var voicePillProcessing: Bool = false
+    @Published var voicePillTranscript: String = ""
+    @Published var voicePillHovered: Bool = false
+    @Published var audioLevel: CGFloat = 0
+
     // Permission state — checked on launch and periodically
     @Published var hasScreenRecording: Bool = false
     @Published var hasFullDiskAccess: Bool = false
@@ -67,6 +75,7 @@ class MonitorState: ObservableObject {
     private let databaseReader = DatabaseReader()
     private let setupManager = SetupManager()
     private let meetingCoordinator = MeetingCoordinator()
+    private let audioLevelMonitor = AudioLevelMonitor()
 
     // MARK: - Static paths (used by extracted services)
 
@@ -101,6 +110,25 @@ class MonitorState: ObservableObject {
             setLaunchAtLogin(true)
         } else {
             launchAtLogin = status == .enabled
+        }
+    }
+
+    func setVoicePillEnabled(_ enabled: Bool) {
+        voicePillEnabled = enabled
+        UserDefaults.standard.set(enabled, forKey: "voicePillEnabled")
+        NotificationCenter.default.post(
+            name: .voicePillToggled,
+            object: nil,
+            userInfo: ["enabled": enabled]
+        )
+    }
+
+    func loadVoicePillState() {
+        // Default to true if never set
+        if UserDefaults.standard.object(forKey: "voicePillEnabled") == nil {
+            voicePillEnabled = true
+        } else {
+            voicePillEnabled = UserDefaults.standard.bool(forKey: "voicePillEnabled")
         }
     }
 
@@ -546,6 +574,77 @@ class MonitorState: ObservableObject {
         }
         contactResults = []
         showContactPicker = false
+    }
+
+    // MARK: - Voice Pill (hold-to-talk)
+
+    func startVoiceCapture() {
+        guard !voicePillActive else { return }
+        NSLog("deja: startVoiceCapture called")
+        voicePillActive = true
+
+        // Start ffmpeg recording via the existing mic API
+        guard let url = URL(string: "http://localhost:5055/api/mic/start") else { return }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.timeoutInterval = 5
+        URLSession.shared.dataTask(with: req) { data, _, error in
+            if let error = error {
+                NSLog("deja: mic/start error: \(error)")
+            } else {
+                NSLog("deja: mic/start OK")
+            }
+        }.resume()
+
+        // Start audio level monitoring for waveform
+        audioLevelMonitor.start { [weak self] level in
+            self?.audioLevel = level
+        }
+    }
+
+    func stopVoiceCapture() {
+        guard voicePillActive else { return }
+        voicePillActive = false
+        audioLevel = 0
+        audioLevelMonitor.stop()
+
+        // Show processing state
+        voicePillProcessing = true
+        voicePillTranscript = ""
+
+        // Stop recording and get transcript
+        guard let url = URL(string: "http://localhost:5055/api/mic/stop") else {
+            voicePillProcessing = false
+            return
+        }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.timeoutInterval = 30
+        URLSession.shared.dataTask(with: req) { [weak self] data, _, error in
+            guard let self = self else { return }
+            guard let data = data,
+                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let transcript = obj["transcript"] as? String,
+                  !transcript.isEmpty else {
+                DispatchQueue.main.async {
+                    self.voicePillProcessing = false
+                    self.voicePillTranscript = ""
+                }
+                return
+            }
+            DispatchQueue.main.async {
+                // Show transcript briefly
+                self.voicePillProcessing = false
+                self.voicePillTranscript = transcript
+
+                // Send to chat after a short display
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                    self.chatInput = transcript
+                    self.sendChat()
+                    self.voicePillTranscript = ""
+                }
+            }
+        }.resume()
     }
 
     // MARK: - Chat

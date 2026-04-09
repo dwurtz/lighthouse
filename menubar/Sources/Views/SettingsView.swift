@@ -46,6 +46,21 @@ struct SettingsView: View {
                         }
                         .toggleStyle(SwitchToggleStyle(tint: .orange))
 
+                        Toggle(isOn: Binding(
+                            get: { monitor.voicePillEnabled },
+                            set: { monitor.setVoicePillEnabled($0) }
+                        )) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Voice pill")
+                                    .font(.system(size: 13))
+                                    .foregroundColor(.white)
+                                Text("Show floating dictation pill at the bottom of your screen")
+                                    .font(.system(size: 11))
+                                    .foregroundColor(.white.opacity(0.35))
+                            }
+                        }
+                        .toggleStyle(SwitchToggleStyle(tint: .orange))
+
                         Button(action: {
                             (NSApp.delegate as? AppDelegate)?.updaterController.checkForUpdates(nil)
                         }) {

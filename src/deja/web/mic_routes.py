@@ -30,6 +30,40 @@ log = logging.getLogger("deja.mic")
 
 router = APIRouter()
 
+
+def _get_groq_key() -> str:
+    """Read Groq API key from ~/.deja/config.json."""
+    config_path = DEJA_HOME / "config.json"
+    if config_path.exists():
+        import json as _json
+        config = _json.loads(config_path.read_text())
+        key = config.get("groq_api_key", "")
+        if key:
+            return key
+    raise RuntimeError("Groq API key not configured in ~/.deja/config.json")
+
+
+async def _transcribe_groq(wav_path: Path) -> str:
+    """Transcribe a WAV file using Groq's Whisper API."""
+    import httpx
+
+    key = _get_groq_key()
+    audio_bytes = wav_path.read_bytes()
+
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.post(
+            "https://api.groq.com/openai/v1/audio/transcriptions",
+            headers={"Authorization": f"Bearer {key}"},
+            files={"file": ("audio.wav", audio_bytes, "audio/wav")},
+            data={"model": "whisper-large-v3"},
+        )
+        resp.raise_for_status()
+        result = resp.json()
+
+    transcript = (result.get("text") or "").strip()
+    log.info("groq whisper: %d bytes → %r", len(audio_bytes), transcript[:200])
+    return transcript
+
 AUDIO_DIR = DEJA_HOME / "audio"
 MIC_AUTO_STOP_SEC = 300  # 5 minutes
 
@@ -92,18 +126,14 @@ async def _mic_stop_inner(reason: str = "manual") -> dict:
 
     log.info("mic_stop: wav=%s size=%d bytes", wav_path, wav_path.stat().st_size)
 
-    # Transcribe via Gemini.
-    from deja.llm_client import GeminiClient
-
-    gemini = GeminiClient()
+    # Transcribe via Groq Whisper (fast, dedicated speech-to-text).
+    transcript = ""
+    transcribe_error = None
     try:
-        transcript = await gemini.transcribe_audio(str(wav_path))
+        transcript = await _transcribe_groq(wav_path)
     except Exception as e:
-        transcript = ""
         transcribe_error = str(e)
         log.exception("mic_stop: transcription failed")
-    else:
-        transcribe_error = None
 
     if transcript:
         try:

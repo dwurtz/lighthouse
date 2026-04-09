@@ -24,7 +24,7 @@ from google.genai import types  # re-exported for reflection.py and prefilter.py
 from deja.auth import get_auth_token
 from deja.config import INTEGRATE_MODEL, REFLECT_MODEL, VISION_MODEL
 
-DEJA_API_URL = os.environ.get("DEJA_API_URL", "https://api.trydeja.com")
+DEJA_API_URL = os.environ.get("DEJA_API_URL", "https://deja-api.onrender.com")
 _USE_DIRECT = bool(os.environ.get("GEMINI_API_KEY"))
 
 # Onboarding is a one-time, high-stakes run against potentially the

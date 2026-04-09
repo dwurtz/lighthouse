@@ -39,6 +39,7 @@ targets:
         SWIFT_VERSION: "5.0"
         INFOPLIST_KEY_LSUIElement: true
         PRODUCT_NAME: Deja
+        CODE_SIGN_ENTITLEMENTS: Deja.entitlements
     info:
       path: Deja-Info.plist
       properties:
@@ -64,6 +65,7 @@ targets:
       - sdk: ImageIO.framework
       - sdk: ScreenCaptureKit.framework
       - sdk: ServiceManagement.framework
+      - sdk: AVFoundation.framework
       - sdk: libsqlite3.tbd
     postBuildScripts:
       - name: "Bundle Python Environment"
