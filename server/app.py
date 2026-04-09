@@ -3,13 +3,13 @@
 import time
 import logging
 
-from fastapi import FastAPI, Request, Header
+from fastapi import FastAPI, Request, Header, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from auth import validate_token
-from proxy import generate
+from proxy import generate, transcribe
 from telemetry import log_event
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
@@ -76,6 +76,27 @@ async def generate_endpoint(
     )
 
     return result
+
+
+@app.post("/v1/transcribe")
+async def transcribe_endpoint(
+    file: UploadFile = File(...),
+    authorization: str = Header(...),
+):
+    token = authorization.removeprefix("Bearer ").strip()
+    user = await validate_token(token)
+
+    audio_bytes = await file.read()
+    start = time.time()
+    text = await transcribe(audio_bytes, file.filename or "audio.wav")
+    latency_ms = round((time.time() - start) * 1000)
+
+    logger.info(
+        "transcribe user=%s size=%d latency_ms=%d text=%r",
+        user["email"], len(audio_bytes), latency_ms, text[:100],
+    )
+
+    return {"text": text}
 
 
 @app.post("/v1/telemetry")

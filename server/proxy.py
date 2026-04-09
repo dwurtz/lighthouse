@@ -1,8 +1,9 @@
-"""Gemini proxy — forwards generate_content calls using the server's API key."""
+"""Deja API proxy — Gemini LLM + Groq Whisper transcription."""
 
 import base64
 import os
 
+import httpx
 from google import genai
 from google.genai import types
 from fastapi import HTTPException
@@ -72,3 +73,21 @@ async def generate(model: str, contents, config: dict) -> dict:
                 else {}
             ),
         }
+
+
+async def transcribe(audio_bytes: bytes, filename: str = "audio.wav") -> str:
+    """Transcribe audio via Groq Whisper API. Returns transcript text."""
+    groq_key = os.environ.get("GROQ_API_KEY")
+    if not groq_key:
+        raise HTTPException(status_code=500, detail="GROQ_API_KEY not configured")
+
+    mime = "audio/wav" if filename.endswith(".wav") else "audio/mpeg"
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.post(
+            "https://api.groq.com/openai/v1/audio/transcriptions",
+            headers={"Authorization": f"Bearer {groq_key}"},
+            files={"file": (filename, audio_bytes, mime)},
+            data={"model": "whisper-large-v3"},
+        )
+        resp.raise_for_status()
+        return (resp.json().get("text") or "").strip()

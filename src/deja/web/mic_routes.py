@@ -31,37 +31,27 @@ log = logging.getLogger("deja.mic")
 router = APIRouter()
 
 
-def _get_groq_key() -> str:
-    """Read Groq API key from ~/.deja/config.json."""
-    config_path = DEJA_HOME / "config.json"
-    if config_path.exists():
-        import json as _json
-        config = _json.loads(config_path.read_text())
-        key = config.get("groq_api_key", "")
-        if key:
-            return key
-    raise RuntimeError("Groq API key not configured in ~/.deja/config.json")
-
-
 async def _transcribe_groq(wav_path: Path) -> str:
-    """Transcribe a WAV file using Groq's Whisper API."""
+    """Transcribe a WAV file via the Deja API proxy (Groq Whisper)."""
     import httpx
+    from deja.llm_client import DEJA_API_URL
+    from deja.auth import get_auth_token
 
-    key = _get_groq_key()
     audio_bytes = wav_path.read_bytes()
+    token = get_auth_token()
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
 
     async with httpx.AsyncClient(timeout=30) as client:
         resp = await client.post(
-            "https://api.groq.com/openai/v1/audio/transcriptions",
-            headers={"Authorization": f"Bearer {key}"},
+            f"{DEJA_API_URL}/v1/transcribe",
+            headers=headers,
             files={"file": ("audio.wav", audio_bytes, "audio/wav")},
-            data={"model": "whisper-large-v3"},
         )
         resp.raise_for_status()
         result = resp.json()
 
     transcript = (result.get("text") or "").strip()
-    log.info("groq whisper: %d bytes → %r", len(audio_bytes), transcript[:200])
+    log.info("transcribe: %d bytes → %r", len(audio_bytes), transcript[:200])
     return transcript
 
 AUDIO_DIR = DEJA_HOME / "audio"
