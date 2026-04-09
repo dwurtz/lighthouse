@@ -168,13 +168,43 @@ SCOPES = [
 ]
 
 
+def _fetch_oauth_config() -> dict | None:
+    """Fetch OAuth client config from the Deja API server.
+
+    Returns {"client_id": ..., "client_secret": ..., "project_id": ...}
+    or None if the server is unreachable.
+    """
+    try:
+        import httpx
+        import os
+
+        api_url = os.environ.get("DEJA_API_URL", "https://deja-api.onrender.com")
+        resp = httpx.get(f"{api_url}/v1/config", timeout=10)
+        if resp.status_code == 200:
+            data = resp.json()
+            client_id = data.get("oauth_client_id", "")
+            client_secret = data.get("oauth_client_secret", "")
+            if client_id and client_secret:
+                return {
+                    "client_id": client_id,
+                    "client_secret": client_secret,
+                    "project_id": data.get("oauth_project_id", "deja-ai-app"),
+                }
+    except Exception as e:
+        log.debug("Failed to fetch OAuth config from server: %s", e)
+    return None
+
+
 def _find_client_secret() -> Path | None:
-    """Locate client_secret.json from bundled locations."""
+    """Locate client_secret.json from bundled locations (fallback only).
+
+    The primary path is _fetch_oauth_config() from the server.
+    This is the fallback for dev mode or when the server is unreachable.
+    """
     candidates = [
         Path.home() / ".config" / "gws" / "client_secret.json",
         Path(__file__).parent / "default_assets" / "client_secret.json",
     ]
-    # macOS .app bundle
     if getattr(sys, "frozen", False):
         candidates.append(
             Path(sys.executable).parent.parent / "Resources" / "client_secret.json"
@@ -388,9 +418,13 @@ def run_oauth_flow(port: int = 0) -> dict:
     Returns a dict with {ok, email, name, error} on completion.
     The token is saved to ~/.deja/google_token.json automatically.
     """
-    client_secret = _find_client_secret()
-    if not client_secret:
-        return {"ok": False, "error": "client_secret.json not found"}
+    # Try fetching OAuth config from server first (no bundled secret needed)
+    oauth_config = _fetch_oauth_config()
+    client_secret_file = None
+    if not oauth_config:
+        client_secret_file = _find_client_secret()
+        if not client_secret_file:
+            return {"ok": False, "error": "OAuth configuration unavailable"}
 
     try:
         import os
@@ -400,9 +434,24 @@ def run_oauth_flow(port: int = 0) -> dict:
         import webbrowser
         import wsgiref.simple_server
 
-        flow = InstalledAppFlow.from_client_secrets_file(
-            str(client_secret), scopes=SCOPES
-        )
+        if oauth_config:
+            # Build flow from server-provided config (no file on disk)
+            client_config = {
+                "installed": {
+                    "client_id": oauth_config["client_id"],
+                    "client_secret": oauth_config["client_secret"],
+                    "project_id": oauth_config["project_id"],
+                    "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                    "token_uri": "https://oauth2.googleapis.com/token",
+                    "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+                    "redirect_uris": ["http://localhost"],
+                }
+            }
+            flow = InstalledAppFlow.from_client_config(client_config, scopes=SCOPES)
+        else:
+            flow = InstalledAppFlow.from_client_secrets_file(
+                str(client_secret_file), scopes=SCOPES
+            )
 
         # Custom local server with branded callback page
         flow.redirect_uri = f"http://localhost:{port or 0}/"
@@ -449,10 +498,15 @@ def run_oauth_flow(port: int = 0) -> dict:
         flow.fetch_token(authorization_response=auth_response_url[0])
         creds = flow.credentials
 
-        # Build token data
-        client_config = json.loads(client_secret.read_text())
-        client_type = list(client_config.keys())[0]
-        client_info = client_config[client_type]
+        # Build token data — get client_id/secret from whichever source we used
+        if oauth_config:
+            stored_client_id = oauth_config["client_id"]
+            stored_client_secret = oauth_config["client_secret"]
+        else:
+            _cfg = json.loads(client_secret_file.read_text())
+            _type = list(_cfg.keys())[0]
+            stored_client_id = _cfg[_type].get("client_id", "")
+            stored_client_secret = _cfg[_type].get("client_secret", "")
 
         token_data = {
             "access_token": creds.token,
@@ -461,8 +515,8 @@ def run_oauth_flow(port: int = 0) -> dict:
             "id_token": getattr(creds, "id_token", None),
             "expiry": creds.expiry.isoformat() if creds.expiry else None,
             "scopes": list(creds.scopes) if creds.scopes else SCOPES,
-            "client_id": client_info.get("client_id"),
-            "client_secret": client_info.get("client_secret"),
+            "client_id": stored_client_id,
+            "client_secret": stored_client_secret,
         }
 
         # Get user info
