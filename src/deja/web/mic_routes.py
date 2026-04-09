@@ -57,6 +57,32 @@ async def _transcribe_groq(wav_path: Path) -> str:
 AUDIO_DIR = DEJA_HOME / "audio"
 
 
+def _has_speech(wav_path: Path, threshold: float = 0.005) -> bool:
+    """Check if a WAV file contains actual speech above a noise threshold.
+
+    Reads the raw PCM data and checks RMS level. Returns False for
+    silence/ambient noise to avoid Whisper hallucinations.
+    """
+    import struct
+    import wave
+
+    try:
+        with wave.open(str(wav_path), "rb") as wf:
+            frames = wf.readframes(wf.getnframes())
+            if len(frames) < 100:
+                return False
+            # 16-bit mono PCM
+            samples = struct.unpack(f"<{len(frames) // 2}h", frames)
+            rms = (sum(s * s for s in samples) / len(samples)) ** 0.5
+            # Normalize to 0-1 range (16-bit max = 32768)
+            level = rms / 32768.0
+            log.info("audio RMS level: %.4f (threshold: %.4f)", level, threshold)
+            return level > threshold
+    except Exception as e:
+        log.warning("_has_speech check failed: %s — proceeding with transcription", e)
+        return True  # on error, try transcription anyway
+
+
 def _find_mic_device() -> int:
     """Find the best microphone device index for ffmpeg avfoundation.
 
@@ -95,15 +121,22 @@ def _find_mic_device() -> int:
     if not devices:
         return 0
 
-    # Prefer built-in MacBook mic as reliable default
+    # Prefer external/wireless devices (AirPods, headset, USB mic) over built-in
+    external_words = {"airpods", "headphone", "headset", "usb", "blue", "yeti", "rode"}
+    for idx, name in devices:
+        if any(w in name.lower() for w in external_words):
+            log.info("mic device: [%d] %s (external — preferred)", idx, name)
+            return idx
+
+    # Fall back to built-in MacBook mic
     for idx, name in devices:
         if "macbook" in name.lower() or "built-in" in name.lower():
             log.info("mic device: [%d] %s (built-in)", idx, name)
             return idx
 
-    # Otherwise use first non-virtual device
+    # Last resort: first non-virtual device
     idx, name = devices[0]
-    log.info("mic device: [%d] %s", idx, name)
+    log.info("mic device: [%d] %s (first available)", idx, name)
     return idx
 MIC_AUTO_STOP_SEC = 300  # 5 minutes
 
@@ -164,7 +197,22 @@ async def _mic_stop_inner(reason: str = "manual") -> dict:
             pass
         return {"recording": False, "reason": f"no audio captured ({reason})"}
 
-    log.info("mic_stop: wav=%s size=%d bytes", wav_path, wav_path.stat().st_size)
+    wav_size = wav_path.stat().st_size
+    log.info("mic_stop: wav=%s size=%d bytes", wav_path, wav_size)
+
+    # Check if audio has actual speech (not just silence)
+    if not _has_speech(wav_path):
+        log.info("mic_stop: no speech detected in audio, skipping transcription")
+        try:
+            wav_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+        return {
+            "recording": False,
+            "reason": reason,
+            "transcript": "",
+            "error": "no speech detected",
+        }
 
     # Transcribe via Groq Whisper (fast, dedicated speech-to-text).
     transcript = ""
@@ -264,13 +312,15 @@ async def mic_start() -> dict:
     AUDIO_DIR.mkdir(parents=True, exist_ok=True)
     wav_path = AUDIO_DIR / f"session-{int(time.time())}.wav"
 
-    # Use macOS default input device — follows AirPods, MacBook mic, etc.
+    # Pick the best mic — prefer connected external devices (AirPods, USB)
+    mic_index = _find_mic_device()
+
     cmd = [
         "ffmpeg",
         "-f",
         "avfoundation",
         "-i",
-        ":default",
+        f":{mic_index}",
         "-ar",
         "16000",
         "-ac",
