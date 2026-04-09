@@ -587,36 +587,23 @@ class MonitorState: ObservableObject {
 
     func startVoiceCapture() {
         guard !voicePillActive, !voicePillProcessing else { return }
-
-        // Show "warming up" state — mic needs ~1.5s to activate (especially Bluetooth)
-        voicePillProcessing = true
-        voicePillStatus = "Listening..."
+        voicePillActive = true
         voicePillTranscript = ""
 
-        // Start ffmpeg recording — the mic takes a moment to activate
+        // Start ffmpeg recording immediately
         guard let url = URL(string: "http://localhost:5055/api/mic/start") else {
-            voicePillProcessing = false
+            voicePillActive = false
             return
         }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.timeoutInterval = 5
-        URLSession.shared.dataTask(with: req) { [weak self] data, _, error in
-            if let error = error {
-                NSLog("deja: mic/start error: \(error)")
-                DispatchQueue.main.async { self?.voicePillProcessing = false }
-                return
-            }
-            // Wait for mic warmup, then show waveform (ready to talk)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                guard let self = self else { return }
-                self.voicePillProcessing = false
-                self.voicePillActive = true
-                self.waveformTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
-                    self?.waveformPhase += 0.15
-                }
-            }
-        }.resume()
+        URLSession.shared.dataTask(with: req) { _, _, _ in }.resume()
+
+        // Animate waveform
+        waveformTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
+            self?.waveformPhase += 0.15
+        }
     }
 
     func stopVoiceCapture() {

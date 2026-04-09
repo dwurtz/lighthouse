@@ -354,23 +354,126 @@ func log(_ message: String) {
 
 import AppKit
 
+// MARK: - Simple Mic Recorder (for voice pill — replaces ffmpeg)
+
+class MicRecorder {
+    private var engine: AVAudioEngine?
+    private var outputFile: AVAudioFile?
+    private let outputPath: URL
+
+    init(outputPath: URL) {
+        self.outputPath = outputPath
+    }
+
+    func start() {
+        let engine = AVAudioEngine()
+        let input = engine.inputNode
+        let inputFormat = input.outputFormat(forBus: 0)
+
+        guard inputFormat.sampleRate > 0 else {
+            log("MicRecorder: no audio input available")
+            exit(1)
+        }
+
+        // Record in the mic's native format — Whisper handles any sample rate
+        let settings: [String: Any] = [
+            AVFormatIDKey: kAudioFormatLinearPCM,
+            AVSampleRateKey: inputFormat.sampleRate,
+            AVNumberOfChannelsKey: 1,
+            AVLinearPCMBitDepthKey: 16,
+            AVLinearPCMIsFloatKey: false,
+            AVLinearPCMIsBigEndianKey: false,
+            AVLinearPCMIsNonInterleaved: false,
+        ]
+
+        do {
+            outputFile = try AVAudioFile(forWriting: outputPath, settings: settings)
+        } catch {
+            log("MicRecorder: failed to create output file: \(error)")
+            exit(1)
+        }
+
+        // Mono format for the tap
+        guard let monoFormat = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: inputFormat.sampleRate,
+            channels: 1,
+            interleaved: false
+        ) else {
+            log("MicRecorder: failed to create mono format")
+            exit(1)
+        }
+
+        input.installTap(onBus: 0, bufferSize: 4096, format: monoFormat) { [weak self] buffer, _ in
+            guard let file = self?.outputFile else { return }
+            do {
+                try file.write(from: buffer)
+            } catch {
+                // Drop buffer on write error
+            }
+        }
+
+        do {
+            try engine.start()
+            self.engine = engine
+            log("MicRecorder: recording to \(outputPath.lastPathComponent) (sr=\(inputFormat.sampleRate) ch=1)")
+        } catch {
+            log("MicRecorder: engine start failed: \(error)")
+            exit(1)
+        }
+    }
+
+    func stop() {
+        engine?.inputNode.removeTap(onBus: 0)
+        engine?.stop()
+        engine = nil
+        outputFile = nil
+        log("MicRecorder: stopped")
+    }
+}
+
+// MARK: - Main
+
+var _globalMicRecorder: MicRecorder?
+
 @main
 struct DejaRecorderApp {
     static func main() {
+        NSApplication.shared.setActivationPolicy(.accessory)
+
+        // --mic <output.wav> mode: simple mic recording for the voice pill
+        if CommandLine.arguments.count >= 3 && CommandLine.arguments[1] == "--mic" {
+            let outputPath = URL(fileURLWithPath: CommandLine.arguments[2])
+            _globalMicRecorder = MicRecorder(outputPath: outputPath)
+            _globalMicRecorder?.start()
+
+            signal(SIGINT) { _ in
+                _globalMicRecorder?.stop()
+                Thread.sleep(forTimeInterval: 0.1)
+                exit(0)
+            }
+            signal(SIGTERM) { _ in
+                _globalMicRecorder?.stop()
+                Thread.sleep(forTimeInterval: 0.1)
+                exit(0)
+            }
+
+            RunLoop.main.run()
+            return
+        }
+
+        // Default: meeting recording mode
         guard CommandLine.arguments.count >= 2 else {
             log("Usage: DejaRecorder <session-dir>")
+            log("       DejaRecorder --mic <output.wav>")
             exit(1)
         }
 
         let sessionDir = URL(fileURLWithPath: CommandLine.arguments[1])
         try? FileManager.default.createDirectory(at: sessionDir, withIntermediateDirectories: true)
 
-        // Run as a pure background process — no Dock icon, no menu bar presence.
-        NSApplication.shared.setActivationPolicy(.accessory)
-
         let recorder = AudioRecorder(outputDir: sessionDir)
 
-        // Poll for .stop sentinel file
         Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
             let stopFile = sessionDir.appendingPathComponent(".stop")
             if FileManager.default.fileExists(atPath: stopFile.path) {

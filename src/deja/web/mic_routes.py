@@ -57,6 +57,26 @@ async def _transcribe_groq(wav_path: Path) -> str:
 AUDIO_DIR = DEJA_HOME / "audio"
 
 
+def _find_recorder() -> str:
+    """Find the DejaRecorder binary — bundled in app or in build output."""
+    import sys
+
+    candidates = []
+    # Inside Deja.app bundle
+    if getattr(sys, "frozen", False):
+        candidates.append(Path(sys.executable).parent / "DejaRecorder")
+    # App bundle in /Applications
+    candidates.append(Path("/Applications/Deja.app/Contents/MacOS/DejaRecorder"))
+    # Development build output
+    candidates.append(Path.home() / "projects" / "deja" / "build" / "Release" / "DejaRecorder")
+
+    for p in candidates:
+        if p.exists():
+            return str(p)
+
+    raise FileNotFoundError("DejaRecorder binary not found")
+
+
 def _has_speech(wav_path: Path, threshold: float = 0.005) -> bool:
     """Check if a WAV file contains actual speech above a noise threshold.
 
@@ -121,20 +141,20 @@ def _find_mic_device() -> int:
     if not devices:
         return 0
 
-    # Prefer external/wireless devices (AirPods, headset, USB mic) over built-in
-    external_words = {"airpods", "headphone", "headset", "usb", "blue", "yeti", "rode"}
+    # Prefer wired/USB mics (instant, no lag) over Bluetooth (has activation delay)
+    wired_words = {"usb", "blue", "yeti", "rode", "scarlett", "focusrite"}
     for idx, name in devices:
-        if any(w in name.lower() for w in external_words):
-            log.info("mic device: [%d] %s (external — preferred)", idx, name)
+        if any(w in name.lower() for w in wired_words):
+            log.info("mic device: [%d] %s (wired external — preferred)", idx, name)
             return idx
 
-    # Fall back to built-in MacBook mic
+    # Built-in MacBook mic — always reliable, no activation delay
     for idx, name in devices:
         if "macbook" in name.lower() or "built-in" in name.lower():
             log.info("mic device: [%d] %s (built-in)", idx, name)
             return idx
 
-    # Last resort: first non-virtual device
+    # Last resort: first non-virtual device (may include Bluetooth)
     idx, name = devices[0]
     log.info("mic device: [%d] %s (first available)", idx, name)
     return idx
@@ -325,24 +345,10 @@ async def mic_start() -> dict:
     AUDIO_DIR.mkdir(parents=True, exist_ok=True)
     wav_path = AUDIO_DIR / f"session-{int(time.time())}.wav"
 
-    # Pick the best mic — prefer connected external devices (AirPods, USB)
-    mic_index = _find_mic_device()
+    # Use DejaRecorder --mic for native CoreAudio capture (handles Bluetooth instantly)
+    recorder_path = _find_recorder()
+    cmd = [recorder_path, "--mic", str(wav_path)]
 
-    cmd = [
-        "ffmpeg",
-        "-f",
-        "avfoundation",
-        "-i",
-        f":{mic_index}",
-        "-ar",
-        "16000",
-        "-ac",
-        "1",
-        "-y",
-        "-loglevel",
-        "error",
-        str(wav_path),
-    ]
     try:
         proc = subprocess.Popen(
             cmd,
@@ -351,9 +357,9 @@ async def mic_start() -> dict:
             stderr=subprocess.PIPE,
         )
     except FileNotFoundError:
-        return {"recording": False, "error": "ffmpeg not installed"}
+        return {"recording": False, "error": "DejaRecorder not found"}
     except Exception as e:
-        return {"recording": False, "error": f"ffmpeg spawn failed: {e}"}
+        return {"recording": False, "error": f"DejaRecorder spawn failed: {e}"}
 
     started_at = datetime.now(timezone.utc).isoformat()
     _mic_state["process"] = proc
