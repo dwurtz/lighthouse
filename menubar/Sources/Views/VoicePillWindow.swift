@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 /// Borderless, always-on-top floating panel anchored to the bottom-center
-/// of the screen. Hosts VoicePillView.
+/// of the screen. Hosts VoicePillView with mouse tracking for hover + click.
 class VoicePillWindow: NSPanel {
     private let monitor: MonitorState
 
@@ -22,13 +22,23 @@ class VoicePillWindow: NSPanel {
         hidesOnDeactivate = false
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
         isMovableByWindowBackground = false
-        // Must accept mouse events for hover + click
         ignoresMouseEvents = false
         acceptsMouseMovedEvents = true
 
+        // Container holds the SwiftUI view + transparent tracking overlay
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 56))
+
         let hostView = NSHostingView(rootView: VoicePillView(monitor: monitor))
-        let trackingView = PillTrackingView(monitor: monitor, hostedView: hostView)
-        contentView = trackingView
+        hostView.frame = container.bounds
+        hostView.autoresizingMask = [.width, .height]
+        container.addSubview(hostView)
+
+        let trackingOverlay = PillTrackingOverlay(monitor: monitor)
+        trackingOverlay.frame = container.bounds
+        trackingOverlay.autoresizingMask = [.width, .height]
+        container.addSubview(trackingOverlay)
+
+        contentView = container
 
         positionAtBottomCenter()
 
@@ -50,8 +60,8 @@ class VoicePillWindow: NSPanel {
     func positionAtBottomCenter() {
         let mouseLocation = NSEvent.mouseLocation
         guard let screen = NSScreen.screens.first(where: { $0.frame.contains(mouseLocation) }) ?? NSScreen.main else { return }
-        let screenFrame = screen.frame
         let visibleFrame = screen.visibleFrame
+        let screenFrame = screen.frame
         let w = frame.width
         let x = screenFrame.origin.x + (screenFrame.width - w) / 2
         let y = visibleFrame.origin.y + 24
@@ -59,26 +69,18 @@ class VoicePillWindow: NSPanel {
     }
 }
 
-/// NSView wrapper that handles mouse tracking without triggering SwiftUI constraint updates.
-class PillTrackingView: NSView {
+/// Transparent overlay that captures mouse events without interfering with SwiftUI layout.
+class PillTrackingOverlay: NSView {
     private let monitor: MonitorState
-    private let hostedView: NSView
 
-    init(monitor: MonitorState, hostedView: NSView) {
+    init(monitor: MonitorState) {
         self.monitor = monitor
-        self.hostedView = hostedView
         super.init(frame: .zero)
-        addSubview(hostedView)
-        hostedView.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            hostedView.leadingAnchor.constraint(equalTo: leadingAnchor),
-            hostedView.trailingAnchor.constraint(equalTo: trailingAnchor),
-            hostedView.topAnchor.constraint(equalTo: topAnchor),
-            hostedView.bottomAnchor.constraint(equalTo: bottomAnchor),
-        ])
     }
 
     required init?(coder: NSCoder) { fatalError() }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
@@ -93,19 +95,14 @@ class PillTrackingView: NSView {
     }
 
     override func mouseEntered(with event: NSEvent) {
-        DispatchQueue.main.async {
-            self.monitor.voicePillHovered = true
-        }
+        DispatchQueue.main.async { self.monitor.voicePillHovered = true }
     }
 
     override func mouseExited(with event: NSEvent) {
-        DispatchQueue.main.async {
-            self.monitor.voicePillHovered = false
-        }
+        DispatchQueue.main.async { self.monitor.voicePillHovered = false }
     }
 
     override func mouseDown(with event: NSEvent) {
-        // Toggle dictation on click
         DispatchQueue.main.async {
             if self.monitor.voicePillActive {
                 self.monitor.stopVoiceCapture()

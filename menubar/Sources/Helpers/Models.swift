@@ -62,6 +62,7 @@ extension Notification.Name {
     static let agentNotification = Notification.Name("dejaAgentNotification")
     static let notificationDismissed = Notification.Name("dejaNotificationDismissed")
     static let voicePillToggled = Notification.Name("dejaVoicePillToggled")
+    static let setupCompleted = Notification.Name("dejaSetupCompleted")
 }
 
 // MARK: - Screen Capture Delegate (minimal, for triggering TCC prompt)

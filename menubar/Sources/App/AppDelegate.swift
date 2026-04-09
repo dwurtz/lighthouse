@@ -20,6 +20,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var isRecording: Bool = false
     var micStatusTimer: Timer?
     var updaterController: SPUStandardUpdaterController!
+    var setupPanelWindow: SetupPanelWindow?
     var voicePillWindow: VoicePillWindow?
     let hotkeyManager = HotkeyManager()
 
@@ -40,8 +41,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Auto-open popover on first launch. Poll until the web server
         // is ready, then check what's already configured and skip steps.
         if monitor.setupNeeded {
-            pollForWebServerThenShowWizard()
+            // Wait for web server to be ready, then show setup panel
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+                self?.showSetupPanel()
+            }
         }
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleSetupCompleted),
+            name: .setupCompleted,
+            object: nil
+        )
 
         // Voice pill — persistent floating capsule at bottom of screen
         setupVoicePill()
@@ -101,48 +112,21 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         meetingPillPopover = nil
     }
 
-    private func showWizardPopover() {
-        guard let button = statusItem?.button else { return }
-        if !popover.isShown {
-            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-            NSApp.activate(ignoringOtherApps: true)
-            popover.contentViewController?.view.window?.makeKey()
-        }
+    private func showSetupPanel() {
+        let panel = SetupPanelWindow(monitor: monitor)
+        panel.orderFront(nil)
+        setupPanelWindow = panel
+    }
+
+    @objc private func handleSetupCompleted() {
+        setupPanelWindow?.close()
+        setupPanelWindow = nil
     }
 
     @objc private func handleMeetingDismissed() {
         dismissMeetingPill()
     }
 
-    private func pollForWebServerThenShowWizard(attempts: Int = 0) {
-        guard let url = URL(string: "http://localhost:5055/api/setup/status") else { return }
-        var req = URLRequest(url: url)
-        req.timeoutInterval = 2
-
-        URLSession.shared.dataTask(with: req) { [weak self] data, _, error in
-            guard let self = self else { return }
-
-            if error != nil || data == nil {
-                // Server not ready yet — retry up to 15 times (30 seconds)
-                if attempts < 15 {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-                        self.pollForWebServerThenShowWizard(attempts: attempts + 1)
-                    }
-                }
-                return
-            }
-
-            // Server is up — check status and show wizard
-            DispatchQueue.main.async {
-                self.monitor.checkSetupStatus()
-
-                // Give the status check a moment to update setupStep
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                    self.showWizardPopover()
-                }
-            }
-        }.resume()
-    }
 
     var notificationPopover: NSPopover?
 

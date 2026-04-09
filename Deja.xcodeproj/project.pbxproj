@@ -10,8 +10,8 @@
 		070169F7CFC7C96432745E16 /* MeetingPillView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E78982A7A76CA05C3EB71ABE /* MeetingPillView.swift */; };
 		0C01FC2FFCC37AF1B2A160EB /* MeetingRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 546E703E0F803FFACC8456F1 /* MeetingRecorder.swift */; };
 		12142699C3AB7EDE92148355 /* DejaRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4EB157B404F53D33F9512646 /* DejaRecorder.swift */; };
-		178EC75C341DB8846FABC6F8 /* PermissionsBlockerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC2F3F6EAACF51C249B8BB05 /* PermissionsBlockerView.swift */; };
 		222D3A7333DB15AC31B0D93D /* ScreenCaptureKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = EFF72E223E893D4D84DE66CD /* ScreenCaptureKit.framework */; };
+		25F5D3FB4B46BDDDF0B85911 /* SetupPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E156BFF7025A36E0009125B6 /* SetupPanelView.swift */; };
 		26EF2D41EF33FF9682E58319 /* ChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3024499F04CAB34515366957 /* ChatView.swift */; };
 		2BB909BD53EAFA57BE316649 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78A8FC28E10F34A2E91C7923 /* AppDelegate.swift */; };
 		30EBCF81C0F2B19A20A82E7C /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 6EE364908535709A817F0EBF /* Sparkle */; };
@@ -28,7 +28,6 @@
 		721E485344FC645BA7C04B43 /* AppIcon.icns in Resources */ = {isa = PBXBuildFile; fileRef = F16A3FDFD508206B3D67DFE3 /* AppIcon.icns */; };
 		7530B2F920F0FFCF1E2D3AA1 /* PopoverContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18CDCF2320DFBB2102143A62 /* PopoverContentView.swift */; };
 		7C47A76DB22E37B757401576 /* CoreGraphics.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = FF7DDEFB774D920864C65017 /* CoreGraphics.framework */; };
-		85D45BB4F029F7418F251EC6 /* SetupWizardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68A8055779A0F9F43304DBF2 /* SetupWizardView.swift */; };
 		94559C662FE0F6196D5528E7 /* Utilities.swift in Sources */ = {isa = PBXBuildFile; fileRef = 577197DA62750145A9E65676 /* Utilities.swift */; };
 		A3419BAB5DF619CFC302DDB9 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEBD0855AD78D7C16A60FE1D /* SettingsView.swift */; };
 		AF2024A02B1E811E745245BB /* DatabaseReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 30A978138C56BCDD8744D302 /* DatabaseReader.swift */; };
@@ -36,6 +35,7 @@
 		B8128765737EF8AE5BE141EE /* SetupManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 651D730D288689BC54939D75 /* SetupManager.swift */; };
 		BBEF67D44A7438C7C9F527AE /* HotkeyManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 944177DAA03864CD41A829C7 /* HotkeyManager.swift */; };
 		BC654C23332F7A07702D26E6 /* AppKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 876F7AA11CEC762975464D2F /* AppKit.framework */; };
+		BD60699959C55904B448FFD0 /* SetupPanelWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 271A14CAA2FA0EB2E1587002 /* SetupPanelWindow.swift */; };
 		C21BEA9674BCB5B70046B6C6 /* NotificationBubbleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80E5DE1FB0E45B028FF313F4 /* NotificationBubbleView.swift */; };
 		D029A72970BEE1DA98ECF8B3 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 226E8F65EA938B8663F5957F /* SwiftUI.framework */; };
 		D04A2CA44B55BAF02C462405 /* VoicePillWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 288F28AA7634EFC49D2A4FBB /* VoicePillWindow.swift */; };
@@ -80,6 +80,7 @@
 		129900B011818660B477E1AA /* MeetingCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingCoordinator.swift; sourceTree = "<group>"; };
 		18CDCF2320DFBB2102143A62 /* PopoverContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PopoverContentView.swift; sourceTree = "<group>"; };
 		226E8F65EA938B8663F5957F /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
+		271A14CAA2FA0EB2E1587002 /* SetupPanelWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetupPanelWindow.swift; sourceTree = "<group>"; };
 		288F28AA7634EFC49D2A4FBB /* VoicePillWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoicePillWindow.swift; sourceTree = "<group>"; };
 		3024499F04CAB34515366957 /* ChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatView.swift; sourceTree = "<group>"; };
 		30A978138C56BCDD8744D302 /* DatabaseReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DatabaseReader.swift; sourceTree = "<group>"; };
@@ -93,7 +94,6 @@
 		63E38726CE176A2832663B80 /* VoicePillView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoicePillView.swift; sourceTree = "<group>"; };
 		651D730D288689BC54939D75 /* SetupManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetupManager.swift; sourceTree = "<group>"; };
 		6657279FEB277AA5D969A150 /* Deja.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Deja.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		68A8055779A0F9F43304DBF2 /* SetupWizardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetupWizardView.swift; sourceTree = "<group>"; };
 		78A8FC28E10F34A2E91C7923 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		80E5DE1FB0E45B028FF313F4 /* NotificationBubbleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationBubbleView.swift; sourceTree = "<group>"; };
 		876F7AA11CEC762975464D2F /* AppKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AppKit.framework; path = System/Library/Frameworks/AppKit.framework; sourceTree = SDKROOT; };
@@ -108,10 +108,10 @@
 		D0728911E37A1E45580AEBFB /* ActivityView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityView.swift; sourceTree = "<group>"; };
 		D53627C343AD928AAA34E847 /* AudioLevelMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioLevelMonitor.swift; sourceTree = "<group>"; };
 		DEBD0855AD78D7C16A60FE1D /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		E156BFF7025A36E0009125B6 /* SetupPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetupPanelView.swift; sourceTree = "<group>"; };
 		E78982A7A76CA05C3EB71ABE /* MeetingPillView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingPillView.swift; sourceTree = "<group>"; };
 		EFF72E223E893D4D84DE66CD /* ScreenCaptureKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = ScreenCaptureKit.framework; path = System/Library/Frameworks/ScreenCaptureKit.framework; sourceTree = SDKROOT; };
 		F16A3FDFD508206B3D67DFE3 /* AppIcon.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = AppIcon.icns; sourceTree = "<group>"; };
-		FC2F3F6EAACF51C249B8BB05 /* PermissionsBlockerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionsBlockerView.swift; sourceTree = "<group>"; };
 		FF7DDEFB774D920864C65017 /* CoreGraphics.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreGraphics.framework; path = System/Library/Frameworks/CoreGraphics.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
@@ -233,10 +233,10 @@
 				3024499F04CAB34515366957 /* ChatView.swift */,
 				E78982A7A76CA05C3EB71ABE /* MeetingPillView.swift */,
 				80E5DE1FB0E45B028FF313F4 /* NotificationBubbleView.swift */,
-				FC2F3F6EAACF51C249B8BB05 /* PermissionsBlockerView.swift */,
 				18CDCF2320DFBB2102143A62 /* PopoverContentView.swift */,
 				DEBD0855AD78D7C16A60FE1D /* SettingsView.swift */,
-				68A8055779A0F9F43304DBF2 /* SetupWizardView.swift */,
+				E156BFF7025A36E0009125B6 /* SetupPanelView.swift */,
+				271A14CAA2FA0EB2E1587002 /* SetupPanelWindow.swift */,
 				63E38726CE176A2832663B80 /* VoicePillView.swift */,
 				288F28AA7634EFC49D2A4FBB /* VoicePillWindow.swift */,
 			);
@@ -410,11 +410,11 @@
 				ECD9847C91199C7871F64AFF /* Models.swift in Sources */,
 				F5D1F9EDFD861854AD0E9D85 /* MonitorState.swift in Sources */,
 				C21BEA9674BCB5B70046B6C6 /* NotificationBubbleView.swift in Sources */,
-				178EC75C341DB8846FABC6F8 /* PermissionsBlockerView.swift in Sources */,
 				7530B2F920F0FFCF1E2D3AA1 /* PopoverContentView.swift in Sources */,
 				A3419BAB5DF619CFC302DDB9 /* SettingsView.swift in Sources */,
 				B8128765737EF8AE5BE141EE /* SetupManager.swift in Sources */,
-				85D45BB4F029F7418F251EC6 /* SetupWizardView.swift in Sources */,
+				25F5D3FB4B46BDDDF0B85911 /* SetupPanelView.swift in Sources */,
+				BD60699959C55904B448FFD0 /* SetupPanelWindow.swift in Sources */,
 				94559C662FE0F6196D5528E7 /* Utilities.swift in Sources */,
 				479BBE1791DB6EBFC865AEE8 /* VoicePillView.swift in Sources */,
 				D04A2CA44B55BAF02C462405 /* VoicePillWindow.swift in Sources */,

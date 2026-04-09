@@ -8,15 +8,7 @@ struct PopoverContentView: View {
 
     var body: some View {
         Group {
-            if monitor.setupNeeded {
-                SetupWizardView(monitor: monitor)
-            // Permissions blocker removed — never hijack the UI after
-            // setup is done. Missing permissions are shown in Settings.
-            // } else if !monitor.hasScreenRecording {
-            //     PermissionsBlockerView(monitor: monitor)
-            } else {
-                content
-            }
+            content
         }
         .frame(width: 420, height: 600)
         .background(Color.black)

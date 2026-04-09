@@ -246,6 +246,8 @@ class MonitorState: ObservableObject {
         Timer.scheduledTimer(withTimeInterval: 60.0, repeats: true) { [weak self] _ in
             self?.checkRuntimePermissions()
         }
+
+        NotificationCenter.default.post(name: .setupCompleted, object: nil)
     }
 
     func checkRuntimePermissions() {
