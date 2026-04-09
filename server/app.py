@@ -65,12 +65,17 @@ async def config():
         "integrate_model": "gemini-2.5-flash-lite",
         "vision_model": "gemini-2.5-flash",
         "reflect_model": "gemini-2.5-pro",
+        "oauth_client_id": os.environ.get("GOOGLE_CLIENT_ID", ""),
+        "oauth_client_secret": os.environ.get("GOOGLE_CLIENT_SECRET", ""),
+        "oauth_project_id": "deja-ai-app",
     }
 
 
 ALLOWED_MODELS = {
     "gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-2.5-pro",
     "gemini-2.0-flash", "gemini-2.0-flash-lite",
+    "gemini-3.1-pro-preview", "gemini-3.1-flash-lite-preview",
+    "gemini-3-flash-preview",
 }
 MAX_AUDIO_SIZE = 25 * 1024 * 1024  # 25MB
 
@@ -88,7 +93,7 @@ async def generate_endpoint(
     user = await validate_token(token)
 
     if body.model not in ALLOWED_MODELS:
-        raise JSONResponse(
+        return JSONResponse(
             status_code=400,
             content={"error": f"Model not allowed: {body.model}"},
         )
