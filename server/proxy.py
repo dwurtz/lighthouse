@@ -60,19 +60,20 @@ def _deserialize_part(p):
             return types.Part.from_text(text=p["text"])
         if "function_call" in p:
             fc = p["function_call"]
-            part = types.Part.from_function_call(
-                name=fc["name"],
-                args=fc.get("args", {}),
-            )
-            # Restore thought_signature if present (required by Gemini 3.1+)
-            if "thought_signature" in fc:
-                part.function_call.thought_signature = fc["thought_signature"]
-            return part
+            # Build FunctionCall with thought_signature if present.
+            # Must use the types constructor directly — from_function_call()
+            # doesn't support thought_signature.
+            fc_kwargs = {
+                "name": fc["name"],
+                "args": fc.get("args", {}),
+            }
+            if "thought_signature" in fc and fc["thought_signature"]:
+                fc_kwargs["thought_signature"] = fc["thought_signature"]
+            return types.Part(function_call=types.FunctionCall(**fc_kwargs))
         if p.get("thought"):
-            # Thought parts — pass through as text with thought flag
-            part = types.Part.from_text(text=p.get("text", ""))
-            part.thought = True
-            return part
+            # Thought parts must be round-tripped exactly — Gemini
+            # requires them in the contents for multi-turn tool calls.
+            return types.Part(thought=True, text=p.get("text", ""))
         if "function_response" in p:
             fr = p["function_response"]
             return types.Part.from_function_response(
@@ -173,6 +174,30 @@ async def generate(
     except Exception as exc:
         logger.exception("Failed to build GenerateContentConfig")
         raise HTTPException(status_code=400, detail=f"Config error: {exc}")
+
+    # Log the contents structure for debugging tool-call round-trips
+    import json as _json
+    try:
+        def _debug_contents(c):
+            if isinstance(c, list):
+                return [_debug_contents(x) for x in c]
+            if hasattr(c, 'role'):
+                parts_debug = []
+                for p in (c.parts or []):
+                    if hasattr(p, 'function_call') and p.function_call:
+                        fc = p.function_call
+                        parts_debug.append(f"function_call:{fc.name} has_thought_sig={hasattr(fc, 'thought_signature') and bool(fc.thought_signature)}")
+                    elif hasattr(p, 'function_response') and p.function_response:
+                        parts_debug.append(f"function_response:{p.function_response.name}")
+                    elif hasattr(p, 'thought') and p.thought:
+                        parts_debug.append("thought")
+                    elif hasattr(p, 'text') and p.text:
+                        parts_debug.append(f"text:{len(p.text)}chars")
+                return f"{c.role}:[{', '.join(parts_debug)}]"
+            return str(type(c).__name__)
+        logger.info("generate contents: %s", _debug_contents(contents))
+    except Exception:
+        pass
 
     try:
         response = client.models.generate_content(
