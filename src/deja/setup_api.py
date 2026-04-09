@@ -298,13 +298,16 @@ def set_identity(body: dict) -> dict:
             dest = prompts_dir / f"{prompt_name}.md"
             if not dest.exists():
                 try:
-                    src = pkg_resources.files("deja") / "default_prompts" / f"{prompt_name}.md"
+                    src = pkg_resources.files("deja") / "default_assets" / "prompts" / f"{prompt_name}.md"
                     if src.is_file():
                         dest.write_text(src.read_text())
+                        log.info("Copied default prompt: %s", prompt_name)
+                    else:
+                        log.warning("Default prompt not found in package: %s", prompt_name)
                 except Exception:
-                    pass
+                    log.warning("Failed to copy default prompt: %s", prompt_name, exc_info=True)
     except Exception:
-        log.debug("Default prompts copy failed", exc_info=True)
+        log.error("Default prompts copy failed entirely", exc_info=True)
 
     # Create goals.md if not present
     goals = WIKI_DIR / "goals.md"
