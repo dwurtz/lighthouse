@@ -20,7 +20,7 @@ from deja.observations.types import Observation
 
 log = logging.getLogger(__name__)
 
-_last_image_hash = None
+_last_image_hashes: dict[str, object] = {}  # per-screen perceptual hash
 _last_read_ts: float = 0
 
 _DEJA_HOME = os.path.expanduser("~/.deja")
@@ -36,8 +36,21 @@ class ScreenshotObserver(BaseObserver):
         return "Screenshot"
 
     def collect(self) -> list[Observation]:
-        result = capture_screenshot_if_changed()
-        return [result] if result else []
+        results = []
+        # Process all display screenshots (screen_1.png, screen_2.png, ...)
+        import glob
+        screen_files = sorted(glob.glob(os.path.join(_DEJA_HOME, "screen_*.png")))
+        if screen_files:
+            for screen_file in screen_files:
+                result = capture_screenshot_if_changed(screenshot_path=screen_file)
+                if result:
+                    results.append(result)
+        else:
+            # Fallback to single latest_screen.png
+            result = capture_screenshot_if_changed()
+            if result:
+                results.append(result)
+        return results
 
 
 def screen_recording_granted() -> bool:
@@ -50,9 +63,18 @@ def screen_recording_granted() -> bool:
         return False
 
 
-def capture_screenshot_if_changed() -> Observation | None:
-    """Read the latest screenshot from disk, dedup by perceptual hash."""
-    global _last_image_hash, _last_read_ts
+def capture_screenshot_if_changed(
+    screenshot_path: str | None = None,
+) -> Observation | None:
+    """Read a screenshot from disk, dedup by perceptual hash.
+
+    Args:
+        screenshot_path: Path to a specific screen file (e.g. screen_1.png).
+                         Falls back to latest_screen.png if not provided.
+    """
+    global _last_read_ts
+
+    src_path = screenshot_path or _SCREENSHOT_PATH
 
     # Check timestamp file to see if there's a new frame
     try:
@@ -61,43 +83,48 @@ def capture_screenshot_if_changed() -> Observation | None:
     except Exception:
         return None
 
-    # Skip if we already processed this frame
-    if ts <= _last_read_ts:
+    # Skip if we already processed this frame (only for single-screen mode)
+    if screenshot_path is None and ts <= _last_read_ts:
         return None
 
     # Verify the screenshot file exists and has content
-    if not os.path.exists(_SCREENSHOT_PATH) or os.path.getsize(_SCREENSHOT_PATH) < 1024:
+    if not os.path.exists(src_path) or os.path.getsize(src_path) < 1024:
         return None
 
-    _last_read_ts = ts
+    if screenshot_path is None:
+        _last_read_ts = ts
 
     # Copy to a temp file so the Swift app can overwrite the original freely
     path = tempfile.mktemp(suffix=".png")
     try:
-        shutil.copy2(_SCREENSHOT_PATH, path)
+        shutil.copy2(src_path, path)
     except Exception:
         log.debug("Failed to copy screenshot file", exc_info=True)
         return None
 
     # Perceptual hash dedup — skip identical or near-identical frames
+    hash_key = src_path
     try:
         import imagehash
         from PIL import Image
 
         current_hash = imagehash.phash(Image.open(path))
-        if _last_image_hash is not None and (current_hash - _last_image_hash) < 8:
+        prev_hash = _last_image_hashes.get(hash_key)
+        if prev_hash is not None and (current_hash - prev_hash) < 8:
             os.remove(path)
             return None
-        _last_image_hash = current_hash
+        _last_image_hashes[hash_key] = current_hash
     except Exception:
         log.debug("imagehash dedup failed — proceeding without dedup", exc_info=True)
 
+    # Include display number in the ID so multi-screen observations are distinct
+    display_label = os.path.basename(src_path).replace(".png", "").replace("screen_", "display-")
     sig = Observation(
         source="screenshot",
-        sender="screen",
+        sender=display_label if screenshot_path else "screen",
         text="(pending vision description)",
         timestamp=datetime.now(),
-        id_key=f"screen-{datetime.now().strftime('%H%M%S')}",
+        id_key=f"{display_label}-{datetime.now().strftime('%H%M%S')}",
     )
     sig._image_path = path
     return sig

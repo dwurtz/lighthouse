@@ -1,5 +1,6 @@
 import Foundation
 import CoreGraphics
+import AppKit
 
 /// Manages the Python monitor and web backend subprocesses,
 /// including starting, stopping, health-checking, and crash restart.
@@ -110,16 +111,37 @@ class BackendProcessManager {
             withIntermediateDirectories: true
         )
 
-        let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
-        proc.arguments = ["-x", "-C", screenshotPath]
-        proc.standardOutput = FileHandle.nullDevice
-        proc.standardError = FileHandle.nullDevice
-        do {
-            try proc.run()
-            proc.waitUntilExit()
-        } catch {
-            return
+        // Capture all connected displays. Each -D flag captures a
+        // specific display; omitting -D captures only the main one.
+        // We capture each display to a temp file, then keep the set
+        // for the Python backend to analyze.
+        let screens = NSScreen.screens
+        var capturedPaths: [String] = []
+
+        for (i, _) in screens.enumerated() {
+            let displayNum = i + 1  // screencapture uses 1-based display numbers
+            let path = home + "/screen_\(displayNum).png"
+            let proc = Process()
+            proc.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+            proc.arguments = ["-x", "-D", "\(displayNum)", path]
+            proc.standardOutput = FileHandle.nullDevice
+            proc.standardError = FileHandle.nullDevice
+            do {
+                try proc.run()
+                proc.waitUntilExit()
+                if proc.terminationStatus == 0 {
+                    capturedPaths.append(path)
+                }
+            } catch {
+                continue
+            }
+        }
+
+        // Copy the primary display capture as latest_screen.png for
+        // backward compatibility with the Python vision pipeline.
+        if let primary = capturedPaths.first {
+            try? FileManager.default.removeItem(atPath: screenshotPath)
+            try? FileManager.default.copyItem(atPath: primary, toPath: screenshotPath)
         }
 
         guard FileManager.default.fileExists(atPath: screenshotPath),
