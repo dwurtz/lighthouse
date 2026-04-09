@@ -8,6 +8,9 @@ from pathlib import Path
 
 DB_PATH = os.environ.get("DEJA_DB_PATH", "/tmp/deja-events.db")
 
+# Ensure parent directory exists
+Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
+
 
 def _get_db() -> sqlite3.Connection:
     db = sqlite3.connect(DB_PATH)
