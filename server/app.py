@@ -123,3 +123,110 @@ async def telemetry_endpoint(
 
     log_event(body.event, body.properties, user_email, body.client_version)
     return {"status": "ok"}
+
+
+# -- Admin Dashboard ----------------------------------------------------------
+
+import os
+from fastapi.responses import HTMLResponse
+from db import search_events, get_stats
+
+ADMIN_KEY = os.environ.get("DEJA_ADMIN_KEY", "admin")
+
+
+@app.get("/admin")
+async def admin_dashboard(key: str = ""):
+    if key != ADMIN_KEY:
+        return HTMLResponse("<h1>Unauthorized</h1><p>Add ?key=YOUR_ADMIN_KEY</p>", status_code=401)
+
+    stats = get_stats()
+    errors_html = ""
+    for e in stats["recent_errors"]:
+        props = e.get("properties", "{}")
+        errors_html += f"<tr><td>{e['timestamp'][:19]}</td><td>{e['user_email'] or '—'}</td><td>{props}</td></tr>"
+
+    users_html = ""
+    for u in stats["active_users"]:
+        users_html += f"<tr><td>{u['user_email']}</td><td>{u['event_count']}</td><td>{u['last_seen'][:19]}</td></tr>"
+
+    return HTMLResponse(f"""<!DOCTYPE html>
+<html><head><title>Déjà Admin</title>
+<style>
+  body {{ font-family: -apple-system, sans-serif; max-width: 900px; margin: 40px auto; background: #111; color: #eee; padding: 0 20px; }}
+  h1 {{ color: #fff; }} h2 {{ color: #aaa; margin-top: 32px; }}
+  .stats {{ display: flex; gap: 24px; margin: 20px 0; }}
+  .stat {{ background: #222; padding: 16px 24px; border-radius: 8px; }}
+  .stat-num {{ font-size: 28px; font-weight: bold; color: #fff; }}
+  .stat-label {{ font-size: 12px; color: #888; margin-top: 4px; }}
+  table {{ width: 100%; border-collapse: collapse; margin-top: 8px; }}
+  th, td {{ text-align: left; padding: 8px 12px; border-bottom: 1px solid #333; font-size: 13px; }}
+  th {{ color: #888; font-weight: 600; }}
+  form {{ margin: 20px 0; display: flex; gap: 8px; }}
+  input {{ background: #222; border: 1px solid #444; color: #fff; padding: 8px 12px; border-radius: 6px; font-size: 14px; width: 300px; }}
+  button {{ background: #fff; color: #000; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 14px; }}
+  .error {{ color: #f66; }}
+</style></head><body>
+<h1>Déjà Admin</h1>
+
+<div class="stats">
+  <div class="stat"><div class="stat-num">{stats['unique_users']}</div><div class="stat-label">Users</div></div>
+  <div class="stat"><div class="stat-num">{stats['total_events']}</div><div class="stat-label">Events</div></div>
+  <div class="stat"><div class="stat-num error">{stats['total_errors']}</div><div class="stat-label">Errors</div></div>
+</div>
+
+<h2>Search</h2>
+<form action="/admin/search" method="get">
+  <input type="hidden" name="key" value="{key}">
+  <input type="text" name="q" placeholder="Request ID, email, or keyword...">
+  <button type="submit">Search</button>
+</form>
+
+<h2>Active Users</h2>
+<table><tr><th>Email</th><th>Events</th><th>Last Seen</th></tr>{users_html}</table>
+
+<h2>Recent Errors</h2>
+<table><tr><th>Time</th><th>User</th><th>Details</th></tr>{errors_html}</table>
+
+</body></html>""")
+
+
+@app.get("/admin/search")
+async def admin_search(key: str = "", q: str = "", event: str = ""):
+    if key != ADMIN_KEY:
+        return HTMLResponse("<h1>Unauthorized</h1>", status_code=401)
+
+    results = search_events(query=q, event_type=event, limit=200)
+
+    rows_html = ""
+    for r in results:
+        rows_html += (
+            f"<tr><td>{r['timestamp'][:19]}</td><td>{r['event']}</td>"
+            f"<td>{r['user_email'] or '—'}</td><td>{r['request_id'] or '—'}</td>"
+            f"<td><small>{r['properties'][:200]}</small></td></tr>"
+        )
+
+    return HTMLResponse(f"""<!DOCTYPE html>
+<html><head><title>Déjà Admin — Search</title>
+<style>
+  body {{ font-family: -apple-system, sans-serif; max-width: 1100px; margin: 40px auto; background: #111; color: #eee; padding: 0 20px; }}
+  h1 {{ color: #fff; }} a {{ color: #8cf; }}
+  form {{ margin: 20px 0; display: flex; gap: 8px; }}
+  input {{ background: #222; border: 1px solid #444; color: #fff; padding: 8px 12px; border-radius: 6px; font-size: 14px; width: 300px; }}
+  button {{ background: #fff; color: #000; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 14px; }}
+  table {{ width: 100%; border-collapse: collapse; margin-top: 8px; }}
+  th, td {{ text-align: left; padding: 8px 10px; border-bottom: 1px solid #333; font-size: 12px; }}
+  th {{ color: #888; font-weight: 600; }}
+  .error {{ color: #f66; }}
+</style></head><body>
+<h1><a href="/admin?key={key}">← Déjà Admin</a> — Search: "{q or event}"</h1>
+
+<form action="/admin/search" method="get">
+  <input type="hidden" name="key" value="{key}">
+  <input type="text" name="q" placeholder="Request ID, email, or keyword..." value="{q}">
+  <button type="submit">Search</button>
+</form>
+
+<p>{len(results)} result(s)</p>
+<table><tr><th>Time</th><th>Event</th><th>User</th><th>Request ID</th><th>Details</th></tr>{rows_html}</table>
+
+</body></html>""")
