@@ -113,26 +113,38 @@ class GeminiClient:
 
     async def _generate(self, model: str, contents, config_dict: dict) -> str:
         """Unified generate call: proxy or direct SDK."""
-        if self._direct_client:
-            from google.genai import types
-            resp = await self._direct_client.aio.models.generate_content(
-                model=model,
-                contents=contents,
-                config=types.GenerateContentConfig(**config_dict),
-            )
-            return resp.text
+        import time as _time
+        from deja.telemetry import track_llm_call
 
-        token = get_auth_token()
-        headers = {"Authorization": f"Bearer {token}"} if token else {}
-        # Serialize contents for JSON transport
-        serialized = self._serialize_contents(contents)
-        resp = await self._http.post("/v1/generate", json={
-            "model": model,
-            "contents": serialized,
-            "config": config_dict,
-        }, headers=headers)
-        resp.raise_for_status()
-        return resp.json()["text"]
+        t0 = _time.time()
+        try:
+            if self._direct_client:
+                from google.genai import types
+                resp = await self._direct_client.aio.models.generate_content(
+                    model=model,
+                    contents=contents,
+                    config=types.GenerateContentConfig(**config_dict),
+                )
+                duration = int((_time.time() - t0) * 1000)
+                track_llm_call(model=model, duration_ms=duration, ok=True)
+                return resp.text
+
+            token = get_auth_token()
+            headers = {"Authorization": f"Bearer {token}"} if token else {}
+            serialized = self._serialize_contents(contents)
+            resp = await self._http.post("/v1/generate", json={
+                "model": model,
+                "contents": serialized,
+                "config": config_dict,
+            }, headers=headers)
+            resp.raise_for_status()
+            duration = int((_time.time() - t0) * 1000)
+            track_llm_call(model=model, duration_ms=duration, ok=True)
+            return resp.json()["text"]
+        except Exception as e:
+            duration = int((_time.time() - t0) * 1000)
+            track_llm_call(model=model, duration_ms=duration, ok=False, error=type(e).__name__)
+            raise
 
     @staticmethod
     def _serialize_contents(contents) -> Any:

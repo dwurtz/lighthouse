@@ -95,14 +95,20 @@ def start_gws_auth() -> dict:
         return {"ok": True, "email": email, "name": "", "already": True}
 
     # Run native OAuth flow (opens browser, handles callback)
+    from deja.telemetry import track_setup_step
+    track_setup_step("google_auth_started")
+
     result = run_oauth_flow()
     if not result.get("ok"):
+        track_setup_step("google_auth_failed", error=result.get("error", "unknown"))
         return result
 
     email = result.get("email", "")
     name = result.get("name", "")
 
     # Auto-create identity if we have email
+    track_setup_step("google_auth_completed")
+
     if email:
         identity_result = set_identity({
             "name": name or email.split("@")[0].replace(".", " ").title(),
@@ -207,6 +213,9 @@ def set_identity(body: dict) -> dict:
 @router.post("/complete")
 def complete_setup() -> dict:
     """Mark setup as complete. Writes the setup_done marker."""
+    from deja.telemetry import track_setup_step
+    track_setup_step("setup_completed")
+
     DEJA_HOME.mkdir(parents=True, exist_ok=True)
     (DEJA_HOME / "setup_done").write_text("")
 

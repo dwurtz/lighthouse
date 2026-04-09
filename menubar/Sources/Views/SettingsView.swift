@@ -143,6 +143,28 @@ struct SettingsView: View {
 
                     Divider().background(Color.white.opacity(0.1))
 
+                    // Support
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Support")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(.white.opacity(0.4))
+                            .textCase(.uppercase)
+
+                        Button(action: { sendLogs() }) {
+                            HStack(spacing: 6) {
+                                Image(systemName: "envelope")
+                                    .font(.system(size: 12))
+                                Text("Send Logs to Déjà Support")
+                                    .font(.system(size: 13))
+                            }
+                            .foregroundColor(.white.opacity(0.7))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(16)
+
+                    Divider().background(Color.white.opacity(0.1))
+
                     // Account
                     VStack(alignment: .leading, spacing: 16) {
                         Text("Account")
@@ -177,6 +199,38 @@ struct SettingsView: View {
             }
         }
         .background(Color.black)
+    }
+
+    // MARK: - Send Logs
+
+    func sendLogs() {
+        DispatchQueue.global(qos: .utility).async {
+            let home = NSHomeDirectory() + "/.deja"
+            var logContent = "=== Déjà Support Logs ===\n"
+            logContent += "Date: \(Date())\n"
+            logContent += "App version: 0.2.0\n"
+            logContent += "macOS: \(ProcessInfo.processInfo.operatingSystemVersionString)\n\n"
+
+            // Include deja.log (last 500 lines)
+            let logPath = home + "/deja.log"
+            if let data = FileManager.default.contents(atPath: logPath),
+               let text = String(data: data, encoding: .utf8) {
+                let lines = text.components(separatedBy: "\n")
+                let tail = lines.suffix(500).joined(separator: "\n")
+                logContent += "=== deja.log (last 500 lines) ===\n\(tail)\n\n"
+            }
+
+            // Upload to server
+            guard let url = URL(string: "http://localhost:5055/api/setup/status") else { return }
+            // For now, compose an email with the logs attached
+            let encoded = logContent.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+            let mailto = "mailto:david@trydeja.com?subject=Déjà%20Support%20Logs&body=\(encoded)"
+            if let mailURL = URL(string: String(mailto.prefix(50000))) {
+                DispatchQueue.main.async {
+                    NSWorkspace.shared.open(mailURL)
+                }
+            }
+        }
     }
 
     // MARK: - Permission Row

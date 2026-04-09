@@ -60,10 +60,22 @@ async def _run_monitor() -> None:
     from deja.llm_client import GeminiClient
     from deja.agent.loop import AgentLoop
     from deja.observations.collector import Observer
+    from deja.telemetry import track, track_heartbeat
+
+    track("monitor_started")
 
     gemini = GeminiClient()
     collector = Observer()
     monitor = AgentLoop(gemini, collector)
+
+    # Periodic heartbeat — sends system state every 10 minutes
+    import asyncio
+    async def _heartbeat_loop():
+        while True:
+            await asyncio.sleep(600)
+            track_heartbeat()
+
+    asyncio.get_event_loop().create_task(_heartbeat_loop())
 
     # Nightly cleanup used to be scheduled via apscheduler cron at 02:00,
     # but that silently missed fires when macOS was in maintenance sleep
