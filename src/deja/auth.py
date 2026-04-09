@@ -1,8 +1,8 @@
 """Google OAuth for Deja API server authentication.
 
 Uses google-auth-oauthlib for native OAuth — no external CLI dependency.
-Tokens are stored at ~/.deja/google_token.json. Falls back to the legacy
-gws token file for backwards compatibility.
+Tokens are stored in the macOS Keychain (service=deja, account=google-token)
+for encryption at rest. Falls back to legacy file-based tokens for migration.
 """
 
 from __future__ import annotations
@@ -18,6 +18,51 @@ from pathlib import Path
 log = logging.getLogger(__name__)
 
 _DEJA_TOKEN_PATH = Path.home() / ".deja" / "google_token.json"
+_KEYCHAIN_SERVICE = "deja"
+_KEYCHAIN_ACCOUNT = "google-token"
+
+
+def _keychain_read() -> str | None:
+    """Read the token JSON blob from macOS Keychain."""
+    try:
+        r = subprocess.run(
+            ["security", "find-generic-password",
+             "-s", _KEYCHAIN_SERVICE, "-a", _KEYCHAIN_ACCOUNT, "-w"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if r.returncode == 0 and r.stdout.strip():
+            return r.stdout.strip()
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        pass
+    return None
+
+
+def _keychain_write(value: str) -> bool:
+    """Store the token JSON blob in macOS Keychain. Returns True on success."""
+    try:
+        subprocess.run(
+            ["security", "add-generic-password",
+             "-s", _KEYCHAIN_SERVICE, "-a", _KEYCHAIN_ACCOUNT,
+             "-w", value, "-U"],
+            check=True, capture_output=True, text=True, timeout=5,
+        )
+        return True
+    except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired) as e:
+        log.warning("Keychain write failed: %s", e)
+        return False
+
+
+def _keychain_delete() -> bool:
+    """Remove the token from macOS Keychain."""
+    try:
+        r = subprocess.run(
+            ["security", "delete-generic-password",
+             "-s", _KEYCHAIN_SERVICE, "-a", _KEYCHAIN_ACCOUNT],
+            capture_output=True, text=True,
+        )
+        return r.returncode == 0
+    except Exception:
+        return False
 
 _BRANDED_CALLBACK_HTML = """<!DOCTYPE html>
 <html>
@@ -145,12 +190,37 @@ def _find_client_secret() -> Path | None:
 
 
 def _read_token_file() -> dict | None:
-    """Read Deja's own token file, falling back to legacy gws token."""
+    """Read token from Keychain, with file-based fallback for migration.
+
+    Priority:
+      1. macOS Keychain (encrypted at rest)
+      2. ~/.deja/google_token.json (migrated to Keychain on first read)
+      3. ~/.config/gws/token.json (legacy gws CLI)
+    """
+    # 1. Try Keychain
+    raw = _keychain_read()
+    if raw:
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            pass
+
+    # 2. Try file-based tokens and migrate to Keychain
     for path in [_DEJA_TOKEN_PATH, _GWS_TOKEN_PATH]:
         try:
             if path.exists():
                 data = json.loads(path.read_text())
                 if data:
+                    # Migrate to Keychain
+                    if _keychain_write(json.dumps(data)):
+                        log.info("Migrated token from %s to macOS Keychain", path)
+                        # Remove the plain-text file after successful migration
+                        if path == _DEJA_TOKEN_PATH:
+                            try:
+                                path.unlink()
+                                log.info("Deleted plain-text token file: %s", path)
+                            except OSError:
+                                pass
                     return data
         except (json.JSONDecodeError, OSError) as e:
             log.debug("Failed to read %s: %s", path, e)
@@ -158,9 +228,29 @@ def _read_token_file() -> dict | None:
 
 
 def _save_token(token_data: dict) -> None:
-    """Save token to Deja's own token file."""
+    """Save token to macOS Keychain (encrypted at rest).
+
+    Falls back to file if Keychain write fails.
+    """
+    token_json = json.dumps(token_data)
+    if _keychain_write(token_json):
+        # Clean up plain-text file if it exists
+        if _DEJA_TOKEN_PATH.exists():
+            try:
+                _DEJA_TOKEN_PATH.unlink()
+            except OSError:
+                pass
+        return
+
+    # Fallback to file (shouldn't happen on macOS, but just in case)
+    log.warning("Keychain write failed — falling back to file storage")
     _DEJA_TOKEN_PATH.parent.mkdir(parents=True, exist_ok=True)
-    _DEJA_TOKEN_PATH.write_text(json.dumps(token_data, indent=2))
+    _DEJA_TOKEN_PATH.write_text(token_json)
+    try:
+        import os
+        os.chmod(str(_DEJA_TOKEN_PATH), 0o600)
+    except OSError:
+        pass
 
 
 def _is_expired(token_data: dict) -> bool:
