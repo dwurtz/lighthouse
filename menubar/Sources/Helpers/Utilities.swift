@@ -49,15 +49,94 @@ func formatDuration(_ seconds: TimeInterval) -> String {
     return String(format: "%d:%02d", mins, secs)
 }
 
-// MARK: - Authenticated Local API Requests
+// MARK: - Local API (Unix Domain Socket)
 
-/// Create a URLRequest to the local Python backend with the IPC secret header.
-/// All calls to localhost:5055 MUST use this instead of raw URLRequest.
-func localAPIRequest(_ path: String, method: String = "GET", timeoutInterval: TimeInterval = 10) -> URLRequest {
-    let url = URL(string: "http://localhost:5055\(path)")!
-    var req = URLRequest(url: url)
-    req.httpMethod = method
-    req.timeoutInterval = timeoutInterval
-    req.setValue(BackendProcessManager.ipcSecret, forHTTPHeaderField: "X-Deja-Secret")
-    return req
+/// Make an HTTP request to the Python backend over the Unix domain socket
+/// at ``~/.deja/deja.sock``. The socket is protected by filesystem
+/// permissions (owner-only), so no shared secret is needed.
+///
+/// The completion handler is called on a background queue with the
+/// response body (or nil on error) and an optional error.
+func localAPICall(
+    _ path: String,
+    method: String = "GET",
+    body: Data? = nil,
+    timeoutInterval: TimeInterval = 10,
+    completion: @escaping (Data?, Error?) -> Void
+) {
+    DispatchQueue.global(qos: .userInitiated).async {
+        let socketPath = MonitorState.home + "/deja.sock"
+
+        let fd = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
+        guard fd >= 0 else {
+            completion(nil, NSError(domain: "deja.ipc", code: -1, userInfo: [NSLocalizedDescriptionKey: "socket() failed"]))
+            return
+        }
+
+        // Set send/receive timeout
+        var tv = timeval(tv_sec: Int(timeoutInterval), tv_usec: 0)
+        setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
+        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
+
+        var addr = sockaddr_un()
+        addr.sun_family = sa_family_t(AF_UNIX)
+        withUnsafeMutablePointer(to: &addr.sun_path.0) { ptr in
+            socketPath.withCString { cstr in
+                _ = strcpy(ptr, cstr)
+            }
+        }
+
+        let connectResult = withUnsafePointer(to: &addr, { ptr in
+            ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockPtr in
+                Darwin.connect(fd, sockPtr, socklen_t(MemoryLayout<sockaddr_un>.size))
+            }
+        })
+        guard connectResult == 0 else {
+            Darwin.close(fd)
+            completion(nil, NSError(domain: "deja.ipc", code: -2, userInfo: [NSLocalizedDescriptionKey: "connect() failed: \(String(cString: strerror(errno)))"]))
+            return
+        }
+
+        // Build raw HTTP/1.1 request
+        var http = "\(method) \(path) HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n"
+        if let body = body {
+            http += "Content-Type: application/json\r\nContent-Length: \(body.count)\r\n"
+        }
+        http += "\r\n"
+
+        // Send headers
+        let headerBytes = Array(http.utf8)
+        headerBytes.withUnsafeBufferPointer { buf in
+            _ = Darwin.write(fd, buf.baseAddress!, buf.count)
+        }
+        // Send body
+        if let body = body {
+            body.withUnsafeBytes { buf in
+                _ = Darwin.write(fd, buf.baseAddress!, body.count)
+            }
+        }
+
+        // Read full response
+        var responseData = Data()
+        let bufSize = 65536
+        let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: bufSize)
+        defer { buffer.deallocate() }
+
+        while true {
+            let n = Darwin.read(fd, buffer, bufSize)
+            if n <= 0 { break }
+            responseData.append(buffer, count: n)
+        }
+        Darwin.close(fd)
+
+        // Split HTTP headers from body at \r\n\r\n
+        let separator = Data("\r\n\r\n".utf8)
+        if let range = responseData.range(of: separator) {
+            let bodyData = responseData.subdata(in: range.upperBound..<responseData.endIndex)
+            completion(bodyData, nil)
+        } else {
+            // No headers found — return raw data
+            completion(responseData.isEmpty ? nil : responseData, nil)
+        }
+    }
 }

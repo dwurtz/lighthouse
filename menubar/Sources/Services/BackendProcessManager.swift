@@ -14,15 +14,14 @@ class BackendProcessManager {
         monitorProcess?.isRunning ?? false
     }
 
-    // IPC secret — generated once at app startup, shared with Python via env var.
-    // All HTTP requests to localhost:5055 must include this as X-Deja-Secret header.
-    static let ipcSecret: String = UUID().uuidString
+    /// Path to the Unix domain socket used by the Python backend.
+    /// Filesystem permissions on ~/.deja/ (0o700) serve as the auth boundary.
+    static let socketPath = MonitorState.home + "/deja.sock"
 
     // MARK: - Environment
 
     private func makeEnv() -> [String: String] {
         var env = ProcessInfo.processInfo.environment
-        env["DEJA_IPC_SECRET"] = Self.ipcSecret
         if MonitorState.isBundledPython {
             if let resourceURL = Bundle.main.resourceURL {
                 env["PYTHONPATH"] = resourceURL.appendingPathComponent("python-env/src").path
@@ -79,6 +78,10 @@ class BackendProcessManager {
 
     func startWeb() {
         guard webProcess == nil || !webProcess!.isRunning else { return }
+
+        // Remove stale socket from a previous run
+        try? FileManager.default.removeItem(atPath: Self.socketPath)
+
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: MonitorState.backendPath)
         proc.arguments = ["-m", "deja", "web"]
@@ -164,6 +167,9 @@ class BackendProcessManager {
         monitorProcess = nil
         webProcess?.terminate()
         webProcess = nil
+
+        // Clean up socket file
+        try? FileManager.default.removeItem(atPath: Self.socketPath)
     }
 
     func restartAll(onMonitorTermination: @escaping () -> Void) {

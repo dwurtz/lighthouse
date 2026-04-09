@@ -174,9 +174,7 @@ struct SetupPanelView: View {
     func connectGoogle() {
         gwsLoading = true
         gwsError = ""
-        var req = localAPIRequest("/api/setup/gws-auth", method: "POST", timeoutInterval: 120)
-
-        URLSession.shared.dataTask(with: req) { data, _, err in
+        localAPICall("/api/setup/gws-auth", method: "POST", timeoutInterval: 120) { data, err in
             DispatchQueue.main.async {
                 gwsLoading = false
                 if let err = err {
@@ -196,7 +194,7 @@ struct SetupPanelView: View {
                     gwsError = obj["error"] as? String ?? "Auth failed"
                 }
             }
-        }.resume()
+        }
     }
 
     func grantScreenRecording() {
@@ -243,8 +241,7 @@ struct SetupPanelView: View {
     }
 
     func checkExistingAuth() {
-        let req = localAPIRequest("/api/setup/status", timeoutInterval: 3)
-        URLSession.shared.dataTask(with: req) { data, _, _ in
+        localAPICall("/api/setup/status", timeoutInterval: 3) { data, _ in
             guard let data = data,
                   let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
             DispatchQueue.main.async {
@@ -253,7 +250,7 @@ struct SetupPanelView: View {
                     if self.gwsEmail.isEmpty { self.gwsEmail = "Connected" }
                 }
             }
-        }.resume()
+        }
     }
 
     func startPolling() {

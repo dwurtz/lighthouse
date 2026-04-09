@@ -16,8 +16,7 @@ class SetupManager {
 
     /// Check backend setup status and determine which wizard step to show.
     func checkSetupStatus(completion: @escaping (Int) -> Void) {
-        let req = localAPIRequest("/api/setup/status", timeoutInterval: 5)
-        URLSession.shared.dataTask(with: req) { data, _, _ in
+        localAPICall("/api/setup/status", timeoutInterval: 5) { data, _ in
             guard let data = data,
                   let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
             DispatchQueue.main.async {
@@ -35,7 +34,7 @@ class SetupManager {
                 }
                 completion(step)
             }
-        }.resume()
+        }
     }
 
     // MARK: - Permission Checks
@@ -60,8 +59,7 @@ class SetupManager {
     // MARK: - Backfill
 
     func checkBackfillStatus(completion: @escaping (Bool, String, Int) -> Void) {
-        let req = localAPIRequest("/api/setup/backfill-status", timeoutInterval: 3)
-        URLSession.shared.dataTask(with: req) { data, _, _ in
+        localAPICall("/api/setup/backfill-status", timeoutInterval: 3) { data, _ in
             guard let data = data,
                   let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
             let running = obj["running"] as? Bool ?? false
@@ -70,11 +68,10 @@ class SetupManager {
             DispatchQueue.main.async {
                 completion(running, step, pages)
             }
-        }.resume()
+        }
     }
 
     func startBackfill() {
-        let req = localAPIRequest("/api/setup/start-backfill", method: "POST", timeoutInterval: 10)
-        URLSession.shared.dataTask(with: req) { _, _, _ in }.resume()
+        localAPICall("/api/setup/start-backfill", method: "POST", timeoutInterval: 10) { _, _ in }
     }
 }

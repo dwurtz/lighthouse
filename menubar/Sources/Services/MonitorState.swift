@@ -230,8 +230,7 @@ class MonitorState: ObservableObject {
 
         // Tell the backend to write the setup_done marker so the
         // wizard doesn't reappear on next launch.
-        let req = localAPIRequest("/api/setup/complete", method: "POST", timeoutInterval: 5)
-        URLSession.shared.dataTask(with: req) { _, _, _ in }.resume()
+        localAPICall("/api/setup/complete", method: "POST", timeoutInterval: 5) { _, _ in }
 
         startScreenshotCapture()
         startDatabaseReaders()
@@ -557,8 +556,7 @@ class MonitorState: ObservableObject {
             return
         }
         let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query
-        let req = localAPIRequest("/api/contacts/search?q=\(encoded)&limit=5")
-        URLSession.shared.dataTask(with: req) { [weak self] data, _, _ in
+        localAPICall("/api/contacts/search?q=\(encoded)&limit=5") { [weak self] data, _ in
             guard let data = data,
                   let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return }
             let results = arr.map { c in
@@ -572,7 +570,7 @@ class MonitorState: ObservableObject {
                 self?.contactResults = results
                 self?.showContactPicker = !results.isEmpty
             }
-        }.resume()
+        }
     }
 
     func insertContact(_ contact: ContactMatch) {
@@ -591,8 +589,7 @@ class MonitorState: ObservableObject {
         voicePillTranscript = ""
 
         // Start ffmpeg recording immediately
-        let req = localAPIRequest("/api/mic/start", method: "POST", timeoutInterval: 5)
-        URLSession.shared.dataTask(with: req) { _, _, _ in }.resume()
+        localAPICall("/api/mic/start", method: "POST", timeoutInterval: 5) { _, _ in }
 
         // Animate waveform
         waveformTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
@@ -613,8 +610,7 @@ class MonitorState: ObservableObject {
         voicePillTranscript = ""
 
         // Stop recording and get transcript
-        let req = localAPIRequest("/api/mic/stop", method: "POST", timeoutInterval: 30)
-        URLSession.shared.dataTask(with: req) { [weak self] data, _, error in
+        localAPICall("/api/mic/stop", method: "POST", timeoutInterval: 30) { [weak self] data, error in
             guard let self = self else { return }
             guard let data = data,
                   let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -638,7 +634,7 @@ class MonitorState: ObservableObject {
                     self.voicePillTranscript = ""
                 }
             }
-        }.resume()
+        }
     }
 
     // MARK: - Chat
@@ -654,44 +650,37 @@ class MonitorState: ObservableObject {
         let placeholderIdx = chatMessages.count
         chatMessages.append(ChatMessage(role: "agent", content: ""))
 
-        DispatchQueue.global().async { [weak self] in
-            var request = localAPIRequest("/api/chat", method: "POST", timeoutInterval: 120)
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.httpBody = try? JSONSerialization.data(withJSONObject: ["message": message])
-
-            let session = URLSession(configuration: .default)
-            let task = session.dataTask(with: request) { data, response, error in
-                guard let data = data else {
-                    DispatchQueue.main.async {
-                        self?.chatLoading = false
-                        self?.chatMessages[placeholderIdx] = ChatMessage(role: "agent", content: "Error: \(error?.localizedDescription ?? "no response")")
-                    }
-                    return
+        let chatBody = try? JSONSerialization.data(withJSONObject: ["message": message])
+        localAPICall("/api/chat", method: "POST", body: chatBody, timeoutInterval: 120) { [weak self] data, error in
+            guard let data = data else {
+                DispatchQueue.main.async {
+                    self?.chatLoading = false
+                    self?.chatMessages[placeholderIdx] = ChatMessage(role: "agent", content: "Error: \(error?.localizedDescription ?? "no response")")
                 }
+                return
+            }
 
-                var fullText = ""
-                let text = String(data: data, encoding: .utf8) ?? ""
-                for line in text.split(separator: "\n") {
-                    let l = String(line)
-                    if l.hasPrefix("data: ") {
-                        let jsonStr = String(l.dropFirst(6))
-                        if let jsonData = jsonStr.data(using: .utf8),
-                           let obj = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any] {
-                            if let chunk = obj["chunk"] as? String {
-                                fullText += chunk
-                            }
+            var fullText = ""
+            let text = String(data: data, encoding: .utf8) ?? ""
+            for line in text.split(separator: "\n") {
+                let l = String(line)
+                if l.hasPrefix("data: ") {
+                    let jsonStr = String(l.dropFirst(6))
+                    if let jsonData = jsonStr.data(using: .utf8),
+                       let obj = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any] {
+                        if let chunk = obj["chunk"] as? String {
+                            fullText += chunk
                         }
                     }
                 }
-
-                let displayText = fullText.replacingOccurrences(of: "\\[ACTION:[^\\]]*\\]", with: "", options: .regularExpression)
-
-                DispatchQueue.main.async {
-                    self?.chatLoading = false
-                    self?.chatMessages[placeholderIdx] = ChatMessage(role: "agent", content: displayText.trimmingCharacters(in: .whitespacesAndNewlines))
-                }
             }
-            task.resume()
+
+            let displayText = fullText.replacingOccurrences(of: "\\[ACTION:[^\\]]*\\]", with: "", options: .regularExpression)
+
+            DispatchQueue.main.async {
+                self?.chatLoading = false
+                self?.chatMessages[placeholderIdx] = ChatMessage(role: "agent", content: displayText.trimmingCharacters(in: .whitespacesAndNewlines))
+            }
         }
     }
 }

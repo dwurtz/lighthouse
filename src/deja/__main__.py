@@ -147,8 +147,7 @@ def main() -> None:
         help="Start the MCP server (stdio transport) — connects to Claude Desktop/Code",
     )
     sub.add_parser("status", help="Print liveness summary")
-    web_p = sub.add_parser("web", help="Start the FastAPI backend for the popover")
-    web_p.add_argument("--port", type=int, default=5055)
+    sub.add_parser("web", help="Start the FastAPI backend on Unix socket (~/.deja/deja.sock)")
     link_p = sub.add_parser(
         "linkify",
         help="Sweep the wiki and wrap unlinked entity mentions in [[slug]] syntax",
@@ -198,7 +197,7 @@ def main() -> None:
     elif command == "web":
         _ensure_single_instance("web")
         from deja.web import run_web
-        run_web(port=args.port)
+        run_web()
     elif command == "status":
         _show_status()
     elif command == "linkify":

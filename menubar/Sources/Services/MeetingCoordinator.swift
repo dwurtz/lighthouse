@@ -19,8 +19,7 @@ class MeetingCoordinator {
         onDismiss: @escaping () -> Void
     ) {
         guard !isRecording else { return }
-        let req = localAPIRequest("/api/meeting/prompt", timeoutInterval: 2)
-        URLSession.shared.dataTask(with: req) { [weak self] data, _, _ in
+        localAPICall("/api/meeting/prompt", timeoutInterval: 2) { [weak self] data, _ in
             guard let self = self, let data = data,
                   let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let available = obj["available"] as? Bool else { return }
@@ -48,12 +47,11 @@ class MeetingCoordinator {
                     }
                 }
             }
-        }.resume()
+        }
     }
 
     func refreshMeetingStatus(onElapsed: @escaping (TimeInterval) -> Void) {
-        let req = localAPIRequest("/api/meeting/status", timeoutInterval: 2)
-        URLSession.shared.dataTask(with: req) { data, _, _ in
+        localAPICall("/api/meeting/status", timeoutInterval: 2) { data, _ in
             guard let data = data,
                   let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
             DispatchQueue.main.async {
@@ -61,7 +59,7 @@ class MeetingCoordinator {
                     onElapsed(TimeInterval(elapsed))
                 }
             }
-        }.resume()
+        }
     }
 
     // MARK: - Start Recording
@@ -76,16 +74,13 @@ class MeetingCoordinator {
             recordedEventIds.insert(lastPromptedEventId)
         }
 
-        var req = localAPIRequest("/api/meeting/start", method: "POST", timeoutInterval: 10)
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-
-        let body: [String: Any] = [
+        let bodyDict: [String: Any] = [
             "title": title,
             "attendees": attendees.map { ["name": $0] },
         ]
-        req.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        let bodyData = try? JSONSerialization.data(withJSONObject: bodyDict)
 
-        URLSession.shared.dataTask(with: req) { [weak self] data, _, error in
+        localAPICall("/api/meeting/start", method: "POST", body: bodyData, timeoutInterval: 10) { [weak self] data, error in
             if let error = error {
                 NSLog("deja: meeting start failed: \(error)")
                 return
@@ -100,7 +95,7 @@ class MeetingCoordinator {
                 onStarted(sessionId)
                 NSLog("deja: meeting recording started in Swift: \(sessionId)")
             }
-        }.resume()
+        }
     }
 
     // MARK: - Stop Recording
@@ -108,11 +103,8 @@ class MeetingCoordinator {
     func stopRecording(notes: String, onProcessed: @escaping () -> Void) {
         recorder.stopRecording { [weak self] in
             guard self != nil else { return }
-            var req = localAPIRequest("/api/meeting/stop", method: "POST", timeoutInterval: 300)
-            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            req.httpBody = try? JSONSerialization.data(withJSONObject: ["notes": notes])
-
-            URLSession.shared.dataTask(with: req) { data, _, error in
+            let stopBody = try? JSONSerialization.data(withJSONObject: ["notes": notes])
+            localAPICall("/api/meeting/stop", method: "POST", body: stopBody, timeoutInterval: 300) { data, error in
                 DispatchQueue.main.async {
                     onProcessed()
                 }
@@ -135,7 +127,7 @@ class MeetingCoordinator {
                         }
                     }
                 }
-            }.resume()
+            }
         }
     }
 
@@ -156,8 +148,7 @@ class MeetingCoordinator {
     // MARK: - Unlink
 
     func unlinkMeeting() {
-        let req = localAPIRequest("/api/meeting/unlink", method: "POST", timeoutInterval: 5)
-        URLSession.shared.dataTask(with: req) { _, _, _ in }.resume()
+        localAPICall("/api/meeting/unlink", method: "POST", timeoutInterval: 5) { _, _ in }
     }
 
     // MARK: - Auto-stop callback

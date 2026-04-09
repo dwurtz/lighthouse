@@ -15,7 +15,12 @@ set -euo pipefail
 DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT="$DIR/.."
 VENV="$PROJECT/venv"
-APP="$PROJECT/Deja.app"
+# Use Xcode's BUILT_PRODUCTS_DIR if available (xcodebuild), otherwise project root (build.sh)
+if [ -n "${BUILT_PRODUCTS_DIR:-}" ]; then
+    APP="$BUILT_PRODUCTS_DIR/Deja.app"
+else
+    APP="$PROJECT/Deja.app"
+fi
 DEST="$APP/Contents/Resources/python-env"
 
 PYTHON_VERSION="3.14"

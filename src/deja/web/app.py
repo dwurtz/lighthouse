@@ -7,7 +7,6 @@ modules define ``APIRouter`` objects that are included here.
 from __future__ import annotations
 
 from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
 
 from deja.web.setup_routes import router as setup_router
 from deja.web.chat_routes import router as chat_router
@@ -18,40 +17,13 @@ from deja.web.status_routes import router as status_router
 
 
 def create_app() -> FastAPI:
-    """Build and return the fully-configured FastAPI application."""
-    import os
-    from starlette.middleware.base import BaseHTTPMiddleware
-    from starlette.responses import JSONResponse
+    """Build and return the fully-configured FastAPI application.
 
+    Authentication is handled by Unix domain socket filesystem
+    permissions (``~/.deja/`` is chmod 700), so no shared-secret
+    middleware is needed.
+    """
     application = FastAPI(title="deja", version="0.2.0")
-
-    # IPC authentication — the Swift app passes a random secret via
-    # DEJA_IPC_SECRET env var. All requests must include it as
-    # X-Deja-Secret header. This prevents other local processes from
-    # accessing the backend.
-    ipc_secret = os.environ.get("DEJA_IPC_SECRET")
-
-    class IPCAuthMiddleware(BaseHTTPMiddleware):
-        async def dispatch(self, request, call_next):
-            if ipc_secret:
-                provided = request.headers.get("x-deja-secret", "")
-                if provided != ipc_secret:
-                    return JSONResponse(
-                        {"error": "Unauthorized"},
-                        status_code=401,
-                    )
-            return await call_next(request)
-
-    application.add_middleware(IPCAuthMiddleware)
-
-    # CORS — localhost only (Swift app + admin)
-    application.add_middleware(
-        CORSMiddleware,
-        allow_origins=["http://localhost:5055"],
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
 
     # Include routers
     application.include_router(setup_router)
@@ -67,9 +39,38 @@ def create_app() -> FastAPI:
 app = create_app()
 
 
-def run_web(port: int = 5055) -> None:
-    """Start the web server. Called by ``python -m deja web``."""
+def run_web(port: int = 0) -> None:
+    """Start the web server on a Unix domain socket.
+
+    Called by ``python -m deja web``. Listens on
+    ``~/.deja/deja.sock``.  Filesystem permissions on ``~/.deja/``
+    (chmod 700) serve as the authentication boundary -- no shared
+    secret is needed.
+
+    The ``port`` parameter is accepted for backward compatibility
+    but ignored; all IPC goes through the socket.
+    """
+    import atexit
+    import os
+
     import uvicorn
 
-    print(f"Déjà: http://localhost:{port}")
-    uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
+    from deja.config import DEJA_HOME
+
+    sock_path = str(DEJA_HOME / "deja.sock")
+
+    # Clean up stale socket from a previous run
+    if os.path.exists(sock_path):
+        os.unlink(sock_path)
+
+    # Register cleanup so socket is removed on exit
+    def _cleanup():
+        try:
+            os.unlink(sock_path)
+        except FileNotFoundError:
+            pass
+
+    atexit.register(_cleanup)
+
+    print(f"Déjà: unix://{sock_path}")
+    uvicorn.run(app, uds=sock_path, log_level="info")
