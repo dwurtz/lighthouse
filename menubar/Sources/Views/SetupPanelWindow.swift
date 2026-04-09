@@ -15,12 +15,12 @@ class SetupPanelWindow: NSPanel {
         hasShadow = true
         hidesOnDeactivate = false
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        isMovableByWindowBackground = true
+        isMovableByWindowBackground = false
 
         let hostView = NSHostingView(rootView: SetupPanelView(monitor: monitor))
         contentView = hostView
 
-        centerOnScreen()
+        positionAbovePill()
 
         NotificationCenter.default.addObserver(
             self,
@@ -34,14 +34,16 @@ class SetupPanelWindow: NSPanel {
     override var canBecomeMain: Bool { false }
 
     @objc private func screenChanged() {
-        centerOnScreen()
+        positionAbovePill()
     }
 
-    private func centerOnScreen() {
+    private func positionAbovePill() {
+        // Anchor at bottom-center, just above the voice pill position.
+        // The pill sits at y=24 from the bottom; we stack above it.
         guard let screen = NSScreen.main else { return }
         let screenFrame = screen.visibleFrame
         let x = screenFrame.origin.x + (screenFrame.width - frame.width) / 2
-        let y = screenFrame.origin.y + (screenFrame.height - frame.height) / 2
+        let y = screenFrame.origin.y + 80  // above the pill (pill is at y=24, height ~56)
         setFrameOrigin(NSPoint(x: x, y: y))
     }
 }

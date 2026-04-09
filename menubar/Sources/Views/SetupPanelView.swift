@@ -1,5 +1,6 @@
 import SwiftUI
 import CoreGraphics
+import SQLite3
 
 struct SetupPanelView: View {
     @ObservedObject var monitor: MonitorState
@@ -207,11 +208,16 @@ struct SetupPanelView: View {
     }
 
     func grantFullDisk() {
-        // Attempt to read a protected file — this causes macOS to add
-        // Deja to the Full Disk Access list automatically (user still
-        // needs to toggle it on, but at least it appears in the list).
-        let _ = FileManager.default.contents(atPath: NSHomeDirectory() + "/Library/Messages/chat.db")
+        // Try to access the protected database — this triggers macOS
+        // to add Deja to the Full Disk Access list (user still needs
+        // to toggle it on). Using sqlite3 open which is what the
+        // DatabaseReader uses in production.
+        var db: OpaquePointer?
+        let dbPath = NSHomeDirectory() + "/Library/Messages/chat.db"
+        sqlite3_open_v2(dbPath, &db, 0x00000001, nil)  // SQLITE_OPEN_READONLY
+        if db != nil { sqlite3_close(db) }
 
+        // Open System Settings to the FDA pane
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") {
             NSWorkspace.shared.open(url)
         }
