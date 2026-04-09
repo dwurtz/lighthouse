@@ -60,10 +60,19 @@ def _deserialize_part(p):
             return types.Part.from_text(text=p["text"])
         if "function_call" in p:
             fc = p["function_call"]
-            return types.Part.from_function_call(
+            part = types.Part.from_function_call(
                 name=fc["name"],
                 args=fc.get("args", {}),
             )
+            # Restore thought_signature if present (required by Gemini 3.1+)
+            if "thought_signature" in fc:
+                part.function_call.thought_signature = fc["thought_signature"]
+            return part
+        if p.get("thought"):
+            # Thought parts — pass through as text with thought flag
+            part = types.Part.from_text(text=p.get("text", ""))
+            part.thought = True
+            return part
         if "function_response" in p:
             fr = p["function_response"]
             return types.Part.from_function_response(
@@ -97,7 +106,7 @@ def _deserialize_tools(tools_data):
 
 
 def _serialize_response(response) -> dict:
-    """Serialize a Gemini response to JSON, including function_call parts."""
+    """Serialize a Gemini response to JSON, preserving all parts including thought_signature."""
     candidate = response.candidates[0] if response.candidates else None
     parts_data = []
     text = ""
@@ -106,12 +115,17 @@ def _serialize_response(response) -> dict:
         for part in candidate.content.parts:
             if getattr(part, "function_call", None):
                 fc = part.function_call
-                parts_data.append({
-                    "function_call": {
-                        "name": fc.name,
-                        "args": dict(fc.args) if fc.args else {},
-                    }
-                })
+                fc_data = {
+                    "name": fc.name,
+                    "args": dict(fc.args) if fc.args else {},
+                }
+                # Preserve thought_signature — required by Gemini 3.1 Pro
+                if hasattr(fc, "thought_signature") and fc.thought_signature:
+                    fc_data["thought_signature"] = fc.thought_signature
+                parts_data.append({"function_call": fc_data})
+            elif getattr(part, "thought", None) is not None:
+                # Preserve thought parts for multi-round
+                parts_data.append({"thought": True, "text": part.text or ""})
             elif getattr(part, "text", None):
                 text += part.text
                 parts_data.append({"text": part.text})

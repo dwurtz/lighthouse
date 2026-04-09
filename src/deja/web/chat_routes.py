@@ -118,9 +118,8 @@ async def post_chat(body: dict):
                     },
                 )
             except Exception as e:
-                err = f"chat LLM call failed: {e}"
-                log.exception(err)
-                yield f"data: {json.dumps({'chunk': f'[error] {err}'})}\n\n"
+                log.exception("chat LLM call failed: %s", e)
+                yield f"data: {json.dumps({'chunk': 'Sorry, I had trouble processing that. Please try again.'})}\n\n"
                 break
 
             parts = result.get("parts", [])
