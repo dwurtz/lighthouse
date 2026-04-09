@@ -23,6 +23,48 @@ log = logging.getLogger("deja.chat")
 router = APIRouter()
 
 
+def _get_screenshot_part() -> dict | None:
+    """Read the latest screenshot and return as a base64-encoded image part.
+
+    Returns None if no recent screenshot is available (older than 30s).
+    """
+    import base64
+    import time
+    from pathlib import Path
+
+    from deja.config import DEJA_HOME
+
+    screenshot_path = DEJA_HOME / "latest_screen.png"
+    ts_path = DEJA_HOME / "latest_screen_ts.txt"
+
+    if not screenshot_path.exists():
+        return None
+
+    # Check freshness — only include if captured within last 30 seconds
+    try:
+        ts_str = ts_path.read_text().strip()
+        ts = float(ts_str)
+        if time.time() - ts > 30:
+            log.debug("screenshot too stale (%.0fs old)", time.time() - ts)
+            return None
+    except Exception:
+        pass  # no timestamp — include anyway
+
+    try:
+        data = screenshot_path.read_bytes()
+        if len(data) < 1024:
+            return None  # too small, probably blank
+        encoded = base64.b64encode(data).decode()
+        return {
+            "type": "bytes",
+            "data": encoded,
+            "mime_type": "image/png",
+        }
+    except Exception as e:
+        log.debug("failed to read screenshot: %s", e)
+        return None
+
+
 @router.get("/api/chat")
 def get_chat(limit: int = 50) -> list[dict]:
     return load_conversation()[-limit:]
@@ -42,6 +84,7 @@ async def post_chat(body: dict):
     from starlette.responses import StreamingResponse
 
     user_message = body.get("message", "")
+    include_screenshot = body.get("include_screenshot", False)
     exchange_start_ts = datetime.now(timezone.utc).isoformat()
 
     messages = load_conversation()
@@ -94,8 +137,20 @@ async def post_chat(body: dict):
 
     tools_json = build_tool_declarations_json()
 
+    # Build user message parts — text + optional screenshot for visual context
+    user_parts: list[dict] = [{"text": user_message}]
+
+    if include_screenshot:
+        screenshot_part = _get_screenshot_part()
+        if screenshot_part:
+            user_parts.insert(0, screenshot_part)
+            user_parts[1]["text"] = (
+                f"[The user is looking at the attached screenshot while saying this]\n\n"
+                f"{user_message}"
+            )
+
     contents: list = [
-        {"role": "user", "parts": [{"text": user_message}]},
+        {"role": "user", "parts": user_parts},
     ]
 
     MAX_TOOL_ROUNDS = 8

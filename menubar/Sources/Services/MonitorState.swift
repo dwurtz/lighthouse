@@ -627,10 +627,10 @@ class MonitorState: ObservableObject {
                 self.voicePillProcessing = false
                 self.voicePillTranscript = transcript
 
-                // Send to chat after a short display
+                // Send to chat with screenshot context after a short display
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
                     self.chatInput = transcript
-                    self.sendChat()
+                    self.sendChat(includeScreenshot: true)
                     self.voicePillTranscript = ""
                 }
             }
@@ -639,7 +639,7 @@ class MonitorState: ObservableObject {
 
     // MARK: - Chat
 
-    func sendChat() {
+    func sendChat(includeScreenshot: Bool = false) {
         let message = chatInput.trimmingCharacters(in: .whitespaces)
         guard !message.isEmpty, !chatLoading else { return }
         chatMessages.append(ChatMessage(role: "user", content: message))
@@ -650,7 +650,11 @@ class MonitorState: ObservableObject {
         let placeholderIdx = chatMessages.count
         chatMessages.append(ChatMessage(role: "agent", content: ""))
 
-        let chatBody = try? JSONSerialization.data(withJSONObject: ["message": message])
+        var payload: [String: Any] = ["message": message]
+        if includeScreenshot {
+            payload["include_screenshot"] = true
+        }
+        let chatBody = try? JSONSerialization.data(withJSONObject: payload)
         localAPICall("/api/chat", method: "POST", body: chatBody, timeoutInterval: 120) { [weak self] data, error in
             guard let data = data else {
                 DispatchQueue.main.async {
