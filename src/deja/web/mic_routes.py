@@ -234,6 +234,19 @@ async def _mic_stop_inner(reason: str = "manual") -> dict:
         )
 
     transcript = (transcript or "").strip()
+
+    # Filter known Whisper hallucinations from near-silent audio
+    _HALLUCINATIONS = {
+        "you", "thank you", "thanks", "thank you.", "thanks.",
+        "thanks for watching", "thanks for watching.",
+        "thank you for watching", "thank you for watching.",
+        "bye", "bye.", "goodbye", "goodbye.",
+        "you.", "the end", "the end.",
+    }
+    if transcript.lower().strip(".!? ") in _HALLUCINATIONS:
+        log.info("mic_stop: filtered Whisper hallucination: %r", transcript)
+        transcript = ""
+
     if not transcript:
         return {
             "recording": False,

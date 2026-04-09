@@ -7,14 +7,31 @@ import Foundation
 class AudioLevelMonitor {
     private var engine: AVAudioEngine?
     private var updateHandler: ((CGFloat) -> Void)?
+    private var retryCount = 0
 
     func start(onLevel: @escaping (CGFloat) -> Void) {
         stop()
+        retryCount = 0
         updateHandler = onLevel
+        startEngine()
+    }
 
+    private func startEngine() {
         let engine = AVAudioEngine()
         let input = engine.inputNode
         let format = input.outputFormat(forBus: 0)
+
+        // If format has zero sample rate, the mic isn't ready yet — retry
+        guard format.sampleRate > 0 else {
+            retryCount += 1
+            if retryCount <= 5 {
+                NSLog("deja: AudioLevelMonitor — mic not ready (attempt %d), retrying...", retryCount)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+                    self?.startEngine()
+                }
+            }
+            return
+        }
 
         input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
             guard let data = buffer.floatChannelData?[0] else { return }
@@ -24,7 +41,6 @@ class AudioLevelMonitor {
                 sum += data[i] * data[i]
             }
             let rms = sqrt(sum / Float(max(count, 1)))
-            // Normalize to 0...1 range (mic RMS is typically 0..0.3)
             let level = CGFloat(min(rms * 4.0, 1.0))
             DispatchQueue.main.async {
                 self?.updateHandler?(level)
@@ -36,12 +52,21 @@ class AudioLevelMonitor {
             self.engine = engine
         } catch {
             NSLog("deja: AudioLevelMonitor failed to start: \(error)")
+            // Retry once on failure
+            retryCount += 1
+            if retryCount <= 3 {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                    self?.startEngine()
+                }
+            }
         }
     }
 
     func stop() {
-        engine?.inputNode.removeTap(onBus: 0)
-        engine?.stop()
+        if let engine = engine {
+            engine.inputNode.removeTap(onBus: 0)
+            engine.stop()
+        }
         engine = nil
         updateHandler = nil
     }
