@@ -262,11 +262,11 @@ def rename_page(category: str, old_slug: str, new_slug: str, reason: str) -> Too
 # ---------------------------------------------------------------------------
 
 def _google_api(method: str, url: str, json_body: dict | None = None) -> tuple[int, dict]:
-    """Make an authenticated Google API call using the stored OAuth token."""
+    """Make an authenticated Google API call using the stored OAuth access token."""
     import httpx
-    from deja.auth import get_auth_token
+    from deja.auth import get_access_token
 
-    token = get_auth_token()
+    token = get_access_token()
     if not token:
         return 401, {"error": "Not authenticated — sign in first"}
 

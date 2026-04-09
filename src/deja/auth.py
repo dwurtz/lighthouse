@@ -128,6 +128,28 @@ def _refresh_token_gws() -> bool:
         return False
 
 
+def get_access_token() -> str | None:
+    """Return a valid Google OAuth access_token for calling Google APIs.
+
+    Unlike get_auth_token() which prefers id_token (for server auth),
+    this always returns the access_token (needed for Calendar, Gmail, etc.).
+    """
+    token_data = _read_token_file()
+    if not token_data:
+        return None
+
+    if _is_expired(token_data):
+        if not _refresh_token_native(token_data):
+            if not _refresh_token_gws():
+                log.warning("OAuth token expired and all refresh methods failed")
+                return None
+            token_data = _read_token_file()
+            if not token_data:
+                return None
+
+    return token_data.get("access_token") or token_data.get("token")
+
+
 def get_auth_token() -> str | None:
     """Return a valid Google OAuth token string, or None if not authenticated.
 
