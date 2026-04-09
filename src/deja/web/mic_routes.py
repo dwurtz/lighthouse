@@ -55,6 +55,56 @@ async def _transcribe_groq(wav_path: Path) -> str:
     return transcript
 
 AUDIO_DIR = DEJA_HOME / "audio"
+
+
+def _find_mic_device() -> int:
+    """Find the best microphone device index for ffmpeg avfoundation.
+
+    Prefers external mics (AirPods, USB) over built-in, and skips
+    virtual/loopback devices (Descript, BlackHole, Soundflower, etc.).
+    Falls back to device 0 if nothing better is found.
+    """
+    import re
+
+    try:
+        result = subprocess.run(
+            ["ffmpeg", "-f", "avfoundation", "-list_devices", "true", "-i", ""],
+            capture_output=True, text=True, timeout=5,
+        )
+        output = result.stderr  # ffmpeg writes device list to stderr
+    except Exception:
+        return 0
+
+    # Parse audio device lines: [N] Device Name
+    skip_words = {"loopback", "blackhole", "soundflower", "virtual", "descript"}
+    devices: list[tuple[int, str]] = []
+    in_audio = False
+    for line in output.splitlines():
+        if "audio devices" in line.lower():
+            in_audio = True
+            continue
+        if in_audio:
+            m = re.search(r"\[(\d+)\]\s+(.+)", line)
+            if m:
+                idx, name = int(m.group(1)), m.group(2).strip()
+                if not any(w in name.lower() for w in skip_words):
+                    devices.append((idx, name))
+            elif "video devices" in line.lower():
+                break
+
+    if not devices:
+        return 0
+
+    # Prefer built-in MacBook mic as reliable default
+    for idx, name in devices:
+        if "macbook" in name.lower() or "built-in" in name.lower():
+            log.info("mic device: [%d] %s (built-in)", idx, name)
+            return idx
+
+    # Otherwise use first non-virtual device
+    idx, name = devices[0]
+    log.info("mic device: [%d] %s", idx, name)
+    return idx
 MIC_AUTO_STOP_SEC = 300  # 5 minutes
 
 _mic_state: dict = {
@@ -214,12 +264,13 @@ async def mic_start() -> dict:
     AUDIO_DIR.mkdir(parents=True, exist_ok=True)
     wav_path = AUDIO_DIR / f"session-{int(time.time())}.wav"
 
+    # Use macOS default input device — follows AirPods, MacBook mic, etc.
     cmd = [
         "ffmpeg",
         "-f",
         "avfoundation",
         "-i",
-        ":0",
+        ":default",
         "-ar",
         "16000",
         "-ac",
