@@ -163,7 +163,7 @@ VISION_MODEL = _get(
 # fixtures (4x more wiki-link grounding) and also beats Pro 10/5 at 1/4
 # the cost. Re-run the eval after any Gemini release to re-check.
 REFLECT_MODEL = _get(
-    "reflect_model", "nightly_model", "gemini-2.5-pro"
+    "reflect_model", "nightly_model", "gemini-3.1-pro-preview"
 )  # reflection — deeper reasoning a few times a day
 CHAT_MODEL = _get(
     "chat_model", "chat_model", "gemini-3.1-pro-preview"
