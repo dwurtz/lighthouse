@@ -265,30 +265,42 @@ struct SetupWizardView: View {
 
             Spacer()
 
-            if screenRecordingGranted {
-                HStack {
-                    Spacer()
+            HStack {
+                if !screenRecordingGranted {
+                    // Show "I've granted it" after user may have toggled
+                    // it in System Settings (macOS may need a restart to
+                    // reflect the change, so polling can miss it).
                     Button(action: {
                         permPollTimer?.invalidate()
                         permSubStep = 1
                     }) {
-                        HStack(spacing: 4) {
-                            Text("Continue")
-                                .font(.system(size: 13, weight: .semibold))
-                            Image(systemName: "arrow.right")
-                                .font(.system(size: 11))
-                        }
-                        .foregroundColor(.black)
-                        .padding(.horizontal, 24)
-                        .padding(.vertical, 8)
-                        .background(Color.white)
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                        Text("I've granted it — continue")
+                            .font(.system(size: 12))
+                            .foregroundColor(.white.opacity(0.4))
                     }
                     .buttonStyle(.plain)
                 }
-                .padding(.horizontal, 20)
-                .padding(.bottom, 16)
+                Spacer()
+                Button(action: {
+                    permPollTimer?.invalidate()
+                    permSubStep = 1
+                }) {
+                    HStack(spacing: 4) {
+                        Text("Continue")
+                            .font(.system(size: 13, weight: .semibold))
+                        Image(systemName: "arrow.right")
+                            .font(.system(size: 11))
+                    }
+                    .foregroundColor(screenRecordingGranted ? .black : .white.opacity(0.3))
+                    .padding(.horizontal, 24)
+                    .padding(.vertical, 8)
+                    .background(screenRecordingGranted ? Color.white : Color.white.opacity(0.1))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                }
+                .buttonStyle(.plain)
             }
+            .padding(.horizontal, 20)
+            .padding(.bottom, 16)
         }
         .frame(maxWidth: .infinity)
     }
@@ -368,9 +380,14 @@ struct SetupWizardView: View {
                     }
                     .buttonStyle(.plain)
 
-                    Text("Find Deja in the list and toggle it on")
-                        .font(.system(size: 11))
-                        .foregroundColor(.white.opacity(0.3))
+                    VStack(spacing: 4) {
+                        Text("Click the + button, then select")
+                            .font(.system(size: 11))
+                            .foregroundColor(.white.opacity(0.3))
+                        Text("Applications → Deja")
+                            .font(.system(size: 11, weight: .medium, design: .monospaced))
+                            .foregroundColor(.white.opacity(0.4))
+                    }
                 }
             }
 
