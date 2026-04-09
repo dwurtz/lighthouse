@@ -183,15 +183,16 @@ def start_gws_auth() -> dict:
                 gws_redirect = params.get("redirect_uri", [""])[0]
                 gws_port = gws_redirect.split(":")[-1] if gws_redirect else ""
 
-                # Start our own callback server on a different port
-                from deja._oauth_callback import start_branded_callback
-                our_port = start_branded_callback(gws_port=int(gws_port) if gws_port.isdigit() else 0)
-
-                if our_port:
-                    # Rewrite the auth URL to redirect to our branded server
-                    new_redirect = f"http://localhost:{our_port}"
-                    auth_url = auth_url.replace(gws_redirect, new_redirect)
-                    log.info("Rewrote OAuth redirect to branded callback on port %d", our_port)
+                # Try branded callback page (optional — falls back to plain gws)
+                try:
+                    from deja._oauth_callback import start_branded_callback
+                    our_port = start_branded_callback(gws_port=int(gws_port) if gws_port.isdigit() else 0)
+                    if our_port:
+                        new_redirect = f"http://localhost:{our_port}"
+                        auth_url = auth_url.replace(gws_redirect, new_redirect)
+                        log.info("Rewrote OAuth redirect to branded callback on port %d", our_port)
+                except ImportError:
+                    pass  # branded callback not available — use plain gws redirect
 
                 subprocess.run(["open", auth_url])
                 log.info("Opened Google auth URL in browser")
