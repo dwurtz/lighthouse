@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter
 
-from deja.config import REFLECT_MODEL
+from deja.config import CHAT_MODEL
 from deja.prompts import load as load_prompt
 from deja.web.helpers import (
     OBSERVATIONS_LOG,
@@ -108,7 +108,7 @@ async def post_chat(body: dict):
         for round_idx in range(MAX_TOOL_ROUNDS):
             try:
                 result = await _call_generate(
-                    model=REFLECT_MODEL,
+                    model=CHAT_MODEL,
                     contents=contents,
                     system_instruction=system_instruction,
                     tools=tools_json,

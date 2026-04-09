@@ -165,6 +165,9 @@ VISION_MODEL = _get(
 REFLECT_MODEL = _get(
     "reflect_model", "nightly_model", "gemini-2.5-pro"
 )  # reflection — deeper reasoning a few times a day
+CHAT_MODEL = _get(
+    "chat_model", "chat_model", "gemini-3.1-pro-preview"
+)  # chat — most capable model for interactive conversations with tools
 
 # Hours of the day (local time, 0-23) when a new reflection "slot" begins.
 # Reflection runs once per slot: on the first agent heartbeat after the
