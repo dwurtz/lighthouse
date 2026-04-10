@@ -351,7 +351,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Crash Reporting
 
     private func setupCrashReporting() {
-        // Catch uncaught exceptions
+        // Catch uncaught ObjC/Swift exceptions
         NSSetUncaughtExceptionHandler { exception in
             CrashReporter.report(
                 type: "uncaught_exception",
@@ -359,6 +359,43 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 reason: exception.reason ?? "unknown",
                 stackTrace: exception.callStackSymbols.joined(separator: "\n")
             )
+        }
+
+        // Catch fatal signals (SIGTRAP, SIGABRT, SIGSEGV, SIGBUS, SIGFPE, SIGILL)
+        // These cover crashes that exceptions don't — like the NSPanel constraint crash
+        let signals: [Int32] = [SIGTRAP, SIGABRT, SIGSEGV, SIGBUS, SIGFPE, SIGILL]
+        for sig in signals {
+            signal(sig) { signum in
+                // In a signal handler, only async-signal-safe functions are allowed.
+                // We write directly to a file descriptor — no malloc, no ObjC.
+                let name: String
+                switch signum {
+                case SIGTRAP:  name = "SIGTRAP"
+                case SIGABRT:  name = "SIGABRT"
+                case SIGSEGV:  name = "SIGSEGV"
+                case SIGBUS:   name = "SIGBUS"
+                case SIGFPE:   name = "SIGFPE"
+                case SIGILL:   name = "SIGILL"
+                default:       name = "SIG\(signum)"
+                }
+
+                // Write a minimal crash file synchronously (async-signal-safe)
+                let dir = NSHomeDirectory() + "/.deja/crash-reports"
+                mkdir(dir, 0o755)
+                let ts = Int(Date().timeIntervalSince1970)
+                let path = "\(dir)/signal-\(ts).json"
+                let json = """
+                {"type":"signal","name":"\(name)","reason":"Fatal signal \(signum)","timestamp":"\(ts)","app_version":"0.2.0"}
+                """
+                if let fd = fopen(path, "w") {
+                    fputs(json, fd)
+                    fclose(fd)
+                }
+
+                // Re-raise to get the default crash behavior (generates .ips file)
+                signal(signum, SIG_DFL)
+                raise(signum)
+            }
         }
 
         // Send any crash reports from previous sessions
