@@ -19,9 +19,9 @@ log = logging.getLogger(__name__)
 
 _PROMPT_TEMPLATE = (
     "This is {user_name}'s Mac. {app_context}"
-    "\n\nDescribe what {first_name} is looking at right now. "
-    "Name the specific app, any people or contacts visible, "
-    "and what content is on screen."
+    "\n\nRead this screenshot carefully. What app is {first_name} using? "
+    "Read any visible messages, emails, or conversations — quote the "
+    "actual text you can see. Who is talking to whom, and about what?"
 )
 
 # Fallback if identity isn't available
