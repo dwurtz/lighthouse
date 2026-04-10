@@ -68,6 +68,55 @@ MODELS = {
         "input_per_mtok_usd": 1.25,
         "output_per_mtok_usd": 10.00,
     },
+    # Local Gemma models via Ollama (free, private — no data leaves the Mac)
+    "gemma3:4b": {
+        "id": "gemma3:4b",
+        "backend": "ollama",
+        "input_per_mtok_usd": 0.0,
+        "output_per_mtok_usd": 0.0,
+    },
+    "gemma3:12b": {
+        "id": "gemma3:12b",
+        "backend": "ollama",
+        "input_per_mtok_usd": 0.0,
+        "output_per_mtok_usd": 0.0,
+    },
+    "gemma3:27b": {
+        "id": "gemma3:27b",
+        "backend": "ollama",
+        "input_per_mtok_usd": 0.0,
+        "output_per_mtok_usd": 0.0,
+    },
+    "gemma4": {
+        "id": "gemma4",
+        "backend": "ollama",
+        "input_per_mtok_usd": 0.0,
+        "output_per_mtok_usd": 0.0,
+    },
+    "gemma4:26b": {
+        "id": "gemma4:26b",
+        "backend": "ollama",
+        "input_per_mtok_usd": 0.0,
+        "output_per_mtok_usd": 0.0,
+    },
+    "moondream": {
+        "id": "moondream",
+        "backend": "ollama",
+        "input_per_mtok_usd": 0.0,
+        "output_per_mtok_usd": 0.0,
+    },
+    "qwen2.5vl:3b": {
+        "id": "qwen2.5vl:3b",
+        "backend": "ollama",
+        "input_per_mtok_usd": 0.0,
+        "output_per_mtok_usd": 0.0,
+    },
+    "qwen2.5vl:7b": {
+        "id": "qwen2.5vl:7b",
+        "backend": "ollama",
+        "input_per_mtok_usd": 0.0,
+        "output_per_mtok_usd": 0.0,
+    },
 }
 
 
@@ -156,6 +205,94 @@ def check_wiki_match(summary: str, case: dict) -> bool:
 # One vision call through one model
 # ---------------------------------------------------------------------------
 
+def _get_resource_usage() -> dict:
+    """Sample current CPU and memory usage. Returns {cpu_percent, memory_mb}."""
+    import subprocess
+    try:
+        # macOS: use ps to get total CPU and memory
+        r = subprocess.run(
+            ["ps", "-A", "-o", "%cpu,%mem"],
+            capture_output=True, text=True, timeout=5,
+        )
+        cpu_total = 0.0
+        mem_total = 0.0
+        for line in r.stdout.strip().split("\n")[1:]:
+            parts = line.split()
+            if len(parts) >= 2:
+                cpu_total += float(parts[0])
+                mem_total += float(parts[1])
+        # Get total RAM in MB
+        r2 = subprocess.run(
+            ["sysctl", "-n", "hw.memsize"],
+            capture_output=True, text=True, timeout=5,
+        )
+        total_ram_mb = int(r2.stdout.strip()) / (1024 * 1024)
+        return {
+            "cpu_percent": round(cpu_total, 1),
+            "memory_mb": round(mem_total / 100 * total_ram_mb),
+        }
+    except Exception:
+        return {"cpu_percent": 0, "memory_mb": 0}
+
+
+async def describe_one_ollama(
+    image_bytes: bytes,
+    mime: str,
+    prompt: str,
+    model_id: str,
+) -> tuple[str, int, int, int, dict]:
+    """Call a local Ollama model. Returns (text, in_tokens, out_tokens, latency_ms, resources).
+
+    Resources dict has cpu_percent and memory_mb sampled during inference.
+    """
+    import base64
+    import httpx
+
+    b64_image = base64.b64encode(image_bytes).decode()
+
+    resources_before = _get_resource_usage()
+    t0 = time.time()
+
+    # Gemma 4 is a thinking model — needs larger token budget and /no_think prefix
+    is_gemma4 = "gemma4" in model_id
+    actual_prompt = prompt
+    num_predict = 2048
+    if is_gemma4:
+        num_predict = 4096  # extra room for thinking tokens
+
+    async with httpx.AsyncClient(timeout=600) as client:
+        resp = await client.post(
+            "http://localhost:11434/api/generate",
+            json={
+                "model": model_id,
+                "prompt": actual_prompt,
+                "images": [b64_image],
+                "stream": False,
+                "options": {
+                    "temperature": 0.2,
+                    "num_predict": num_predict,
+                },
+            },
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+    latency_ms = int((time.time() - t0) * 1000)
+    resources_after = _get_resource_usage()
+
+    text = (data.get("response") or "").strip()
+    # Ollama reports token counts in the response
+    in_tok = data.get("prompt_eval_count", 0)
+    out_tok = data.get("eval_count", 0)
+
+    resources = {
+        "cpu_percent_peak": max(resources_before["cpu_percent"], resources_after["cpu_percent"]),
+        "memory_mb_peak": max(resources_before["memory_mb"], resources_after["memory_mb"]),
+    }
+
+    return text, in_tok, out_tok, latency_ms, resources
+
+
 async def describe_one(
     client,
     types_mod,
@@ -164,19 +301,7 @@ async def describe_one(
     prompt: str,
     model_id: str,
 ) -> tuple[str, int, int, int]:
-    """Call one vision model once. Returns (text, in_tokens, out_tokens, latency_ms).
-
-    Gemini 2.5 Pro burns hidden thinking tokens against ``max_output_tokens``
-    and returns an empty candidate when the budget is exhausted, so we use
-    a generous cap (2048) and explicitly set ``thinking_config.thinking_budget=0``
-    for Pro so it skips the thinking pass entirely — a visual description is
-    not a task that benefits from chain-of-thought.
-    """
-    # Gemini 2.5 Pro burns hidden thinking tokens against ``max_output_tokens``
-    # and the API refuses ``thinking_budget=0`` (it requires thinking mode).
-    # Give Pro a generous 4096 budget so thinking + response both fit;
-    # Flash and Flash-Lite only use the budget for response text, so 2048
-    # is plenty for them.
+    """Call one Gemini vision model once. Returns (text, in_tokens, out_tokens, latency_ms)."""
     is_pro = "pro" in model_id
     config = types_mod.GenerateContentConfig(
         max_output_tokens=4096 if is_pro else 2048,
@@ -237,26 +362,47 @@ def render_prompt(index_md: str) -> str:
 # ---------------------------------------------------------------------------
 
 async def evaluate(args):
-    from google import genai
-    from google.genai import types as genai_types
+    # Lazy-init Gemini client only when needed (Ollama models don't need it)
+    _gemini_client = None
+    _genai_types = None
 
-    client = genai.Client()
+    def get_gemini():
+        nonlocal _gemini_client, _genai_types
+        if _gemini_client is None:
+            from google import genai
+            from google.genai import types as gt
+            _gemini_client = genai.Client()
+            _genai_types = gt
+        return _gemini_client, _genai_types
 
     fixtures_dir = Path(args.fixtures)
     spec_path = fixtures_dir / "spec.yaml"
     spec = yaml.safe_load(spec_path.read_text()) if spec_path.exists() else {}
     cases = {c["file"]: c for c in (spec.get("cases") or []) if c.get("file")}
 
-    # Load the live wiki index.md as the grounding context
-    index_path = WIKI_DIR / "index.md"
-    index_md = index_path.read_text() if index_path.exists() else ""
-    prompt = render_prompt(index_md)
+    # Load the prompt — either grounded (Gemini) or raw (local models)
+    if args.raw_prompt:
+        prompt = (
+            "Describe in detail what you see on this screen. "
+            "Name every visible app, website, person, file, conversation, "
+            "and piece of content. Be specific — include names, numbers, "
+            "titles, and any text you can read. "
+            "Format as a concise paragraph."
+        )
+    else:
+        index_path = WIKI_DIR / "index.md"
+        index_md = index_path.read_text() if index_path.exists() else ""
+        prompt = render_prompt(index_md)
 
     model_aliases = [m.strip() for m in args.models.split(",") if m.strip()]
     for m in model_aliases:
         if m not in MODELS:
-            print(f"unknown model alias: {m}. valid: {list(MODELS)}", file=sys.stderr)
-            sys.exit(2)
+            # Allow any ollama model by name (e.g. "llava:13b")
+            if ":" in m:
+                MODELS[m] = {"id": m, "backend": "ollama", "input_per_mtok_usd": 0.0, "output_per_mtok_usd": 0.0}
+            else:
+                print(f"unknown model alias: {m}. valid: {list(MODELS)}", file=sys.stderr)
+                sys.exit(2)
 
     fixture_files = sorted(fixtures_dir.glob("*.png"))
     if not fixture_files:
@@ -276,12 +422,21 @@ async def evaluate(args):
         print(f"[{fx_name}]")
 
         for model_alias in model_aliases:
-            model_id = MODELS[model_alias]["id"]
+            model_info = MODELS[model_alias]
+            model_id = model_info["id"]
+            is_ollama = model_info.get("backend") == "ollama"
             for sample_idx in range(args.samples):
                 try:
-                    text, in_tok, out_tok, latency = await describe_one(
-                        client, genai_types, image_bytes, mime, prompt, model_id
-                    )
+                    resources = {}
+                    if is_ollama:
+                        text, in_tok, out_tok, latency, resources = await describe_one_ollama(
+                            image_bytes, mime, prompt, model_id
+                        )
+                    else:
+                        client, genai_types = get_gemini()
+                        text, in_tok, out_tok, latency = await describe_one(
+                            client, genai_types, image_bytes, mime, prompt, model_id
+                        )
                     mc_hits, mc_total = check_must_contain(text, case)
                     mn_hits = check_must_not_contain(text, case)
                     wm_hit = check_wiki_match(text, case)
@@ -304,6 +459,9 @@ async def evaluate(args):
                         latency_ms=latency,
                     )
                     results.append(result)
+                    res_str = ""
+                    if resources:
+                        res_str = f"  cpu={resources.get('cpu_percent_peak', 0):.0f}%  mem={resources.get('memory_mb_peak', 0)}MB"
                     print(
                         f"  {model_alias:10s} s{sample_idx}  "
                         f"{result.entity_count:2d} ent  "
@@ -314,6 +472,7 @@ async def evaluate(args):
                         f"{result.length_chars:4d}ch  "
                         f"{result.cost_cents:.4f}¢  "
                         f"{latency}ms"
+                        f"{res_str}"
                     )
                 except Exception as e:
                     print(f"  {model_alias:10s} s{sample_idx}  ERROR: {e}")
@@ -430,6 +589,11 @@ def main():
     parser.add_argument(
         "--fixtures",
         default=str(_REPO / "tests" / "fixtures" / "screenshots"),
+    )
+    parser.add_argument(
+        "--raw-prompt",
+        action="store_true",
+        help="Use a short raw description prompt instead of grounded wiki prompt (for local models)",
     )
     args = parser.parse_args()
     asyncio.run(evaluate(args))
