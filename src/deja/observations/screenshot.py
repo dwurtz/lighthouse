@@ -110,9 +110,14 @@ def capture_screenshot_if_changed(
 
         current_hash = imagehash.phash(Image.open(path))
         prev_hash = _last_image_hashes.get(hash_key)
-        if prev_hash is not None and (current_hash - prev_hash) < 8:
-            os.remove(path)
-            return None
+        if prev_hash is not None:
+            distance = current_hash - prev_hash
+            log.info("Screenshot dedup %s: hash distance=%d (threshold=8)", os.path.basename(src_path), distance)
+            if distance < 8:
+                os.remove(path)
+                return None
+        else:
+            log.info("Screenshot %s: first capture (no prev hash)", os.path.basename(src_path))
         _last_image_hashes[hash_key] = current_hash
     except Exception:
         log.debug("imagehash dedup failed — proceeding without dedup", exc_info=True)

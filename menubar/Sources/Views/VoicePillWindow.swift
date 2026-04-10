@@ -1,15 +1,24 @@
 import AppKit
 import SwiftUI
+import Combine
 
 /// Borderless, always-on-top floating panel anchored to the bottom-center
-/// of the screen. Hosts VoicePillView with mouse tracking for hover + click.
+/// of the screen. Resizes dynamically to match pill state — tiny when
+/// collapsed so it doesn't block clicks on other content.
 class VoicePillWindow: NSPanel {
     private let monitor: MonitorState
+    private var cancellables = Set<AnyCancellable>()
+
+    // Sizes for each state
+    private static let collapsedSize = NSSize(width: 140, height: 16)
+    private static let hoveredSize = NSSize(width: 200, height: 36)
+    private static let expandedSize = NSSize(width: 300, height: 56)
+    private static let transcriptSize = NSSize(width: 400, height: 44)
 
     init(monitor: MonitorState) {
         self.monitor = monitor
         super.init(
-            contentRect: NSRect(x: 0, y: 0, width: 300, height: 56),
+            contentRect: NSRect(x: 0, y: 0, width: Self.collapsedSize.width, height: Self.collapsedSize.height),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
@@ -25,37 +34,60 @@ class VoicePillWindow: NSPanel {
         ignoresMouseEvents = false
         acceptsMouseMovedEvents = true
 
-        // Container holds the SwiftUI view + transparent tracking overlay
-        let container = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 56))
-        container.autoresizesSubviews = false
-
         let hostView = NSHostingView(rootView: VoicePillView(monitor: monitor))
-        // Pin to fixed size — prevents constraint updates that crash borderless panels
-        hostView.frame = NSRect(x: 0, y: 0, width: 300, height: 56)
         hostView.sizingOptions = []
-        container.addSubview(hostView)
 
         let trackingOverlay = PillTrackingOverlay(monitor: monitor)
-        trackingOverlay.frame = NSRect(x: 0, y: 0, width: 300, height: 56)
-        container.addSubview(trackingOverlay)
 
+        let container = NSView()
+        container.addSubview(hostView)
+        container.addSubview(trackingOverlay)
         contentView = container
 
+        applySize(Self.collapsedSize)
         positionAtBottomCenter()
 
+        // Watch for state changes and resize the window
+        monitor.$voicePillActive.sink { [weak self] _ in self?.updateWindowSize() }.store(in: &cancellables)
+        monitor.$voicePillProcessing.sink { [weak self] _ in self?.updateWindowSize() }.store(in: &cancellables)
+        monitor.$voicePillHovered.sink { [weak self] _ in self?.updateWindowSize() }.store(in: &cancellables)
+        monitor.$voicePillTranscript.sink { [weak self] _ in self?.updateWindowSize() }.store(in: &cancellables)
+
         NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(screenChanged),
-            name: NSApplication.didChangeScreenParametersNotification,
-            object: nil
+            self, selector: #selector(screenChanged),
+            name: NSApplication.didChangeScreenParametersNotification, object: nil
         )
     }
 
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
 
-    @objc private func screenChanged() {
+    @objc private func screenChanged() { positionAtBottomCenter() }
+
+    private func updateWindowSize() {
+        let newSize: NSSize
+        if !monitor.voicePillTranscript.isEmpty {
+            newSize = Self.transcriptSize
+        } else if monitor.voicePillActive || monitor.voicePillProcessing {
+            newSize = Self.expandedSize
+        } else if monitor.voicePillHovered {
+            newSize = Self.hoveredSize
+        } else {
+            newSize = Self.collapsedSize
+        }
+        applySize(newSize)
         positionAtBottomCenter()
+    }
+
+    private func applySize(_ size: NSSize) {
+        // Resize container, host view, and tracking overlay
+        if let container = contentView {
+            container.frame = NSRect(origin: .zero, size: size)
+            for sub in container.subviews {
+                sub.frame = NSRect(origin: .zero, size: size)
+            }
+        }
+        setContentSize(size)
     }
 
     func positionAtBottomCenter() {
@@ -70,7 +102,7 @@ class VoicePillWindow: NSPanel {
     }
 }
 
-/// Transparent overlay that captures mouse events without interfering with SwiftUI layout.
+/// Transparent overlay that captures mouse events.
 class PillTrackingOverlay: NSView {
     private let monitor: MonitorState
 
@@ -86,13 +118,11 @@ class PillTrackingOverlay: NSView {
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
         for area in trackingAreas { removeTrackingArea(area) }
-        let area = NSTrackingArea(
+        addTrackingArea(NSTrackingArea(
             rect: bounds,
             options: [.mouseEnteredAndExited, .activeAlways],
-            owner: self,
-            userInfo: nil
-        )
-        addTrackingArea(area)
+            owner: self, userInfo: nil
+        ))
     }
 
     override func mouseEntered(with event: NSEvent) {
