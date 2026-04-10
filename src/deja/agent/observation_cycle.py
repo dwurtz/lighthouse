@@ -40,8 +40,11 @@ async def run_collect_cycle(loop_ref) -> None:
                         # Falls back to Gemini via proxy if mlx-vlm not installed
                         from deja.vision_local import describe_screen_local, is_available
                         local_desc = None
-                        if is_available():
+                        avail = is_available()
+                        log.info("Local vision available: %s", avail)
+                        if avail:
                             local_desc = describe_screen_local(image_path)
+                            log.info("Local vision result: %s", "OK" if local_desc else "EMPTY")
 
                         if local_desc:
                             sig.text = local_desc
