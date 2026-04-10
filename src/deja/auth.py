@@ -257,11 +257,41 @@ def _read_token_file() -> dict | None:
     return None
 
 
+def _sync_gws_credentials(token_data: dict) -> None:
+    """Write token in gws CLI format so observation collectors work.
+
+    The gws CLI reads ~/.config/gws/credentials.json with a specific
+    schema. This bridges our native OAuth token to gws format.
+    """
+    try:
+        gws_dir = Path.home() / ".config" / "gws"
+        gws_dir.mkdir(parents=True, exist_ok=True)
+        creds = {
+            "type": "authorized_user",
+            "token": token_data.get("access_token") or token_data.get("token"),
+            "refresh_token": token_data.get("refresh_token"),
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "client_id": token_data.get("client_id"),
+            "client_secret": token_data.get("client_secret"),
+            "scopes": token_data.get("scopes", []),
+            "universe_domain": "googleapis.com",
+            "account": "",
+            "expiry": token_data.get("expiry"),
+        }
+        (gws_dir / "credentials.json").write_text(json.dumps(creds, indent=2))
+    except Exception as e:
+        log.debug("Failed to sync gws credentials: %s", e)
+
+
 def _save_token(token_data: dict) -> None:
     """Save token to macOS Keychain (encrypted at rest).
 
     Falls back to file if Keychain write fails.
+    Also syncs to gws CLI format for observation collectors.
     """
+    # Always sync to gws format so collectors work
+    _sync_gws_credentials(token_data)
+
     token_json = json.dumps(token_data)
     if _keychain_write(token_json):
         # Clean up plain-text file if it exists
