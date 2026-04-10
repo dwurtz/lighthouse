@@ -114,11 +114,39 @@ async def run_analysis_cycle(loop_ref) -> None:
             continue
         batch_text = format_signals(batch_items)
         log.info("Running analysis on %d %s...", len(batch_items), batch_name)
+
+        # Save fixture for local model evaluation
+        try:
+            from deja.config import DEJA_HOME
+            import json as _json
+            fixture_dir = DEJA_HOME / "integration_fixtures"
+            fixture_dir.mkdir(exist_ok=True)
+            from datetime import datetime as _dt
+            ts = _dt.now().strftime("%Y%m%d-%H%M%S")
+            fixture_path = fixture_dir / f"{ts}-{batch_name}.json"
+            fixture_path.write_text(_json.dumps({
+                "batch_name": batch_name,
+                "signals_text": batch_text,
+                "wiki_text": wiki_text[:5000],  # truncate for storage
+                "timestamp": ts,
+            }, indent=2))
+            log.debug("Saved integration fixture: %s", fixture_path.name)
+        except Exception:
+            pass
+
         try:
             result = await loop_ref.gemini.integrate_observations(
                 signals_text=batch_text,
                 wiki_text=wiki_text,
             )
+
+            # Save the response alongside the fixture
+            try:
+                response_path = fixture_dir / f"{ts}-{batch_name}-response.json"
+                response_path.write_text(_json.dumps(result, indent=2, default=str))
+            except Exception:
+                pass
+
             updates = result.get("wiki_updates", [])
             reasoning = result.get("reasoning", "")
             all_wiki_updates.extend(updates)
