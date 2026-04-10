@@ -356,82 +356,7 @@ import AppKit
 
 // MARK: - Simple Mic Recorder (for voice pill — replaces ffmpeg)
 
-import CoreAudio
-import AudioToolbox
-
 class MicRecorder {
-
-    /// If the default input is Bluetooth (24kHz = SCO mode), switch to built-in mic.
-    private func selectBuiltInMicIfBluetooth(engine: AVAudioEngine) {
-        let defaultFormat = engine.inputNode.outputFormat(forBus: 0)
-        // Bluetooth SCO runs at 8/16/24 kHz. Built-in runs at 44.1/48 kHz.
-        guard defaultFormat.sampleRate < 30000 else { return }
-
-        log("MicRecorder: Bluetooth mic detected (sr=\(defaultFormat.sampleRate)), looking for built-in...")
-
-        // Find the built-in microphone device
-        var propAddr = AudioObjectPropertyAddress(
-            mSelector: kAudioHardwarePropertyDevices,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        var propSize: UInt32 = 0
-        AudioObjectGetPropertyDataSize(AudioObjectID(kAudioObjectSystemObject), &propAddr, 0, nil, &propSize)
-        let count = Int(propSize) / MemoryLayout<AudioDeviceID>.size
-        var deviceIDs = [AudioDeviceID](repeating: 0, count: count)
-        AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &propAddr, 0, nil, &propSize, &deviceIDs)
-
-        for deviceID in deviceIDs {
-            // Check if device has input channels
-            var inputAddr = AudioObjectPropertyAddress(
-                mSelector: kAudioDevicePropertyStreamConfiguration,
-                mScope: kAudioObjectPropertyScopeInput,
-                mElement: kAudioObjectPropertyElementMain
-            )
-            var bufSize: UInt32 = 0
-            AudioObjectGetPropertyDataSize(deviceID, &inputAddr, 0, nil, &bufSize)
-            guard bufSize > 0 else { continue }
-
-            let bufListPtr = UnsafeMutablePointer<AudioBufferList>.allocate(capacity: 1)
-            defer { bufListPtr.deallocate() }
-            AudioObjectGetPropertyData(deviceID, &inputAddr, 0, nil, &bufSize, bufListPtr)
-            let inputChannels = bufListPtr.pointee.mBuffers.mNumberChannels
-            guard inputChannels > 0 else { continue }
-
-            // Get device name
-            var nameAddr = AudioObjectPropertyAddress(
-                mSelector: kAudioDevicePropertyDeviceNameCFString,
-                mScope: kAudioObjectPropertyScopeGlobal,
-                mElement: kAudioObjectPropertyElementMain
-            )
-            var name: CFString = "" as CFString
-            var nameSize = UInt32(MemoryLayout<CFString>.size)
-            AudioObjectGetPropertyData(deviceID, &nameAddr, 0, nil, &nameSize, &name)
-            let deviceName = name as String
-
-            // Check if it's built-in (not Bluetooth)
-            let isBuiltIn = deviceName.lowercased().contains("macbook") ||
-                            deviceName.lowercased().contains("built-in")
-            if isBuiltIn {
-                // Set as the input device for the engine's audio unit
-                var deviceIDVar = deviceID
-                let audioUnit = engine.inputNode.audioUnit!
-                let err = AudioUnitSetProperty(
-                    audioUnit,
-                    kAudioOutputUnitProperty_CurrentDevice,
-                    kAudioUnitScope_Global, 0,
-                    &deviceIDVar, UInt32(MemoryLayout<AudioDeviceID>.size)
-                )
-                if err == noErr {
-                    log("MicRecorder: switched to built-in mic: \(deviceName) (id=\(deviceID))")
-                } else {
-                    log("MicRecorder: failed to switch to built-in mic (err=\(err))")
-                }
-                return
-            }
-        }
-        log("MicRecorder: no built-in mic found, using default")
-    }
     private var engine: AVAudioEngine?
     private var outputFile: AVAudioFile?
     private let outputPath: URL
@@ -442,11 +367,6 @@ class MicRecorder {
 
     func start() {
         let engine = AVAudioEngine()
-
-        // Check if the default input is Bluetooth (AirPods) — it has a ~2s
-        // activation delay that clips the start of speech. If so, try to
-        // switch to the built-in mic which activates instantly.
-        selectBuiltInMicIfBluetooth(engine: engine)
 
         let input = engine.inputNode
         let inputFormat = input.outputFormat(forBus: 0)
