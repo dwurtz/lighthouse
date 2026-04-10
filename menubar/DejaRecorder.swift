@@ -435,6 +435,7 @@ class MicRecorder {
 // MARK: - Main
 
 var _globalMicRecorder: MicRecorder?
+var _micShouldStop = false
 
 @main
 struct DejaRecorderApp {
@@ -447,15 +448,20 @@ struct DejaRecorderApp {
             _globalMicRecorder = MicRecorder(outputPath: outputPath)
             _globalMicRecorder?.start()
 
-            signal(SIGINT) { _ in
-                _globalMicRecorder?.stop()
-                Thread.sleep(forTimeInterval: 0.1)
-                exit(0)
-            }
-            signal(SIGTERM) { _ in
-                _globalMicRecorder?.stop()
-                Thread.sleep(forTimeInterval: 0.1)
-                exit(0)
+            // Set a flag on SIGINT/SIGTERM — actual cleanup happens on the main thread
+            signal(SIGINT) { _ in _micShouldStop = true }
+            signal(SIGTERM) { _ in _micShouldStop = true }
+
+            // Poll on main thread so stop() runs on the right thread
+            Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { timer in
+                if _micShouldStop {
+                    timer.invalidate()
+                    _globalMicRecorder?.stop()
+                    // Give the file a moment to flush
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                        exit(0)
+                    }
+                }
             }
 
             RunLoop.main.run()

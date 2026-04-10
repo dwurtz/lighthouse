@@ -77,7 +77,7 @@ def _find_recorder() -> str:
     raise FileNotFoundError("DejaRecorder binary not found")
 
 
-def _has_speech(wav_path: Path, threshold: float = 0.005) -> bool:
+def _has_speech(wav_path: Path, threshold: float = 0.003) -> bool:
     """Check if a WAV file contains actual speech above a noise threshold.
 
     Reads the raw PCM data and checks RMS level. Returns False for
@@ -89,18 +89,30 @@ def _has_speech(wav_path: Path, threshold: float = 0.005) -> bool:
     try:
         with wave.open(str(wav_path), "rb") as wf:
             frames = wf.readframes(wf.getnframes())
+            sw = wf.getsampwidth()
             if len(frames) < 100:
                 return False
-            # 16-bit mono PCM
-            samples = struct.unpack(f"<{len(frames) // 2}h", frames)
-            rms = (sum(s * s for s in samples) / len(samples)) ** 0.5
-            # Normalize to 0-1 range (16-bit max = 32768)
-            level = rms / 32768.0
-            log.info("audio RMS level: %.4f (threshold: %.4f)", level, threshold)
+
+            if sw == 2:
+                # 16-bit PCM
+                samples = struct.unpack(f"<{len(frames) // 2}h", frames)
+                rms = (sum(s * s for s in samples) / len(samples)) ** 0.5
+                level = rms / 32768.0
+            elif sw == 4:
+                # 32-bit float
+                samples = struct.unpack(f"<{len(frames) // 4}f", frames)
+                rms = (sum(s * s for s in samples) / len(samples)) ** 0.5
+                level = rms  # already 0-1 range
+            else:
+                log.info("_has_speech: unexpected sample width %d — proceeding", sw)
+                return True
+
+            log.info("audio RMS level: %.6f (threshold: %.4f, sw=%d, frames=%d)",
+                     level, threshold, sw, len(frames))
             return level > threshold
     except Exception as e:
         log.warning("_has_speech check failed: %s — proceeding with transcription", e)
-        return True  # on error, try transcription anyway
+        return True
 
 
 def _find_mic_device() -> int:
@@ -204,8 +216,8 @@ async def _mic_stop_inner(reason: str = "manual") -> dict:
     except Exception:
         pass
 
-    # Give the filesystem a moment to flush the WAV file
-    await asyncio.sleep(0.3)
+    # Give DejaRecorder time to flush the WAV file to disk
+    await asyncio.sleep(0.5)
 
     _mic_state["process"] = None
     _mic_state["wav_path"] = None
@@ -222,20 +234,6 @@ async def _mic_stop_inner(reason: str = "manual") -> dict:
 
     wav_size = wav_path.stat().st_size
     log.info("mic_stop: wav=%s size=%d bytes", wav_path, wav_size)
-
-    # Check if audio has actual speech (not just silence)
-    if not _has_speech(wav_path):
-        log.info("mic_stop: no speech detected in audio, skipping transcription")
-        try:
-            wav_path.unlink(missing_ok=True)
-        except Exception:
-            pass
-        return {
-            "recording": False,
-            "reason": reason,
-            "transcript": "",
-            "error": "no speech detected",
-        }
 
     # Transcribe via Groq Whisper (fast, dedicated speech-to-text).
     transcript = ""
