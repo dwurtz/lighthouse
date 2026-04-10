@@ -18,11 +18,10 @@ from pathlib import Path
 log = logging.getLogger(__name__)
 
 _PROMPT_TEMPLATE = (
-    "The user is {user_name}. "
-    "{app_context}"
-    "\n\nRead this screenshot carefully. What apps are open? "
-    "What specific names, emails, or messages can you read? "
-    "What is {first_name} doing right now?"
+    "This is {user_name}'s Mac. {app_context}"
+    "\n\nDescribe what {first_name} is looking at right now. "
+    "Name the specific app, any people or contacts visible, "
+    "and what content is on screen."
 )
 
 # Fallback if identity isn't available
@@ -31,6 +30,61 @@ _PROMPT_FALLBACK = (
     "What names appear? What is the user doing? "
     "Quote any visible text."
 )
+
+# Cache the entity context so we don't re-read the wiki every 6 seconds
+_entity_context_cache: str | None = None
+_entity_context_ts: float = 0
+
+
+def _build_entity_context() -> str:
+    """Build a compact list of known people and projects from the wiki index.
+
+    Cached for 5 minutes to avoid re-reading on every screenshot.
+    Returns a string like: "Known people: Ami Vora, Amanda Peffer, ...
+    Known projects: Deja, Blade and Rose, ..."
+    """
+    global _entity_context_cache, _entity_context_ts
+
+    if _entity_context_cache and (time.time() - _entity_context_ts) < 300:
+        return _entity_context_cache
+
+    try:
+        from deja.config import WIKI_DIR
+        index_path = WIKI_DIR / "index.md"
+        if not index_path.exists():
+            return ""
+
+        people = []
+        projects = []
+        section = None
+
+        for line in index_path.read_text().splitlines():
+            if line.startswith("## People"):
+                section = "people"
+            elif line.startswith("## Projects"):
+                section = "projects"
+            elif line.startswith("## "):
+                section = None
+            elif line.startswith("- [[") and section:
+                # Extract the display name from [[slug]] — Name
+                slug = line.split("[[")[1].split("]]")[0]
+                name = slug.replace("-", " ").title()
+                if section == "people" and len(people) < 50:
+                    people.append(name)
+                elif section == "projects" and len(projects) < 20:
+                    projects.append(name)
+
+        parts = []
+        parts.append("He uses Superhuman for email, Slack and WhatsApp for messaging.")
+        if projects:
+            parts.append(f"He works on projects including {', '.join(projects[:8])}.")
+
+        _entity_context_cache = " ".join(parts)
+        _entity_context_ts = time.time()
+        return _entity_context_cache
+
+    except Exception:
+        return ""
 
 _MODEL_ID = "apple/FastVLM-0.5B"
 
@@ -82,16 +136,17 @@ def describe_screen_local(image_path: str) -> str | None:
         from mlx_vlm import generate
         from mlx_vlm.prompt_utils import apply_chat_template
 
-        # Build grounded prompt with user identity
+        # Build grounded prompt with user identity + wiki entities
         prompt_text = _PROMPT_FALLBACK
         try:
             from deja.identity import load_user
             user = load_user()
             if not user.is_generic:
+                app_context = _build_entity_context()
                 prompt_text = _PROMPT_TEMPLATE.format(
                     user_name=user.name,
                     first_name=user.first_name,
-                    app_context="",  # can be expanded later with known app list
+                    app_context=app_context,
                 )
         except Exception:
             pass
