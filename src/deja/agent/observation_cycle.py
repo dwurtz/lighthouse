@@ -36,8 +36,19 @@ async def run_collect_cycle(loop_ref) -> None:
                 image_path = getattr(sig, "_image_path", None)
                 if image_path:
                     try:
-                        vision_result = await loop_ref.gemini.describe_screen(image_path)
-                        sig.text = (vision_result.get("summary") or "").strip() or "(empty vision description)"
+                        # Try local FastVLM first (private, free, ~3.5s)
+                        # Falls back to Gemini via proxy if mlx-vlm not installed
+                        from deja.vision_local import describe_screen_local, is_available
+                        local_desc = None
+                        if is_available():
+                            local_desc = describe_screen_local(image_path)
+
+                        if local_desc:
+                            sig.text = local_desc
+                        else:
+                            # Fallback to cloud Gemini
+                            vision_result = await loop_ref.gemini.describe_screen(image_path)
+                            sig.text = (vision_result.get("summary") or "").strip() or "(empty vision description)"
                     finally:
                         # Optional retention for vision A/B eval — gated by
                         # config.VISION_RETENTION. Saves PNG + sidecar .txt
