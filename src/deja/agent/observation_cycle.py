@@ -63,6 +63,57 @@ def _recent_voice_context(window_seconds: int = 30) -> str:
     return ""
 
 
+async def _shadow_save_triple(
+    loop_ref,
+    image_path: str,
+    local_desc: str,
+    voice_context: str,
+    timestamp: datetime,
+) -> None:
+    """Run cloud vision on the same image and save (image, local, cloud) triple.
+
+    Used by VISION_SHADOW_EVAL mode to build a real-world dataset for
+    iterating on the local vision model's prompt.
+    """
+    import json
+    import shutil
+    from deja.config import VISION_SHADOW_DIR
+
+    VISION_SHADOW_DIR.mkdir(parents=True, exist_ok=True)
+    ts = timestamp.strftime("%Y%m%d-%H%M%S")
+
+    # Run cloud vision (Gemini) on the same image
+    cloud_desc = ""
+    cloud_error = ""
+    try:
+        cloud_result = await loop_ref.gemini.describe_screen(image_path, voice_context=voice_context)
+        cloud_desc = (cloud_result.get("summary") or "").strip()
+    except Exception as e:
+        cloud_error = str(e)[:200]
+        log.warning("vision shadow: cloud call failed: %s", cloud_error)
+        return
+
+    if not cloud_desc:
+        return
+
+    # Save the triple: image + JSON metadata
+    try:
+        dest_png = VISION_SHADOW_DIR / f"{ts}.png"
+        dest_meta = VISION_SHADOW_DIR / f"{ts}.json"
+        shutil.copy(image_path, dest_png)
+        meta = {
+            "timestamp": timestamp.isoformat(),
+            "voice_context": voice_context,
+            "local_desc": local_desc,
+            "cloud_desc": cloud_desc,
+        }
+        dest_meta.write_text(json.dumps(meta, indent=2), encoding="utf-8")
+        log.info("vision shadow: saved %s (local=%dch cloud=%dch)",
+                 ts, len(local_desc), len(cloud_desc))
+    except Exception as e:
+        log.warning("vision shadow: failed to write triple: %s", e)
+
+
 async def run_collect_cycle(loop_ref) -> None:
     """One collection cycle -- gather all new signals.
 
@@ -106,6 +157,19 @@ async def run_collect_cycle(loop_ref) -> None:
                             # Fallback to cloud Gemini
                             vision_result = await loop_ref.gemini.describe_screen(image_path, voice_context=voice_context)
                             sig.text = (vision_result.get("summary") or "").strip() or "(empty vision description)"
+
+                        # Vision shadow eval — if both models ran, save the
+                        # paired (image, local, cloud) triple for prompt iteration.
+                        # The downstream `sig.text` is unchanged; we only collect.
+                        try:
+                            from deja.config import VISION_SHADOW_EVAL
+                            if VISION_SHADOW_EVAL and local_desc:
+                                await _shadow_save_triple(
+                                    loop_ref, image_path, local_desc,
+                                    voice_context, sig.timestamp,
+                                )
+                        except Exception:
+                            log.debug("vision shadow save failed", exc_info=True)
                     finally:
                         # Optional retention for vision A/B eval — gated by
                         # config.VISION_RETENTION. Saves PNG + sidecar .txt

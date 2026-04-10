@@ -125,6 +125,13 @@ class AgentLoop:
         self.running = True
         log.info("Monitor loop starting")
 
+        # Sync server-driven feature flags (vision_shadow_eval, etc.)
+        try:
+            from deja.feature_flags import sync_feature_flags
+            sync_feature_flags()
+        except Exception:
+            log.debug("feature flag sync failed", exc_info=True)
+
         # Startup health checks
         try:
             from deja.health_check import report_health_checks
