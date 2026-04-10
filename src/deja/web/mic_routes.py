@@ -191,8 +191,7 @@ async def _auto_stop_after(delay: float) -> None:
 
 
 async def _mic_stop_inner(reason: str = "manual") -> dict:
-    """Stop ffmpeg, transcribe, emit signal. Idempotent."""
-    proc: subprocess.Popen | None = _mic_state.get("process")
+    """Stop recording via daemon, transcribe, emit signal. Idempotent."""
     wav_path: Path | None = _mic_state.get("wav_path")
     started_at: str | None = _mic_state.get("started_at")
 
@@ -201,25 +200,19 @@ async def _mic_stop_inner(reason: str = "manual") -> dict:
         task.cancel()
     _mic_state["auto_stop_task"] = None
 
-    if proc is None or wav_path is None:
-        _mic_state["process"] = None
+    if not _mic_state.get("recording") or wav_path is None:
+        _mic_state["recording"] = False
         _mic_state["wav_path"] = None
         _mic_state["started_at"] = None
         return {"recording": False, "reason": "no active session"}
 
-    try:
-        proc.send_signal(_signal.SIGINT)
-        proc.wait(timeout=5)
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        proc.wait(timeout=2)
-    except Exception:
-        pass
+    # Tell daemon to stop recording
+    (_CONTROL_DIR / ".stop").write_text("")
 
-    # Give DejaRecorder time to flush the WAV file to disk
-    await asyncio.sleep(0.5)
+    # Give the daemon time to flush the WAV file
+    await asyncio.sleep(0.3)
 
-    _mic_state["process"] = None
+    _mic_state["recording"] = False
     _mic_state["wav_path"] = None
     _mic_state["started_at"] = None
 
@@ -334,36 +327,54 @@ async def _mic_stop_inner(reason: str = "manual") -> dict:
     }
 
 
+_CONTROL_DIR = DEJA_HOME / "mic-control"
+
+
+def _ensure_daemon():
+    """Start the mic daemon if not already running."""
+    proc = _mic_state.get("daemon")
+    if proc is not None and proc.poll() is None:
+        return  # already running
+
+    _CONTROL_DIR.mkdir(parents=True, exist_ok=True)
+    # Clean stale sentinels
+    for f in [".start", ".stop", ".quit"]:
+        (_CONTROL_DIR / f).unlink(missing_ok=True)
+
+    recorder_path = _find_recorder()
+    try:
+        daemon = subprocess.Popen(
+            [recorder_path, "--daemon", str(_CONTROL_DIR)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        _mic_state["daemon"] = daemon
+        log.info("mic daemon started (pid=%d)", daemon.pid)
+        # Give the engine a moment to start and warm the mic
+        time.sleep(0.3)
+    except Exception as e:
+        log.error("mic daemon failed to start: %s", e)
+
+
 @router.post("/api/mic/start")
 async def mic_start() -> dict:
-    if _mic_state["process"] is not None:
+    if _mic_state.get("recording"):
         return {
             "recording": True,
             "reason": "already recording",
             "started_at": _mic_state["started_at"],
         }
 
+    _ensure_daemon()
+
     AUDIO_DIR.mkdir(parents=True, exist_ok=True)
     wav_path = AUDIO_DIR / f"session-{int(time.time())}.wav"
 
-    # Use DejaRecorder --mic for native CoreAudio capture (handles Bluetooth instantly)
-    recorder_path = _find_recorder()
-    cmd = [recorder_path, "--mic", str(wav_path)]
-
-    try:
-        proc = subprocess.Popen(
-            cmd,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-        )
-    except FileNotFoundError:
-        return {"recording": False, "error": "DejaRecorder not found"}
-    except Exception as e:
-        return {"recording": False, "error": f"DejaRecorder spawn failed: {e}"}
+    # Tell the daemon to start recording by writing the wav path to .start
+    (_CONTROL_DIR / ".start").write_text(str(wav_path))
 
     started_at = datetime.now(timezone.utc).isoformat()
-    _mic_state["process"] = proc
+    _mic_state["recording"] = True
     _mic_state["wav_path"] = wav_path
     _mic_state["started_at"] = started_at
 
@@ -386,6 +397,6 @@ async def mic_stop() -> dict:
 @router.get("/api/mic/status")
 def mic_status() -> dict:
     return {
-        "recording": _mic_state["process"] is not None,
+        "recording": _mic_state.get("recording", False),
         "started_at": _mic_state.get("started_at"),
     }

@@ -354,30 +354,37 @@ func log(_ message: String) {
 
 import AppKit
 
-// MARK: - Simple Mic Recorder (for voice pill — replaces ffmpeg)
+// MARK: - Persistent Mic Daemon (for voice pill)
+//
+// Keeps the AVAudioEngine running so the Bluetooth mic stays active.
+// Records to a file only when a .start sentinel appears.
+// Stops recording (but keeps engine alive) when a .stop sentinel appears.
+// Exits when a .quit sentinel appears.
 
-class MicRecorder {
+class MicDaemon {
     private var engine: AVAudioEngine?
     private var outputFile: AVAudioFile?
-    private let outputPath: URL
+    private var isRecording = false
+    private var monoFormat: AVAudioFormat?
+    private var wavSettings: [String: Any] = [:]
+    private let controlDir: URL
 
-    init(outputPath: URL) {
-        self.outputPath = outputPath
+    init(controlDir: URL) {
+        self.controlDir = controlDir
     }
 
-    func start() {
+    /// Start the audio engine (keeps mic active). Does NOT record yet.
+    func startEngine() {
         let engine = AVAudioEngine()
-
         let input = engine.inputNode
         let inputFormat = input.outputFormat(forBus: 0)
 
         guard inputFormat.sampleRate > 0 else {
-            log("MicRecorder: no audio input available")
+            log("MicDaemon: no audio input available")
             exit(1)
         }
 
-        // Record in the mic's native format — Whisper handles any sample rate
-        let settings: [String: Any] = [
+        wavSettings = [
             AVFormatIDKey: kAudioFormatLinearPCM,
             AVSampleRateKey: inputFormat.sampleRate,
             AVNumberOfChannelsKey: 1,
@@ -387,26 +394,20 @@ class MicRecorder {
             AVLinearPCMIsNonInterleaved: false,
         ]
 
-        do {
-            outputFile = try AVAudioFile(forWriting: outputPath, settings: settings)
-        } catch {
-            log("MicRecorder: failed to create output file: \(error)")
-            exit(1)
-        }
-
-        // Mono format for the tap
-        guard let monoFormat = AVAudioFormat(
+        guard let mono = AVAudioFormat(
             commonFormat: .pcmFormatFloat32,
             sampleRate: inputFormat.sampleRate,
             channels: 1,
             interleaved: false
         ) else {
-            log("MicRecorder: failed to create mono format")
+            log("MicDaemon: failed to create mono format")
             exit(1)
         }
+        monoFormat = mono
 
-        input.installTap(onBus: 0, bufferSize: 4096, format: monoFormat) { [weak self] buffer, _ in
-            guard let file = self?.outputFile else { return }
+        // Install tap — always running, but only writes when isRecording
+        input.installTap(onBus: 0, bufferSize: 4096, format: mono) { [weak self] buffer, _ in
+            guard let self = self, self.isRecording, let file = self.outputFile else { return }
             do {
                 try file.write(from: buffer)
             } catch {
@@ -417,25 +418,74 @@ class MicRecorder {
         do {
             try engine.start()
             self.engine = engine
-            log("MicRecorder: recording to \(outputPath.lastPathComponent) (sr=\(inputFormat.sampleRate) ch=1)")
+            log("MicDaemon: engine started (sr=\(inputFormat.sampleRate)) — mic warm, waiting for .start")
         } catch {
-            log("MicRecorder: engine start failed: \(error)")
+            log("MicDaemon: engine start failed: \(error)")
             exit(1)
         }
     }
 
-    func stop() {
+    /// Begin recording to a new WAV file.
+    func startRecording(to path: URL) {
+        do {
+            outputFile = try AVAudioFile(forWriting: path, settings: wavSettings)
+            isRecording = true
+            log("MicDaemon: recording to \(path.lastPathComponent)")
+        } catch {
+            log("MicDaemon: failed to create output file: \(error)")
+        }
+    }
+
+    /// Stop recording (engine stays alive for next recording).
+    func stopRecording() {
+        isRecording = false
+        outputFile = nil  // flushes and closes
+        log("MicDaemon: recording stopped")
+    }
+
+    /// Shut down everything.
+    func shutdown() {
+        isRecording = false
+        outputFile = nil
         engine?.inputNode.removeTap(onBus: 0)
         engine?.stop()
         engine = nil
-        outputFile = nil
-        log("MicRecorder: stopped")
+        log("MicDaemon: shutdown")
+    }
+
+    /// Poll for sentinel files in controlDir.
+    func pollForCommands() {
+        let fm = FileManager.default
+
+        // .start contains the output WAV path
+        let startFile = controlDir.appendingPathComponent(".start")
+        if fm.fileExists(atPath: startFile.path) {
+            if let wavPath = try? String(contentsOf: startFile, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines) {
+                try? fm.removeItem(at: startFile)
+                startRecording(to: URL(fileURLWithPath: wavPath))
+            }
+        }
+
+        // .stop — stop current recording
+        let stopFile = controlDir.appendingPathComponent(".stop")
+        if fm.fileExists(atPath: stopFile.path) {
+            try? fm.removeItem(at: stopFile)
+            stopRecording()
+        }
+
+        // .quit — exit
+        let quitFile = controlDir.appendingPathComponent(".quit")
+        if fm.fileExists(atPath: quitFile.path) {
+            try? fm.removeItem(at: quitFile)
+            shutdown()
+            exit(0)
+        }
     }
 }
 
 // MARK: - Main
 
-var _globalMicRecorder: MicRecorder?
+var _globalMicDaemon: MicDaemon?
 var _micShouldStop = false
 
 @main
@@ -443,25 +493,52 @@ struct DejaRecorderApp {
     static func main() {
         NSApplication.shared.setActivationPolicy(.accessory)
 
-        // --mic <output.wav> mode: simple mic recording for the voice pill
-        if CommandLine.arguments.count >= 3 && CommandLine.arguments[1] == "--mic" {
-            let outputPath = URL(fileURLWithPath: CommandLine.arguments[2])
-            _globalMicRecorder = MicRecorder(outputPath: outputPath)
-            _globalMicRecorder?.start()
+        // --daemon <control-dir> mode: persistent mic for voice pill
+        // Keeps AVAudioEngine running so Bluetooth mic stays warm.
+        // Polls control-dir for .start/.stop/.quit sentinel files.
+        if CommandLine.arguments.count >= 3 && CommandLine.arguments[1] == "--daemon" {
+            let controlDir = URL(fileURLWithPath: CommandLine.arguments[2])
+            try? FileManager.default.createDirectory(at: controlDir, withIntermediateDirectories: true)
 
-            // Set a flag on SIGINT/SIGTERM — actual cleanup happens on the main thread
+            let daemon = MicDaemon(controlDir: controlDir)
+            daemon.startEngine()
+
+            // Poll for commands every 50ms
+            Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { _ in
+                daemon.pollForCommands()
+            }
+
+            // Clean shutdown on signals
             signal(SIGINT) { _ in _micShouldStop = true }
             signal(SIGTERM) { _ in _micShouldStop = true }
+            Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { timer in
+                if _micShouldStop {
+                    timer.invalidate()
+                    daemon.shutdown()
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { exit(0) }
+                }
+            }
 
-            // Poll on main thread so stop() runs on the right thread
+            RunLoop.main.run()
+            return
+        }
+
+        // --mic <output.wav> mode: one-shot recording (legacy, for non-daemon use)
+        if CommandLine.arguments.count >= 3 && CommandLine.arguments[1] == "--mic" {
+            let controlDir = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".deja/mic-control")
+            try? FileManager.default.createDirectory(at: controlDir, withIntermediateDirectories: true)
+
+            let daemon = MicDaemon(controlDir: controlDir)
+            daemon.startEngine()
+            daemon.startRecording(to: URL(fileURLWithPath: CommandLine.arguments[2]))
+
+            signal(SIGINT) { _ in _micShouldStop = true }
+            signal(SIGTERM) { _ in _micShouldStop = true }
             Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { timer in
                 if _micShouldStop {
                     timer.invalidate()
-                    _globalMicRecorder?.stop()
-                    // Give the file a moment to flush
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                        exit(0)
-                    }
+                    daemon.stopRecording()
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { exit(0) }
                 }
             }
 
