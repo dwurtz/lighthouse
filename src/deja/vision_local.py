@@ -17,7 +17,16 @@ from pathlib import Path
 
 log = logging.getLogger(__name__)
 
-_PROMPT = (
+_PROMPT_TEMPLATE = (
+    "The user is {user_name}. "
+    "{app_context}"
+    "\n\nRead this screenshot carefully. What apps are open? "
+    "What specific names, emails, or messages can you read? "
+    "What is {first_name} doing right now?"
+)
+
+# Fallback if identity isn't available
+_PROMPT_FALLBACK = (
     "Read this screenshot carefully. What apps are open? "
     "What names appear? What is the user doing? "
     "Quote any visible text."
@@ -73,10 +82,24 @@ def describe_screen_local(image_path: str) -> str | None:
         from mlx_vlm import generate
         from mlx_vlm.prompt_utils import apply_chat_template
 
+        # Build grounded prompt with user identity
+        prompt_text = _PROMPT_FALLBACK
+        try:
+            from deja.identity import load_user
+            user = load_user()
+            if not user.is_generic:
+                prompt_text = _PROMPT_TEMPLATE.format(
+                    user_name=user.name,
+                    first_name=user.first_name,
+                    app_context="",  # can be expanded later with known app list
+                )
+        except Exception:
+            pass
+
         prompt = apply_chat_template(
             _processor,
             config=_model.config,
-            prompt=f"<image>\n{_PROMPT}",
+            prompt=f"<image>\n{prompt_text}",
             images=[image_path],
         )
 

@@ -17,7 +17,7 @@ struct VoicePillView: View {
                 collapsedPill
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+        .frame(width: 400, height: 56, alignment: .bottom)
         .animation(.spring(response: 0.3, dampingFraction: 0.75), value: monitor.voicePillActive)
         .animation(.easeInOut(duration: 0.2), value: monitor.voicePillProcessing)
         .animation(.easeInOut(duration: 0.2), value: monitor.voicePillTranscript.isEmpty)
