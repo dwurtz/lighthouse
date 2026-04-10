@@ -204,6 +204,9 @@ async def _mic_stop_inner(reason: str = "manual") -> dict:
     except Exception:
         pass
 
+    # Give the filesystem a moment to flush the WAV file
+    await asyncio.sleep(0.3)
+
     _mic_state["process"] = None
     _mic_state["wav_path"] = None
     _mic_state["started_at"] = None
