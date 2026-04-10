@@ -70,6 +70,12 @@ class MonitorState: ObservableObject {
 
     private var statsTimer: Timer?
     private var screenshotTimer: Timer?
+    private let keystrokeMonitor = KeystrokeMonitor()
+    private var lastCaptureTime: TimeInterval = 0
+    /// Defer captures while the user is typing — mid-sentence frames confuse vision.
+    private let typingIdleThreshold: TimeInterval = 3.5
+    /// Hard cap: if user types nonstop, capture anyway after this much time.
+    private let maxCaptureDeferral: TimeInterval = 60.0
     private var dbReaderTimer: Timer?
     // MARK: - Extracted services
 
@@ -201,6 +207,7 @@ class MonitorState: ObservableObject {
     func stop() {
         statsTimer?.invalidate(); statsTimer = nil
         screenshotTimer?.invalidate(); screenshotTimer = nil
+        keystrokeMonitor.stop()
         dbReaderTimer?.invalidate(); dbReaderTimer = nil
         processManager.stopAll()
         running = false
@@ -313,13 +320,30 @@ class MonitorState: ObservableObject {
 
     func startScreenshotCapture() {
         guard screenshotTimer == nil else { return }
+        keystrokeMonitor.start()
         captureScreenshot()
         screenshotTimer = Timer.scheduledTimer(withTimeInterval: 6.0, repeats: true) { [weak self] _ in
             self?.captureScreenshot()
         }
     }
 
-    private func captureScreenshot() {
+    /// Capture a screenshot, but defer if the user is currently typing.
+    /// Voice transcription bypasses the gate via captureScreenshot(force: true).
+    func captureScreenshot(force: Bool = false) {
+        let now = Date().timeIntervalSince1970
+
+        if !force {
+            let idle = keystrokeMonitor.idleSeconds
+            let timeSinceLastCapture = lastCaptureTime > 0 ? now - lastCaptureTime : .infinity
+
+            // Defer if user is mid-typing AND we haven't been deferring too long
+            if idle < typingIdleThreshold && timeSinceLastCapture < maxCaptureDeferral {
+                NSLog("deja: screenshot deferred (typing — idle=%.1fs, deferred=%.1fs)", idle, timeSinceLastCapture)
+                return
+            }
+        }
+
+        lastCaptureTime = now
         DispatchQueue.global(qos: .utility).async { [weak self] in
             self?.processManager.captureScreenshot()
         }
@@ -626,6 +650,11 @@ class MonitorState: ObservableObject {
                 // Show transcript briefly
                 self.voicePillProcessing = false
                 self.voicePillTranscript = transcript
+
+                // Force a fresh screenshot — the user just spoke, so this
+                // is the moment we want vision to see (and the next vision
+                // call will pick up the voice context for grounding).
+                self.captureScreenshot(force: true)
 
                 // Send to chat with screenshot context after a short display
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
