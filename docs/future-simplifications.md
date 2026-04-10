@@ -71,6 +71,15 @@ Even if Blocker A is fixed, `mlx-swift-lm`'s VLM (vision) support may still be l
 - **Bundle llama.cpp directly:** compile as a library, sign as part of the app. ~20MB binary. Supports Qwen and vision models. Most engineering work but best perf.
 - **Wait for mlx-lm optimizations:** The mlx team actively improves it
 
+**Precedent for bundling llama.cpp:** This is a well-trodden path used by every major consumer local LLM app:
+- **LM Studio** (closed-source, bundles llama.cpp under the hood)
+- **Jan.ai** (open source, Electron, llama.cpp for all inference)
+- **GPT4All** (Nomic AI, llama.cpp backend)
+- **Msty** (polished UX, bundles llama.cpp)
+- **Ollama** (literally a wrapper around llama.cpp)
+
+So "bundle llama.cpp" is not experimental — it's what every local LLM app does. Typical footprint is ~20MB for the binary, Metal-accelerated on Apple Silicon, handles text + vision models.
+
 **Trigger to reconsider:** If users report chat feels slow (>10s to first token) we should bundle llama.cpp.
 
 ## 3. Torch required for FastVLM's vision encoder
