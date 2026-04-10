@@ -286,6 +286,103 @@ def _google_api(method: str, url: str, json_body: dict | None = None) -> tuple[i
         return 500, {"error": str(e)}
 
 
+def list_calendar_events(time_min: str = "", time_max: str = "", max_results: int = 20) -> ToolResult:
+    """List upcoming Google Calendar events in a time range."""
+    from datetime import datetime, timezone, timedelta
+
+    if not time_min:
+        time_min = datetime.now(timezone.utc).isoformat()
+    if not time_max:
+        time_max = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
+
+    import urllib.parse
+    params = urllib.parse.urlencode({
+        "timeMin": time_min,
+        "timeMax": time_max,
+        "maxResults": max_results,
+        "singleEvents": "true",
+        "orderBy": "startTime",
+    })
+    status, data = _google_api(
+        "GET",
+        f"https://www.googleapis.com/calendar/v3/calendars/primary/events?{params}",
+    )
+    if 200 <= status < 300:
+        events = []
+        for e in data.get("items", []):
+            events.append({
+                "id": e.get("id"),
+                "summary": e.get("summary", "(no title)"),
+                "start": e.get("start", {}).get("dateTime") or e.get("start", {}).get("date"),
+                "end": e.get("end", {}).get("dateTime") or e.get("end", {}).get("date"),
+                "location": e.get("location", ""),
+            })
+        return ToolResult(
+            ok=True,
+            message=f"Found {len(events)} event(s)",
+            data={"events": events},
+        )
+    return ToolResult(ok=False, message=f"Calendar API error {status}: {data.get('error', {}).get('message', str(data))}")
+
+
+def delete_calendar_event(event_id: str) -> ToolResult:
+    """Delete a Google Calendar event by its ID."""
+    if not event_id:
+        return ToolResult(ok=False, message="event_id is required")
+
+    import httpx
+    from deja.auth import get_access_token
+
+    token = get_access_token()
+    if not token:
+        return ToolResult(ok=False, message="Not authenticated")
+
+    try:
+        with httpx.Client(timeout=15) as client:
+            resp = client.delete(
+                f"https://www.googleapis.com/calendar/v3/calendars/primary/events/{event_id}",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+        if 200 <= resp.status_code < 300 or resp.status_code == 204:
+            append_log_entry("chat", f"deleted calendar event: {event_id}")
+            return ToolResult(ok=True, message=f"Deleted event {event_id}")
+        return ToolResult(ok=False, message=f"Calendar API error {resp.status_code}: {resp.text[:200]}")
+    except Exception as e:
+        return ToolResult(ok=False, message=f"Delete failed: {e}")
+
+
+def update_calendar_event(event_id: str, summary: str = "", start: str = "", end: str = "",
+                          description: str = "", location: str = "") -> ToolResult:
+    """Update fields of an existing Google Calendar event."""
+    if not event_id:
+        return ToolResult(ok=False, message="event_id is required")
+
+    body: dict = {}
+    if summary:
+        body["summary"] = summary
+    if start:
+        body["start"] = {"dateTime": start}
+    if end:
+        body["end"] = {"dateTime": end}
+    if description:
+        body["description"] = description
+    if location:
+        body["location"] = location
+
+    if not body:
+        return ToolResult(ok=False, message="at least one field to update is required")
+
+    status, data = _google_api(
+        "PATCH",
+        f"https://www.googleapis.com/calendar/v3/calendars/primary/events/{event_id}",
+        body,
+    )
+    if 200 <= status < 300:
+        append_log_entry("chat", f"updated calendar event: {event_id}")
+        return ToolResult(ok=True, message=f"Updated event {event_id}")
+    return ToolResult(ok=False, message=f"Calendar API error {status}: {data.get('error', {}).get('message', str(data))}")
+
+
 def create_calendar_event(summary: str, start: str, end: str,
                           description: str = "", location: str = "") -> ToolResult:
     """Create a Google Calendar event."""
@@ -367,7 +464,10 @@ _TOOLS = {
     "write_page": write_page,
     "delete_page": delete_page,
     "rename_page": rename_page,
+    "list_calendar_events": list_calendar_events,
     "create_calendar_event": create_calendar_event,
+    "update_calendar_event": update_calendar_event,
+    "delete_calendar_event": delete_calendar_event,
     "draft_email": draft_email,
     "create_task": create_task,
 }
@@ -468,6 +568,54 @@ _TOOL_SCHEMAS = [
                 "reason": {"type": "string"},
             },
             "required": ["category", "old_slug", "new_slug", "reason"],
+        },
+    },
+    {
+        "name": "list_calendar_events",
+        "description": (
+            "List upcoming Google Calendar events. Use this to find an event's ID "
+            "before deleting or updating it. Defaults to the next 7 days."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "time_min": {"type": "string", "description": "Optional ISO 8601 start time (defaults to now)"},
+                "time_max": {"type": "string", "description": "Optional ISO 8601 end time (defaults to 7 days out)"},
+                "max_results": {"type": "integer", "description": "Max events to return (default 20)"},
+            },
+        },
+    },
+    {
+        "name": "delete_calendar_event",
+        "description": (
+            "Delete a Google Calendar event by its ID. Call list_calendar_events first "
+            "to find the event ID if you don't have it."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "event_id": {"type": "string", "description": "The Google Calendar event ID"},
+            },
+            "required": ["event_id"],
+        },
+    },
+    {
+        "name": "update_calendar_event",
+        "description": (
+            "Update fields of an existing Google Calendar event. Call list_calendar_events "
+            "first to find the event ID. Only include fields that should change."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "event_id": {"type": "string"},
+                "summary": {"type": "string"},
+                "start": {"type": "string", "description": "ISO 8601 start datetime"},
+                "end": {"type": "string", "description": "ISO 8601 end datetime"},
+                "description": {"type": "string"},
+                "location": {"type": "string"},
+            },
+            "required": ["event_id"],
         },
     },
     {

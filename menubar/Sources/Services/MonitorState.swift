@@ -667,7 +667,8 @@ class MonitorState: ObservableObject {
             var fullText = ""
             let text = String(data: data, encoding: .utf8) ?? ""
             for line in text.split(separator: "\n") {
-                let l = String(line)
+                // Strip trailing \r from HTTP line endings
+                let l = String(line).trimmingCharacters(in: CharacterSet(charactersIn: "\r"))
                 if l.hasPrefix("data: ") {
                     let jsonStr = String(l.dropFirst(6))
                     if let jsonData = jsonStr.data(using: .utf8),
