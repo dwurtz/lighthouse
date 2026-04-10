@@ -343,7 +343,7 @@ class GeminiClient:
     # ------------------------------------------------------------------
 
     async def describe_screen(
-        self, image_path: str, goals_text: str = ""
+        self, image_path: str, goals_text: str = "", voice_context: str = ""
     ) -> dict:
         """Describe a screenshot via Gemini Flash vision.
 
@@ -351,6 +351,10 @@ class GeminiClient:
         model can name specific entities when they appear on screen
         ("this Zillow listing relates to [[palo-alto-relocation]]")
         instead of producing generic descriptions.
+
+        If voice_context is provided (e.g. recent dictation), it's
+        treated as the user's own commentary on what they're looking at
+        and given top priority for grounding the description.
 
         Returns {summary, app, key_details}.
         """
@@ -385,6 +389,20 @@ class GeminiClient:
             # Prompt doesn't use one of the expected placeholders — render
             # as-is rather than blowing up on a partial template.
             prompt = template
+
+        # Voice dictation captured around this screenshot is the user's own
+        # commentary on what they're looking at — prepend it as top-priority
+        # context so the description matches their intent.
+        if voice_context:
+            prompt = (
+                f"# IMPORTANT: The user just said this while looking at the screen\n\n"
+                f'"{voice_context}"\n\n'
+                f"Use their words as the primary lens for interpreting the screen. "
+                f"What they said reveals their intent, what they're focused on, and "
+                f"how they want this moment understood. Ground your description in "
+                f"their commentary.\n\n"
+                f"---\n\n{prompt}"
+            )
 
         # Vision uses its own model (VISION_MODEL) chosen by the
         # tools/vision_eval.py harness — Flash in the default config
