@@ -157,7 +157,7 @@ def set_identity(body: dict) -> dict:
     try:
         import importlib.resources as pkg_resources
         prompts_dir = WIKI_DIR / "prompts"
-        for prompt_name in ["integrate", "reflect", "describe_screen", "prefilter", "chat", "onboard"]:
+        for prompt_name in ["integrate", "integrate_local", "reflect", "describe_screen", "prefilter", "chat", "onboard"]:
             dest = prompts_dir / f"{prompt_name}.md"
             if not dest.exists():
                 try:

@@ -35,9 +35,8 @@ def load_fixtures() -> list[dict]:
     return fixtures
 
 
-def build_prompt(fixture: dict) -> str:
+def build_prompt(fixture: dict, prompt_override: str | None = None) -> str:
     """Build the integration prompt from a fixture."""
-    from deja.prompts import load as load_prompt
     from deja.identity import load_user
     from deja.wiki_schema import load_schema
     from datetime import datetime
@@ -46,7 +45,13 @@ def build_prompt(fixture: dict) -> str:
     user_fields = load_user().as_prompt_fields()
     schema = load_schema()
 
-    prompt = load_prompt("integrate").format(
+    if prompt_override:
+        template = Path(prompt_override).read_text()
+    else:
+        from deja.prompts import load as load_prompt
+        template = load_prompt("integrate")
+
+    prompt = template.format(
         current_time=now.strftime("%Y-%m-%d %H:%M"),
         day_of_week=now.strftime("%A"),
         time_of_day="evening",
@@ -60,14 +65,17 @@ def build_prompt(fixture: dict) -> str:
     return prompt
 
 
-async def call_ollama(model: str, prompt: str) -> tuple[str, int]:
+async def call_ollama(model: str, prompt: str, no_think: bool = False) -> tuple[str, int]:
     """Call Ollama with the integration prompt. Returns (response_text, latency_ms)."""
     import httpx
 
     # For thinking models, prepend /no_think
     actual_prompt = prompt
-    if "gemma4" in model:
+    if "gemma4" in model or no_think:
         actual_prompt = "/no_think\n" + prompt
+
+    # Thinking models need more tokens for internal reasoning
+    num_predict = 8192 if "gemma4" in model else 4096
 
     t0 = time.time()
     async with httpx.AsyncClient(timeout=300) as client:
@@ -79,7 +87,7 @@ async def call_ollama(model: str, prompt: str) -> tuple[str, int]:
                 "stream": False,
                 "options": {
                     "temperature": 0.2,
-                    "num_predict": 4096,
+                    "num_predict": num_predict,
                 },
                 "format": "json",
             },
@@ -126,6 +134,8 @@ def evaluate_response(text: str, gemini_response: dict) -> dict:
 async def main():
     parser = argparse.ArgumentParser(description="Integration cycle local model eval")
     parser.add_argument("--model", default="qwen3:8b", help="Ollama model name")
+    parser.add_argument("--prompt", default=None, help="Path to custom prompt template file")
+    parser.add_argument("--no-think", action="store_true", help="Prepend /no_think to prompt (for Qwen3)")
     args = parser.parse_args()
 
     fixtures = load_fixtures()
@@ -133,16 +143,21 @@ async def main():
         print(f"No fixtures found in {FIXTURES_DIR}")
         sys.exit(1)
 
-    print(f"Evaluating {len(fixtures)} fixtures with {args.model}")
+    label = f"{args.model}"
+    if args.prompt:
+        label += f" + {Path(args.prompt).stem}"
+    if args.no_think:
+        label += " + /no_think"
+    print(f"Evaluating {len(fixtures)} fixtures with {label}")
     print()
 
     results = []
     for fx in fixtures:
-        prompt = build_prompt(fx)
+        prompt = build_prompt(fx, prompt_override=args.prompt)
         prompt_len = len(prompt)
 
         try:
-            text, latency = await call_ollama(args.model, prompt)
+            text, latency = await call_ollama(args.model, prompt, no_think=args.no_think)
             scores = evaluate_response(text, fx["gemini_response"])
             scores["latency_ms"] = latency
             scores["prompt_chars"] = prompt_len

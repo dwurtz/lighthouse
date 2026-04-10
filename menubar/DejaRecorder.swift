@@ -369,6 +369,12 @@ class MicDaemon {
     private var wavSettings: [String: Any] = [:]
     private let controlDir: URL
 
+    // Rolling buffer: last ~2 seconds of audio, used to prepend when recording
+    // starts so we don't lose the first words spoken as the user clicks the pill.
+    private var ringBuffer: [AVAudioPCMBuffer] = []
+    private let ringBufferMaxChunks = 24  // ~2s at 4096 samples / 48kHz
+    private let ringBufferLock = NSLock()
+
     init(controlDir: URL) {
         self.controlDir = controlDir
     }
@@ -405,13 +411,29 @@ class MicDaemon {
         }
         monoFormat = mono
 
-        // Install tap — always running, but only writes when isRecording
+        // Install tap — always running. Always fills the ring buffer so we
+        // have recent audio to prepend when recording starts. Writes to the
+        // output file when recording is active.
         input.installTap(onBus: 0, bufferSize: 4096, format: mono) { [weak self] buffer, _ in
-            guard let self = self, self.isRecording, let file = self.outputFile else { return }
-            do {
-                try file.write(from: buffer)
-            } catch {
-                // Drop buffer on write error
+            guard let self = self else { return }
+
+            // Always copy and append to ring buffer (under lock)
+            if let copy = buffer.copy() as? AVAudioPCMBuffer {
+                self.ringBufferLock.lock()
+                self.ringBuffer.append(copy)
+                while self.ringBuffer.count > self.ringBufferMaxChunks {
+                    self.ringBuffer.removeFirst()
+                }
+                self.ringBufferLock.unlock()
+            }
+
+            // Write to output file if recording
+            if self.isRecording, let file = self.outputFile {
+                do {
+                    try file.write(from: buffer)
+                } catch {
+                    // Drop buffer on write error
+                }
             }
         }
 
@@ -426,11 +448,25 @@ class MicDaemon {
     }
 
     /// Begin recording to a new WAV file.
+    /// Pre-pends the rolling buffer (~2s of recent audio) so we don't lose
+    /// words spoken right before the user clicked the pill.
     func startRecording(to path: URL) {
         do {
-            outputFile = try AVAudioFile(forWriting: path, settings: wavSettings)
+            let file = try AVAudioFile(forWriting: path, settings: wavSettings)
+
+            // Snapshot and flush the ring buffer first
+            ringBufferLock.lock()
+            let preBuffer = ringBuffer
+            ringBuffer.removeAll()
+            ringBufferLock.unlock()
+
+            for buffer in preBuffer {
+                try? file.write(from: buffer)
+            }
+
+            outputFile = file
             isRecording = true
-            log("MicDaemon: recording to \(path.lastPathComponent)")
+            log("MicDaemon: recording to \(path.lastPathComponent) (prepended \(preBuffer.count) chunks = ~\(preBuffer.count * 85)ms)")
         } catch {
             log("MicDaemon: failed to create output file: \(error)")
         }
@@ -503,8 +539,8 @@ struct DejaRecorderApp {
             let daemon = MicDaemon(controlDir: controlDir)
             daemon.startEngine()
 
-            // Poll for commands every 50ms
-            Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { _ in
+            // Poll for commands every 20ms — responsive without burning CPU
+            Timer.scheduledTimer(withTimeInterval: 0.02, repeats: true) { _ in
                 daemon.pollForCommands()
             }
 
