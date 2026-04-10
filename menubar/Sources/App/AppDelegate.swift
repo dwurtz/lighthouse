@@ -26,6 +26,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+        setupCrashReporting()
         setupStatusItem()       // First — before any work that could trigger menu bar layout
         setupPopover()
         monitor.start()         // After UI is set up
@@ -342,9 +343,93 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func cleanupSensitiveFiles() {
         let home = MonitorState.home
         let fm = FileManager.default
-        // Delete all screenshot files
         for pattern in ["latest_screen.png", "screen_1.png", "screen_2.png", "screen_3.png", "screen_4.png"] {
             try? fm.removeItem(atPath: home + "/" + pattern)
+        }
+    }
+
+    // MARK: - Crash Reporting
+
+    private func setupCrashReporting() {
+        // Catch uncaught exceptions
+        NSSetUncaughtExceptionHandler { exception in
+            CrashReporter.report(
+                type: "uncaught_exception",
+                name: exception.name.rawValue,
+                reason: exception.reason ?? "unknown",
+                stackTrace: exception.callStackSymbols.joined(separator: "\n")
+            )
+        }
+
+        // Send any crash reports from previous sessions
+        CrashReporter.sendPendingReports()
+    }
+}
+
+// MARK: - Crash Reporter
+
+enum CrashReporter {
+    private static let pendingDir = NSHomeDirectory() + "/.deja/crash-reports"
+
+    /// Save a crash report to disk (called from signal/exception handlers).
+    static func report(type: String, name: String, reason: String, stackTrace: String) {
+        let fm = FileManager.default
+        try? fm.createDirectory(atPath: pendingDir, withIntermediateDirectories: true)
+
+        let report: [String: Any] = [
+            "type": type,
+            "name": name,
+            "reason": reason,
+            "stack_trace": String(stackTrace.prefix(2000)),
+            "timestamp": ISO8601DateFormatter().string(from: Date()),
+            "app_version": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown",
+            "os_version": ProcessInfo.processInfo.operatingSystemVersionString,
+        ]
+
+        if let data = try? JSONSerialization.data(withJSONObject: report),
+           let json = String(data: data, encoding: .utf8) {
+            let filename = "\(pendingDir)/crash-\(Int(Date().timeIntervalSince1970)).json"
+            try? json.write(toFile: filename, atomically: true, encoding: .utf8)
+        }
+    }
+
+    /// On next launch, send any saved crash reports to the telemetry server.
+    static func sendPendingReports() {
+        DispatchQueue.global(qos: .utility).async {
+            let fm = FileManager.default
+            guard let files = try? fm.contentsOfDirectory(atPath: pendingDir) else { return }
+
+            for file in files where file.hasSuffix(".json") {
+                let path = "\(pendingDir)/\(file)"
+                guard let data = fm.contents(atPath: path),
+                      let report = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                    try? fm.removeItem(atPath: path)
+                    continue
+                }
+
+                // Send to telemetry endpoint
+                guard let url = URL(string: "https://deja-api.onrender.com/v1/telemetry") else { continue }
+                var request = URLRequest(url: url)
+                request.httpMethod = "POST"
+                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                request.timeoutInterval = 10
+
+                let body: [String: Any] = [
+                    "event": "crash",
+                    "properties": report,
+                    "client_version": report["app_version"] as? String ?? "unknown",
+                ]
+                request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+
+                let sem = DispatchSemaphore(value: 0)
+                URLSession.shared.dataTask(with: request) { _, _, _ in
+                    sem.signal()
+                }.resume()
+                _ = sem.wait(timeout: .now() + 10)
+
+                // Remove after sending (or attempting)
+                try? fm.removeItem(atPath: path)
+            }
         }
     }
 }
