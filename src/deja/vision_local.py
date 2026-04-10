@@ -108,3 +108,75 @@ def is_available() -> bool:
         return True
     except ImportError:
         return False
+
+
+def is_model_downloaded() -> bool:
+    """Check if the FastVLM model weights are already cached locally."""
+    try:
+        from huggingface_hub import try_to_load_from_cache
+        # Check for the main model file
+        result = try_to_load_from_cache(_MODEL_ID, "config.json")
+        return result is not None and not isinstance(result, type(None))
+    except Exception:
+        return False
+
+
+_download_progress: dict = {
+    "status": "idle",  # idle, downloading, loading, ready, error
+    "progress": 0.0,   # 0.0 to 1.0
+    "message": "",
+    "model_id": _MODEL_ID,
+    "model_size_mb": 500,
+}
+
+
+def get_download_status() -> dict:
+    """Return the current model download/load status."""
+    return dict(_download_progress)
+
+
+def download_model() -> bool:
+    """Download and pre-load the FastVLM model.
+
+    Called during setup to ensure the model is ready before the app
+    starts capturing screenshots. Updates _download_progress for
+    the UI to poll.
+    """
+    global _model, _processor, _load_attempted
+
+    if _model is not None:
+        _download_progress["status"] = "ready"
+        _download_progress["progress"] = 1.0
+        _download_progress["message"] = "Model ready"
+        return True
+
+    _download_progress["status"] = "downloading"
+    _download_progress["progress"] = 0.1
+    _download_progress["message"] = "Downloading FastVLM 0.5B (~500 MB)..."
+
+    try:
+        from mlx_vlm import load
+
+        # The load() call handles download + cache + model init
+        _download_progress["progress"] = 0.3
+        _download_progress["message"] = "Downloading model weights..."
+
+        _model, _processor = load(_MODEL_ID)
+        _load_attempted = True
+
+        _download_progress["status"] = "ready"
+        _download_progress["progress"] = 1.0
+        _download_progress["message"] = "Model ready"
+        log.info("FastVLM model downloaded and loaded successfully")
+        return True
+
+    except ImportError:
+        _download_progress["status"] = "error"
+        _download_progress["message"] = "mlx-vlm not installed"
+        log.warning("mlx-vlm not installed")
+        return False
+    except Exception as e:
+        _download_progress["status"] = "error"
+        _download_progress["message"] = str(e)[:200]
+        log.exception("Model download failed")
+        return False

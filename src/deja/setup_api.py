@@ -230,6 +230,41 @@ def complete_setup() -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Model download
+# ---------------------------------------------------------------------------
+
+@router.get("/model-status")
+def model_status() -> dict:
+    """Return the local vision model download/load status."""
+    from deja.vision_local import get_download_status, is_available, is_model_downloaded
+    status = get_download_status()
+    status["mlx_vlm_installed"] = is_available()
+    status["model_cached"] = is_model_downloaded()
+    return status
+
+
+@router.post("/download-model")
+async def start_model_download() -> dict:
+    """Download the local vision model in the background.
+
+    Returns immediately. Poll /api/setup/model-status for progress.
+    """
+    import asyncio
+    from deja.vision_local import download_model, get_download_status
+
+    status = get_download_status()
+    if status["status"] in ("downloading", "loading"):
+        return {"ok": True, "already_running": True}
+    if status["status"] == "ready":
+        return {"ok": True, "already_ready": True}
+
+    # Run in background
+    loop = asyncio.get_event_loop()
+    loop.run_in_executor(None, download_model)
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
 # Backfill progress
 # ---------------------------------------------------------------------------
 

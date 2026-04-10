@@ -9,10 +9,14 @@ struct SetupPanelView: View {
     @State private var gwsError: String = ""
     @State private var screenRecordingGranted: Bool = false
     @State private var fullDiskGranted: Bool = false
+    @State private var modelStatus: String = "idle"  // idle, downloading, ready, error
+    @State private var modelProgress: Double = 0.0
+    @State private var modelMessage: String = ""
     @State private var pollTimer: Timer?
 
     private var googleDone: Bool { !gwsEmail.isEmpty }
-    private var canStart: Bool { googleDone && screenRecordingGranted }
+    private var modelReady: Bool { modelStatus == "ready" }
+    private var canStart: Bool { googleDone && screenRecordingGranted && modelReady }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -54,6 +58,18 @@ struct SetupPanelView: View {
                     loading: false,
                     error: "",
                     action: grantScreenRecording
+                )
+
+                // On-device AI model
+                setupRow(
+                    icon: "cpu",
+                    title: "On-Device AI",
+                    description: modelReady ? "FastVLM ready — screenshots analyzed locally" : "Download vision model (~500 MB)",
+                    done: modelReady,
+                    required: true,
+                    loading: modelStatus == "downloading",
+                    error: modelStatus == "error" ? modelMessage : "",
+                    action: downloadModel
                 )
 
                 // iMessage & WhatsApp
@@ -224,6 +240,12 @@ struct SetupPanelView: View {
         }
     }
 
+    func downloadModel() {
+        modelStatus = "downloading"
+        modelMessage = "Starting download..."
+        localAPICall("/api/setup/download-model", method: "POST") { _, _ in }
+    }
+
     func startDeja() {
         pollTimer?.invalidate()
         monitor.completeSetup()
@@ -238,6 +260,18 @@ struct SetupPanelView: View {
         fullDiskGranted = FileManager.default.isReadableFile(
             atPath: NSHomeDirectory() + "/Library/Messages/chat.db"
         )
+    }
+
+    func checkModelStatus() {
+        localAPICall("/api/setup/model-status", timeoutInterval: 3) { data, _ in
+            guard let data = data,
+                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+            DispatchQueue.main.async {
+                self.modelStatus = obj["status"] as? String ?? "idle"
+                self.modelProgress = obj["progress"] as? Double ?? 0.0
+                self.modelMessage = obj["message"] as? String ?? ""
+            }
+        }
     }
 
     func checkExistingAuth() {
@@ -256,6 +290,7 @@ struct SetupPanelView: View {
     func startPolling() {
         pollTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
             checkPermissions()
+            checkModelStatus()
         }
     }
 }

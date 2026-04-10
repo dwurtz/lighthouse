@@ -100,6 +100,11 @@ rsync -a --exclude='__pycache__' --exclude='*.pyc' \
     --exclude='pkg_resources' \
     --exclude='wheel' --exclude='wheel-*' \
     --exclude='*.dist-info/RECORD' \
+    --exclude='torch' --exclude='torch-*' \
+    --exclude='torchvision' --exclude='torchvision-*' \
+    --exclude='timm' --exclude='timm-*' \
+    --exclude='sympy' --exclude='sympy-*' \
+    --exclude='networkx' --exclude='networkx-*' \
     "$SITE_PACKAGES/" "$DEST/lib/python${PYTHON_VERSION}/site-packages/"
 
 # Remove editable install .pth files (they point to the dev machine)
