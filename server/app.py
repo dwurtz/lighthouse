@@ -156,10 +156,18 @@ async def generate_endpoint(
 
     input_tokens = result.get("usage_metadata", {}).get("prompt_token_count", 0)
     output_tokens = result.get("usage_metadata", {}).get("candidates_token_count", 0)
+    # Implicit context cache hit count. Gemini returns this on any call
+    # where part of the input prefix was served from a cached entry.
+    # We log it as an additional column so we can compute cache hit rate
+    # (cached / input) and prompt-restructure savings retroactively.
+    # Expected ~0 until prompts are explicitly restructured with static
+    # content at the top; grep `cached=` in Render logs to measure.
+    cached_tokens = result.get("usage_metadata", {}).get("cached_content_token_count", 0)
 
     logger.info(
-        "generate rid=%s user=%s model=%s in=%d out=%d ms=%d",
-        request_id, user["email"], body.model, input_tokens, output_tokens, latency_ms,
+        "generate rid=%s user=%s model=%s in=%d cached=%d out=%d ms=%d",
+        request_id, user["email"], body.model,
+        input_tokens, cached_tokens, output_tokens, latency_ms,
     )
 
     return result
