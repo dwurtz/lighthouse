@@ -34,18 +34,34 @@ TRIAGE_SOURCES = {"imessage", "whatsapp", "email", "browser"}
 
 _TRIAGE_MODEL = "llama-3.1-8b-instant"
 
+# Safety cap on how many lines of index.md we pass to triage. Generous
+# — Groq 8B has 131K context, and the full wiki index today is only
+# ~266 lines, so this is mostly a defensive valve against pathological
+# wiki growth. Unlike vision's 50 (where attention dilution on a 0.5B
+# model is a real concern), 8B handles a long list of entities fine.
+# Triage is a classifier, not a writer, so it only needs name
+# recognition — and if it misses a name not in the top 150, the
+# recall-biased fallback still lets the signal through to integrate,
+# where BM25/vector retrieval can resolve it from the full wiki.
+_TRIAGE_INDEX_HEAD_LINES = 150
+
 
 def _load_index_md() -> str:
     """Read the current wiki index for triage grounding. Empty on miss.
 
     Delegates to ``wiki_catalog.render_index_for_prompt`` so the vision
     prompt and the triage prompt both pull from the same source of
-    truth — reflect's reordering (once Phase B lands) benefits both
-    consumers automatically. No rebuild here: the analysis cycle has
-    already called rebuild_index() upstream.
+    truth. Capped at ``_TRIAGE_INDEX_HEAD_LINES`` (150 lines) as a
+    defensive valve — the full file grows unboundedly and we don't
+    want triage latency silently creeping up as the wiki expands.
+    No rebuild here: the analysis cycle already called rebuild_index()
+    upstream.
     """
     from deja.wiki_catalog import render_index_for_prompt
-    return render_index_for_prompt(rebuild=False)
+    return render_index_for_prompt(
+        max_lines=_TRIAGE_INDEX_HEAD_LINES,
+        rebuild=False,
+    )
 
 
 def load_index_md() -> str:

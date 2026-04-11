@@ -141,6 +141,20 @@ _VSEARCH_CANDIDATES = 15
 # representative of the batch, not contain every signal verbatim.
 _MAX_QUERY_CHARS = 400
 
+# Head-lines cap on the index.md catalog injected into the integrate
+# prompt. Very generous — Flash-Lite has a 1M-token context window and
+# integrate runs every ~5 minutes, not user-facing, so budget is rarely
+# the problem. This cap is a defensive valve against pathological wiki
+# growth (~1000+ pages) where even Flash-Lite's attention might start
+# favoring the top of a long list. Integrate does NOT lose the ability
+# to reference dormant pages at high cap values: the "other pages
+# available on request" footer (built from _all_slugs, not from the
+# capped index text) lists every page that exists but wasn't retrieved,
+# so Flash-Lite still knows every slug by name and can reference them
+# in wiki_updates. This cap just limits how many get the rich one-line
+# description treatment in the main catalog section.
+_INTEGRATE_INDEX_HEAD_LINES = 300
+
 
 # Capitalized words or multi-word proper-noun phrases. Handles names
 # ("Tom Peffer"), places ("Palo Alto"), and brand fragments ("Blade",
@@ -527,7 +541,13 @@ def build_analysis_context(signal_items: list[dict]) -> str:
         return wiki_store.render_for_prompt()
 
     # Always include the index so the model sees the complete catalog.
-    index_text = render_index_for_prompt().strip() or "(index not yet built)"
+    # Capped at _INTEGRATE_INDEX_HEAD_LINES (see constant definition)
+    # as a defensive safety valve — the "other pages available" footer
+    # built below from _all_slugs() still exposes every page to Flash-Lite
+    # by slug, so pages past the cap are never blind spots.
+    index_text = render_index_for_prompt(
+        max_lines=_INTEGRATE_INDEX_HEAD_LINES,
+    ).strip() or "(index not yet built)"
 
     retrieved_keys = {(c, s) for c, s, _ in pages}
     remaining = [f"{c}/{s}" for c, s in all_pages if (c, s) not in retrieved_keys]
