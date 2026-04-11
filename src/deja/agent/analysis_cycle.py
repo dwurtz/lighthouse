@@ -17,6 +17,12 @@ from deja.config import DEJA_HOME
 
 log = logging.getLogger(__name__)
 
+# Defense in depth for the Swift-side screenshot defer fix: drop any
+# screenshot signal older than this when integrate reads unanalyzed
+# signals. Prevents reasoning about "current screen activity" based on
+# a 10-minute-old frame even if the Swift defer logic misbehaves.
+MAX_SCREENSHOT_AGE_SECONDS = 600  # 10 minutes
+
 # Module-level mutex + active-loop reference so user-initiated triggers
 # can fire run_analysis_cycle immediately without stomping the scheduler.
 # Set by AgentLoop.run() (in-process callers like the mic/command
@@ -159,6 +165,36 @@ async def run_analysis_cycle(loop_ref) -> None:
     signal_items, analysis_marker = await loop.run_in_executor(
         None, loop_ref.collector.get_unanalyzed_signals_structured
     )
+
+    # 1.0. Drop stale screenshot signals. Vision context is only
+    #      useful if it reflects the user's CURRENT screen — a 10
+    #      minute-old frame will mislead the integrator into reasoning
+    #      about "what the user is doing now" based on a stale view.
+    #      See MAX_SCREENSHOT_AGE_SECONDS at the top of this module.
+    if signal_items:
+        now_dt = datetime.now(timezone.utc)
+        filtered: list[dict] = []
+        for item in signal_items:
+            if item.get("source") != "screenshot":
+                filtered.append(item)
+                continue
+            ts_str = item.get("timestamp") or ""
+            try:
+                ts_dt = datetime.fromisoformat(ts_str)
+                if ts_dt.tzinfo is None:
+                    ts_dt = ts_dt.replace(tzinfo=timezone.utc)
+                age = (now_dt - ts_dt).total_seconds()
+            except Exception:
+                # Unparseable timestamp — keep the signal rather than
+                # silently dropping it; the integrator will surface any
+                # downstream failures.
+                filtered.append(item)
+                continue
+            if age > MAX_SCREENSHOT_AGE_SECONDS:
+                log.info("Dropped stale screenshot signal: %ds old", int(age))
+                continue
+            filtered.append(item)
+        signal_items = filtered
 
     if not signal_items:
         log.info("No recent signals for analysis")

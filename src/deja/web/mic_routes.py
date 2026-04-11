@@ -8,7 +8,6 @@ GET  /api/mic/status  — {recording, started_at}
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import json
 import logging
 import subprocess
@@ -20,7 +19,6 @@ from fastapi import APIRouter
 
 from deja.config import DEJA_HOME
 from deja.web.helpers import (
-    OBSERVATIONS_LOG,
     load_conversation,
     save_conversation,
 )
@@ -344,7 +342,9 @@ async def _mic_stop_inner(reason: str = "manual") -> dict:
 
     transcript = (transcript or "").strip()
 
-    # Filter known Whisper hallucinations from near-silent audio
+    # Filter known Whisper hallucinations from near-silent audio.
+    # Surface as a structured failure so the UI can show a "couldn't
+    # understand you — try again" toast instead of silently dropping.
     _HALLUCINATIONS = {
         "you", "thank you", "thanks", "thank you.", "thanks.",
         "thanks for watching", "thanks for watching.",
@@ -353,11 +353,31 @@ async def _mic_stop_inner(reason: str = "manual") -> dict:
         "you.", "the end", "the end.",
     }
     if transcript.lower().strip(".!? ") in _HALLUCINATIONS:
-        log.info("mic_stop: filtered Whisper hallucination: %r", transcript)
-        transcript = ""
+        raw = transcript
+        log.info("mic_stop: filtered Whisper hallucination: %r", raw)
+        # Activity log entry so the dropped transcription shows in feed
+        try:
+            from deja.activity_log import append_log_entry
+
+            kb = wav_size // 1024
+            append_log_entry(
+                "mic",
+                f"transcription dropped — Whisper hallucination: {raw!r} ({kb}KB audio)",
+            )
+        except Exception:
+            log.debug("activity_log append failed for dropped transcription", exc_info=True)
+        return {
+            "ok": False,
+            "recording": False,
+            "reason": "transcription_dropped",
+            "detail": "Couldn't understand audio — try speaking louder or closer to the mic.",
+            "raw_transcript": raw,
+            "wav_size_bytes": wav_size,
+        }
 
     if not transcript:
         return {
+            "ok": False,
             "recording": False,
             "reason": reason,
             "transcript": "",
@@ -373,12 +393,8 @@ async def _mic_stop_inner(reason: str = "manual") -> dict:
     user = load_user()
 
     ts = datetime.now(timezone.utc).isoformat()
-    id_key = (
-        "mic-"
-        + hashlib.md5(f"{ts}-{transcript[:200]}".encode()).hexdigest()[:16]
-    )
 
-    # 1. Append to conversation.json
+    # 1. Append to conversation.json (keeps the voice history visible)
     messages = load_conversation()
     messages.append(
         {
@@ -390,47 +406,112 @@ async def _mic_stop_inner(reason: str = "manual") -> dict:
     )
     save_conversation(messages)
 
-    # 2. Persist as a chat-equivalent observation
+    # 2. Route through the command classifier — every voice utterance
+    #    becomes a classifier call. The classifier decides if it's a
+    #    one-off action (calendar/email/task/notify), a goal/waiting-for
+    #    item, an automation rule, or pure "context" (in which case the
+    #    context dispatch appends to observations.jsonl + fires
+    #    integrate, preserving the old "voice → observation" behavior
+    #    for notes-style dictations). This is the ONE code path that
+    #    can turn "put a test on my calendar" into a calendar_create.
     try:
-        OBSERVATIONS_LOG.parent.mkdir(parents=True, exist_ok=True)
-        with open(OBSERVATIONS_LOG, "a") as f:
-            f.write(
-                json.dumps(
-                    {
-                        "source": "chat",
-                        "sender": "You",
-                        "text": f"[spoken] {transcript[:2000]}",
-                        "timestamp": ts,
-                        "id_key": id_key,
-                    }
-                )
-                + "\n"
-            )
+        from deja.web.command_routes import (
+            _classify,
+            _dispatch_action,
+            _dispatch_automation,
+            _dispatch_context,
+            _dispatch_goal,
+            CommandResponse,
+        )
     except Exception:
-        pass
+        log.exception("mic_stop: failed to import command_routes")
+        raise
 
-    # 2a. Fire-and-forget immediate integrate trigger so the voice
-    # dictation gets processed right away (cross-modal merge with any
-    # screenshots / calendar / email signals from the same minute).
     try:
-        from deja.agent.analysis_cycle import trigger_integrate_now
+        parsed, cost, latency_ms = await _classify(transcript)
+    except Exception as e:
+        log.exception("mic_stop: classifier failed")
+        return {
+            "ok": False,
+            "recording": False,
+            "reason": "classifier_failed",
+            "detail": f"Classifier failed: {e}",
+            "transcript": transcript,
+        }
 
-        asyncio.create_task(trigger_integrate_now(reason="voice_transcript"))
-    except Exception:
-        log.debug("mic: failed to schedule integrate trigger", exc_info=True)
+    cmd_type = parsed.get("type")
+    payload = parsed.get("payload") or {}
+    confirmation = parsed.get("confirmation", "") or ""
 
-    # 3. Human-readable log in the wiki
+    try:
+        if cmd_type == "action":
+            details = _dispatch_action(payload)
+        elif cmd_type == "goal":
+            details = _dispatch_goal(payload)
+        elif cmd_type == "automation":
+            details = _dispatch_automation(payload)
+        elif cmd_type == "context":
+            details = _dispatch_context(payload)
+        else:
+            return {
+                "ok": False,
+                "recording": False,
+                "reason": "classifier_unknown_type",
+                "detail": f"Unknown command type: {cmd_type!r}",
+                "transcript": transcript,
+            }
+    except Exception as e:
+        log.exception("mic_stop: dispatch failed for type=%s", cmd_type)
+        return {
+            "ok": False,
+            "recording": False,
+            "reason": "dispatch_failed",
+            "detail": f"Dispatch failed: {e}",
+            "transcript": transcript,
+        }
+
+    # Activity log — mirror command_routes behavior for text commands
     try:
         from deja.activity_log import append_log_entry
 
-        preview = " ".join(transcript.split())[:120]
-        append_log_entry("chat", f"{user.first_name} (spoken): {preview}")
+        append_log_entry(
+            "command",
+            f"{cmd_type} (spoken): {confirmation or transcript[:120]}",
+        )
     except Exception:
-        pass
+        log.debug("activity_log append failed for voice command", exc_info=True)
 
+    # Context-type commands fire an immediate integrate trigger so the
+    # new signal gets processed against any other unprocessed signals.
+    # (Non-context types already wrote their own state — tasks, actions
+    # execute synchronously — and don't need an integrate cycle.)
+    if cmd_type == "context":
+        try:
+            from deja.agent.analysis_cycle import trigger_integrate_now
+
+            asyncio.create_task(
+                trigger_integrate_now(reason="voice_transcript_context")
+            )
+        except Exception:
+            log.debug(
+                "immediate integrate trigger failed for voice context",
+                exc_info=True,
+            )
+
+    response = CommandResponse(
+        ok=True,
+        type=cmd_type,
+        confirmation=confirmation,
+        details=details,
+        cost_usd=round(cost, 6),
+        latency_ms=latency_ms,
+    )
+
+    # Return the CommandResponse fields PLUS the transcript + recording
+    # metadata the existing UI code expects.
     return {
+        **response.model_dump(),
         "recording": False,
-        "reason": reason,
         "started_at": started_at,
         "transcript": transcript,
     }

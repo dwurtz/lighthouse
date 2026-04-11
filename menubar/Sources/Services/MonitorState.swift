@@ -76,10 +76,16 @@ class MonitorState: ObservableObject {
     private var statsTimer: Timer?
     private var screenshotTimer: Timer?
     private let keystrokeMonitor = KeystrokeMonitor()
-    private var lastCaptureTime: TimeInterval = 0
+    /// Timestamp of the last SUCCESSFUL capture. Updated only when a
+    /// capture actually goes through — NOT on deferred ticks. This is
+    /// what the max-deferral safety valve compares against, so the
+    /// counter is monotonic: brief idle gaps can't reset it.
+    private var lastSuccessfulCaptureTime: TimeInterval = 0
     /// Defer captures while the user is typing — mid-sentence frames confuse vision.
     private let typingIdleThreshold: TimeInterval = 3.5
-    /// Hard cap: if user types nonstop, capture anyway after this much time.
+    /// Hard cap: if it's been this long since the last successful capture,
+    /// force one even if the user is still typing. Prevents vision staleness
+    /// during long coding sessions with brief natural pauses.
     private let maxCaptureDeferral: TimeInterval = 60.0
     private var dbReaderTimer: Timer?
     // MARK: - Extracted services
@@ -334,21 +340,32 @@ class MonitorState: ObservableObject {
 
     /// Capture a screenshot, but defer if the user is currently typing.
     /// Voice transcription bypasses the gate via captureScreenshot(force: true).
+    ///
+    /// Defer rule is monotonic against the last SUCCESSFUL capture time,
+    /// not a transient deferral counter — brief idle pauses during a long
+    /// typing session must not reset the safety valve.
     func captureScreenshot(force: Bool = false) {
         let now = Date().timeIntervalSince1970
 
         if !force {
             let idle = keystrokeMonitor.idleSeconds
-            let timeSinceLastCapture = lastCaptureTime > 0 ? now - lastCaptureTime : .infinity
+            let secondsSinceLastCapture = lastSuccessfulCaptureTime > 0
+                ? now - lastSuccessfulCaptureTime
+                : .infinity
 
-            // Defer if user is mid-typing AND we haven't been deferring too long
-            if idle < typingIdleThreshold && timeSinceLastCapture < maxCaptureDeferral {
-                NSLog("deja: screenshot deferred (typing — idle=%.1fs, deferred=%.1fs)", idle, timeSinceLastCapture)
+            // Defer if user is mid-typing AND we haven't gone too long
+            // without a successful capture. After maxCaptureDeferral
+            // seconds of no capture we force one regardless of typing.
+            if idle < typingIdleThreshold && secondsSinceLastCapture < maxCaptureDeferral {
+                NSLog(
+                    "deja: screenshot deferred (typing — idle=%.1fs, since_last_capture=%.1fs)",
+                    idle, secondsSinceLastCapture
+                )
                 return
             }
         }
 
-        lastCaptureTime = now
+        lastSuccessfulCaptureTime = now
         DispatchQueue.global(qos: .utility).async { [weak self] in
             self?.processManager.captureScreenshot()
         }
@@ -674,22 +691,68 @@ class MonitorState: ObservableObject {
         voicePillStatus = "Transcribing..."
         voicePillTranscript = ""
 
-        // Stop recording and get transcript. The backend writes the
-        // transcript to observations.jsonl AND fires an immediate
-        // integrate trigger, so we don't need to POST anywhere from
-        // here — the monitor loop picks it up.
-        localAPICall("/api/mic/stop", method: "POST", timeoutInterval: 30) { [weak self] data, error in
+        // Stop recording and run the transcript through the command
+        // classifier (backend routes mic transcripts through the same
+        // /api/command dispatch path, so voice can emit goal_actions —
+        // calendar/email/task — not just observations).
+        localAPICall("/api/mic/stop", method: "POST", timeoutInterval: 60) { [weak self] data, error in
             guard let self = self else { return }
+
+            if let error = error {
+                DispatchQueue.main.async {
+                    self.voicePillProcessing = false
+                    self.voicePillTranscript = ""
+                    self.commandToast = Toast(
+                        style: .error,
+                        text: error.localizedDescription
+                    )
+                    self.scheduleToastDismiss()
+                }
+                return
+            }
+
             guard let data = data,
-                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let transcript = obj["transcript"] as? String,
-                  !transcript.isEmpty else {
+                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                DispatchQueue.main.async {
+                    self.voicePillProcessing = false
+                    self.voicePillTranscript = ""
+                    self.commandToast = Toast(
+                        style: .error,
+                        text: "Empty response from backend"
+                    )
+                    self.scheduleToastDismiss()
+                }
+                return
+            }
+
+            // Structured failure: transcription dropped as hallucination,
+            // classifier blew up, dispatch blew up, etc. Surface as a red
+            // toast in the same place as submitCommand() errors.
+            if let ok = obj["ok"] as? Bool, ok == false {
+                let detail = (obj["detail"] as? String)
+                    ?? (obj["error"] as? String)
+                    ?? "Voice command failed."
+                DispatchQueue.main.async {
+                    self.voicePillProcessing = false
+                    self.voicePillTranscript = ""
+                    self.commandToast = Toast(style: .error, text: detail)
+                    self.scheduleToastDismiss()
+                }
+                return
+            }
+
+            let transcript = (obj["transcript"] as? String) ?? ""
+            guard !transcript.isEmpty else {
                 DispatchQueue.main.async {
                     self.voicePillProcessing = false
                     self.voicePillTranscript = ""
                 }
                 return
             }
+
+            let confirmation = (obj["confirmation"] as? String) ?? ""
+            let cmdType = (obj["type"] as? String) ?? ""
+
             DispatchQueue.main.async {
                 self.voicePillProcessing = false
                 self.voicePillTranscript = transcript
@@ -699,14 +762,25 @@ class MonitorState: ObservableObject {
                 // cycle will correlate the voice context with it).
                 self.captureScreenshot(force: true)
 
-                // Show the transcript briefly, then clear. Voice dictation
-                // is just a context signal now — no chat round-trip.
+                // Show the transcript briefly, then clear.
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
                     self.voicePillTranscript = ""
                 }
 
-                // Refresh the activity feed so the transcript's downstream
-                // effect (dedup / integrate write) shows up quickly.
+                // Non-context commands (action/goal/automation) emit a
+                // green toast with the classifier's confirmation so the
+                // user sees "Added to calendar." etc. Context-type voice
+                // notes stay quiet — they're just observations.
+                if !confirmation.isEmpty && cmdType != "context" {
+                    self.commandToast = Toast(
+                        style: .success,
+                        text: confirmation
+                    )
+                    self.scheduleToastDismiss()
+                }
+
+                // Refresh the activity feed so downstream effects
+                // (command row, integrate writes) show up quickly.
                 self.fetchActivity()
             }
         }
