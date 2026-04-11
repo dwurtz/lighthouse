@@ -53,6 +53,63 @@ async def _transcribe_groq(wav_path: Path) -> str:
     log.info("transcribe: %d bytes → %r", len(audio_bytes), transcript[:200])
     return transcript
 
+
+# Prompt adapted from voquill/voquill scripts/prompts/polished.txt (AGPLv3).
+# The load-bearing constraint is "Without changing word-choice" — polish is
+# a grammar/formatting pass, not a paraphrase.
+_POLISH_PROMPT = """Without changing word-choice, clean up the transcript.
+Fix grammar, punctuation, and formatting.
+Remove filler words, false starts, and repetitions. Keep the original meaning intact.
+Break the response into paragraphs when appropriate.
+Format spoken lists into bulleted or numbered lists.
+Convert spoken symbols into their actual character equivalents (e.g. "hashtag" to "#", emojis, `foo.cpp`, etc).
+When the speaker corrects themselves, only keep the corrected version.
+Convert spoken dates, times, and numbers into their proper numerical forms.
+Do NOT use em-dash symbols (—) in your response.
+Respond with JSON only: { "result": "<cleaned transcript>" }
+
+Transcript:
+\"\"\"
+%s
+\"\"\"
+"""
+
+
+async def _polish_transcript(raw: str) -> str:
+    """Clean up a raw voice transcript via Gemini Flash-Lite.
+
+    Fixes grammar, punctuation, fillers, self-corrections, and spoken
+    symbols without changing word choice. Falls back to the raw
+    transcript on any error so we never lose content.
+    """
+    if not raw or len(raw.strip()) < 5:
+        return raw
+
+    try:
+        from deja.llm_client import GeminiClient
+        from deja.config import INTEGRATE_MODEL
+
+        client = GeminiClient()
+        response = await client._generate(
+            model=INTEGRATE_MODEL,
+            contents=_POLISH_PROMPT % raw,
+            config_dict={
+                "response_mime_type": "application/json",
+                "max_output_tokens": 2048,
+                "temperature": 0.1,
+            },
+        )
+        data = json.loads(response)
+        cleaned = (data.get("result") or "").strip()
+        if cleaned:
+            log.info("polish: %d → %d chars", len(raw), len(cleaned))
+            return cleaned
+        log.warning("polish: empty result — keeping raw")
+    except Exception:
+        log.exception("polish: failed — keeping raw transcript")
+
+    return raw
+
 AUDIO_DIR = DEJA_HOME / "audio"
 
 
@@ -285,6 +342,10 @@ async def _mic_stop_inner(reason: str = "manual") -> dict:
             "transcript": "",
             "error": transcribe_error or "no speech detected",
         }
+
+    # Polish pass — fix grammar, remove fillers, convert spoken symbols
+    # without changing word choice. Flash-Lite via the proxy, ~1s latency.
+    transcript = await _polish_transcript(transcript)
 
     from deja.identity import load_user
 
