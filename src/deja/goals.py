@@ -352,6 +352,33 @@ def _op_add_reminder(
     return True
 
 
+def _op_resolve_reminder(section: list[str], needle: str) -> bool:
+    """Remove a reminder bullet matching ``needle``.
+
+    Reminder bullets use the ``- [YYYY-MM-DD] question → [[slug]]``
+    format — they don't have checkbox markers, so ``_op_complete``'s
+    ``- [ ]`` → ``- [x]`` flip would no-op. Resolving a reminder
+    means the agent answered the question; the line goes away and
+    the audit log carries the resolution event.
+    """
+    needle = (needle or "").strip().lower()
+    if not needle:
+        return False
+    for i, line in enumerate(section):
+        if not _REMINDER_DATE_RE.match(line):
+            continue
+        if needle not in line.lower():
+            continue
+        section.pop(i)
+        audit.record(
+            "reminder_resolve",
+            target="goals/reminders",
+            reason=line.strip()[:200],
+        )
+        return True
+    return False
+
+
 def _op_archive_from(
     src_section: list[str],
     archive_section: list[str],
@@ -487,12 +514,7 @@ def apply_tasks_update(update: dict) -> int:
         if _op_add_reminder(reminders, rem, today):
             changes += 1
     for needle in update.get("resolve_reminders") or []:
-        if _op_complete(
-            reminders,
-            needle,
-            action="reminder_resolve",
-            target="goals/reminders",
-        ):
+        if _op_resolve_reminder(reminders, needle):
             changes += 1
     for item in update.get("archive_reminders") or []:
         if isinstance(item, str):

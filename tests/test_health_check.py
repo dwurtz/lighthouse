@@ -54,11 +54,22 @@ def test_check_wiki_missing(isolated_home):
 
 def test_check_wiki_complete(isolated_home):
     _, wiki = isolated_home
-    (wiki / "CLAUDE.md").write_text("schema")
     (wiki / "index.md").write_text("index")
     prompts = wiki / "prompts"
     prompts.mkdir()
-    for name in ("integrate.md", "chat.md", "dedup_confirm.md", "describe_screen.md", "prefilter.md"):
+    # CLAUDE.md was removed; its rules live inline in integrate.md/onboard.md
+    # now. The required prompt list must match health_check.py's REQUIRED
+    # tuple exactly (any drift is a test/code mismatch worth catching).
+    for name in (
+        "integrate.md",
+        "dedup_confirm.md",
+        "contradict.md",
+        "describe_screen.md",
+        "prefilter.md",
+        "command.md",
+        "onboard.md",
+        "query.md",
+    ):
         (prompts / name).write_text("prompt")
     (wiki / ".git").mkdir()
 
@@ -68,12 +79,19 @@ def test_check_wiki_complete(isolated_home):
 
 def test_check_wiki_missing_prompt(isolated_home):
     _, wiki = isolated_home
-    (wiki / "CLAUDE.md").write_text("schema")
     (wiki / "index.md").write_text("index")
     prompts = wiki / "prompts"
     prompts.mkdir()
     # Deliberately missing prefilter.md
-    for name in ("integrate.md", "chat.md", "dedup_confirm.md", "describe_screen.md"):
+    for name in (
+        "integrate.md",
+        "dedup_confirm.md",
+        "contradict.md",
+        "describe_screen.md",
+        "command.md",
+        "onboard.md",
+        "query.md",
+    ):
         (prompts / name).write_text("prompt")
     (wiki / ".git").mkdir()
 

@@ -85,12 +85,7 @@ def test_get_recent_signals_from_log_filters_by_time(isolated_home):
     assert "old msg" not in text
 
 
-def test_should_screenshot_detects_changes(isolated_home):
-    c = Observer()
-    assert c.should_screenshot("Chrome", "Google") is True
-    # Same app+title → no change
-    assert c.should_screenshot("Chrome", "Google") is False
-    # Title change → screenshot
-    assert c.should_screenshot("Chrome", "Gmail") is True
-    # App change → screenshot
-    assert c.should_screenshot("Slack", "Gmail") is True
+# test_should_screenshot_detects_changes removed: Observer.should_screenshot
+# was refactored out when screenshot dedup moved into vision_local.py's image
+# hash comparison. The visual-change detection is now tested via
+# vision_fixtures which compares real image hashes instead of app+title.

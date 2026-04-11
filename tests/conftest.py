@@ -45,8 +45,24 @@ def isolated_home(request, monkeypatch, tmp_path):
     import deja.wiki as wiki_mod
     monkeypatch.setattr(wiki_mod, "WIKI_DIR", wiki)
 
-    import deja.activity_log as wiki_log
-    monkeypatch.setattr(wiki_log, "LOG_PATH", wiki / "log.md")
+    import deja.wiki_catalog as catalog_mod
+    monkeypatch.setattr(catalog_mod, "WIKI_DIR", wiki)
+    monkeypatch.setattr(catalog_mod, "INDEX_PATH", wiki / "index.md")
+
+    # goals.py captures GOALS_PATH at import time; briefing.py imports
+    # GOALS_PATH directly from goals.py so its name binding is different
+    # from goals.GOALS_PATH. Patch both so every test's temp goals.md
+    # actually lands where the code will read it.
+    import deja.goals as goals_mod
+    monkeypatch.setattr(goals_mod, "GOALS_PATH", wiki / "goals.md")
+    import deja.briefing as briefing_mod
+    monkeypatch.setattr(briefing_mod, "GOALS_PATH", wiki / "goals.md")
+
+    # audit.jsonl lives in DEJA_HOME now — replaces the former
+    # ``activity_log`` module that wrote to ~/Deja/log.md.
+    import deja.audit as audit_mod
+    monkeypatch.setattr(audit_mod, "AUDIT_LOG", home / "audit.jsonl")
+    audit_mod.clear_context()
 
     # Modules that did `from deja.config import DEJA_HOME` captured
     # the original path at import time — patch their local bindings too.

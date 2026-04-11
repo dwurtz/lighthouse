@@ -66,12 +66,14 @@ def test_rebuild_emits_real_summary(wiki_mod_with_patched_paths):
     assert "- [[palo-alto]] — Moving the family" in text
 
 
-def test_rebuild_respects_max_entries_cap(wiki_mod_with_patched_paths, monkeypatch):
+def test_rebuild_sorts_by_recency(wiki_mod_with_patched_paths):
     wi, wiki = wiki_mod_with_patched_paths
-    monkeypatch.setattr(wi, "_MAX_ENTRIES", 5)
 
-    # Create 10 pages with staggered mtimes so we can verify the cap keeps
-    # the freshest ones.
+    # The catalog no longer caps at a fixed _MAX_ENTRIES — the full file
+    # is comprehensive and each consumer truncates at format time via
+    # ``render_index_for_prompt(max_lines=N)``. What we DO care about is
+    # that rebuild_index sorts by recency so the fresh entries land at
+    # the top of the file where every consumer sees them first.
     for i in range(10):
         p = _write_page(
             wiki, "projects", f"proj-{i:02d}", f"Project {i}",
@@ -80,14 +82,15 @@ def test_rebuild_respects_max_entries_cap(wiki_mod_with_patched_paths, monkeypat
         os.utime(p, (1_000_000 + i, 1_000_000 + i))
 
     count = wi.rebuild_index()
-    assert count == 5
+    assert count == 10
 
     text = (wiki / "index.md").read_text()
-    # Freshest 5 (proj-05..proj-09) should be present; older should be gone
-    assert "proj-09" in text
-    assert "proj-05" in text
-    assert "proj-04" not in text
-    assert "proj-00" not in text
+    # Every page should be present — no cap
+    for i in range(10):
+        assert f"proj-{i:02d}" in text
+    # The freshest entry (proj-09, highest mtime) must appear before the
+    # oldest (proj-00). Recency-sorted means index[proj-09] < index[proj-00].
+    assert text.index("proj-09") < text.index("proj-00")
 
 
 def test_rebuild_empty_wiki_writes_placeholder(wiki_mod_with_patched_paths):

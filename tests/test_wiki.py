@@ -88,13 +88,17 @@ def test_apply_updates_delete_action_routes(isolated_home, monkeypatch):
     wiki_mod.write_page("projects", "terafab", "# Terafab\n\nContent.")
     assert (wiki_mod.WIKI_DIR / "projects" / "terafab.md").exists()
 
-    logged: list[tuple[str, str]] = []
-    import deja.activity_log as activity_log
-    monkeypatch.setattr(
-        activity_log,
-        "append_log_entry",
-        lambda kind, msg: logged.append((kind, msg)),
-    )
+    # activity_log was replaced by audit.jsonl — capture audit.record
+    # calls directly rather than patching a module that no longer exists.
+    logged: list[tuple[str, str, str]] = []
+    import deja.audit as audit_mod
+    real_record = audit_mod.record
+
+    def spy(action, target, reason, **kw):
+        logged.append((action, target, reason))
+        real_record(action, target, reason, **kw)
+
+    monkeypatch.setattr(audit_mod, "record", spy)
 
     applied = wiki_mod.apply_updates([
         {
@@ -106,9 +110,10 @@ def test_apply_updates_delete_action_routes(isolated_home, monkeypatch):
     ])
     assert applied == 1
     assert not (wiki_mod.WIKI_DIR / "projects" / "terafab.md").exists()
-    # Loud activity log entry recorded under integrate.
-    assert logged and logged[0][0] == "integrate"
-    assert "terafab" in logged[0][1] and "fleeting" in logged[0][1]
+    # Audit entry recorded under the wiki_delete action.
+    assert logged and logged[0][0] == "wiki_delete"
+    assert "terafab" in logged[0][1]
+    assert "fleeting" in logged[0][2]
 
 
 def test_apply_updates_delete_nonexistent_is_noop(isolated_home, monkeypatch):
