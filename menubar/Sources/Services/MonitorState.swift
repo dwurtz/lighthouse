@@ -19,6 +19,7 @@ class MonitorState: ObservableObject {
 
     // Command center state — replaces chat
     @Published var activityEntries: [ActivityEntry] = []
+    @Published var briefing: Briefing = .empty
     @Published var commandInput: String = ""
     @Published var commandPending: Bool = false
     @Published var commandToast: Toast? = nil
@@ -881,12 +882,27 @@ class MonitorState: ObservableObject {
         }
     }
 
-    /// Start polling the activity feed every 10s while the popover is open.
+    /// Fetch the right-now briefing (due reminders, overdue tasks,
+    /// stale waiting-fors). Pure JSON, no LLM — safe to poll on the
+    /// same cadence as the activity feed.
+    func fetchBriefing() {
+        localAPICall("/api/briefing", method: "GET", timeoutInterval: 5) { [weak self] data, _ in
+            guard let data = data,
+                  let decoded = try? JSONDecoder().decode(Briefing.self, from: data) else { return }
+            DispatchQueue.main.async {
+                self?.briefing = decoded
+            }
+        }
+    }
+
+    /// Start polling the activity feed + briefing every 10s while the popover is open.
     func startActivityPolling() {
         activityTimer?.invalidate()
         fetchActivity()
+        fetchBriefing()
         activityTimer = Timer.scheduledTimer(withTimeInterval: 10.0, repeats: true) { [weak self] _ in
             self?.fetchActivity()
+            self?.fetchBriefing()
         }
     }
 

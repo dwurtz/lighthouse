@@ -109,6 +109,7 @@ def _check_wiki() -> list[CheckResult]:
             "prefilter.md",
             "command.md",
             "onboard.md",
+            "query.md",
         )
         missing = [n for n in required if not (prompts_dir / n).exists()]
         if missing:

@@ -4,6 +4,62 @@ import CoreMedia
 
 // MARK: - Data Models
 
+/// Compact right-now briefing returned by ``GET /api/briefing``.
+/// Pure derivation from goals.md — no LLM, no retrieval. Rendered by
+/// the notch ``BriefingView`` at the top of the command center.
+struct Briefing: Codable {
+    struct Counts: Codable {
+        let tasks_open: Int
+        let waiting_open: Int
+        let reminders_total: Int
+        let reminders_due: Int
+    }
+    struct DueReminder: Codable, Identifiable {
+        var id: String { date + question }
+        let date: String
+        let question: String
+        let topics: [String]
+    }
+    struct OverdueTask: Codable, Identifiable {
+        var id: String { text }
+        let text: String
+        let deadline: String
+        let days_overdue: Int
+    }
+    struct UpcomingTask: Codable, Identifiable {
+        var id: String { text }
+        let text: String
+        let deadline: String
+        let days_until: Int
+    }
+    struct StaleWaiting: Codable, Identifiable {
+        var id: String { text }
+        let text: String
+        let added: String
+        let days_stale: Int
+    }
+    let counts: Counts
+    let due_reminders: [DueReminder]
+    let overdue_tasks: [OverdueTask]
+    let upcoming_tasks: [UpcomingTask]
+    let stale_waiting: [StaleWaiting]
+
+    var hasAnything: Bool {
+        !due_reminders.isEmpty
+            || !overdue_tasks.isEmpty
+            || !upcoming_tasks.isEmpty
+            || !stale_waiting.isEmpty
+    }
+
+    static let empty = Briefing(
+        counts: Counts(tasks_open: 0, waiting_open: 0, reminders_total: 0, reminders_due: 0),
+        due_reminders: [],
+        overdue_tasks: [],
+        upcoming_tasks: [],
+        stale_waiting: []
+    )
+}
+
 /// One row in the notch Activity feed — returned by the backend's
 /// ``GET /api/activity`` endpoint, which reads ``~/.deja/audit.jsonl``
 /// (the single source of truth for agent mutations).

@@ -236,6 +236,100 @@ def _dispatch_automation(payload: dict) -> dict:
     return {"automation": text}
 
 
+async def _dispatch_query(payload: dict) -> dict:
+    """Answer a user question by synthesizing across wiki + goals + activity.
+
+    The command classifier tags a question as ``query`` with a ``topic``
+    hint. We assemble a bundle of (a) wiki context for that topic via
+    the same retrieval used by MCP get_context, (b) the goals.md slice
+    touching the topic, and (c) the last ~hour of observations. Then
+    Flash-Lite turns it into a short direct answer following the
+    ``query.md`` prompt.
+
+    Returns ``{"answer": "...", "topic": "..."}`` — the Swift chat view
+    renders ``answer`` as markdown directly.
+    """
+    from deja import audit
+    from deja.llm_client import GeminiClient
+    from deja.prompts import load as load_prompt
+    from deja.identity import load_user
+
+    question = (payload.get("question") or "").strip()
+    topic = (payload.get("topic") or "").strip() or question
+
+    if not question:
+        raise HTTPException(400, "Query payload missing question")
+
+    # Assemble the same three-part bundle MCP get_context returns, but
+    # without the user profile header (we pass that separately in the
+    # prompt) and with a shorter observation window.
+    try:
+        from deja.mcp_server import _goals_for_topic, _qmd_query
+    except Exception:
+        log.exception("query: failed to import mcp helpers")
+        raise HTTPException(500, "Query synthesis unavailable") from None
+
+    parts: list[str] = []
+
+    if topic and topic != "*":
+        qmd_text = _qmd_query(topic, collection="Deja", limit=6)
+        if qmd_text:
+            parts.append(f"## Wiki pages relevant to \"{topic}\"\n\n{qmd_text}")
+
+    goals_slice = _goals_for_topic(topic if topic != "*" else question)
+    if goals_slice:
+        parts.append(f"## Open commitments\n\n{goals_slice}")
+    else:
+        # Global query ("what's on my plate"): include the full briefing.
+        from deja.briefing import build_briefing
+        brief = build_briefing()
+        if any(brief["counts"].values()):
+            import json as _json
+            parts.append(
+                "## Full right-now briefing (no specific topic)\n\n"
+                + "```json\n"
+                + _json.dumps(brief, indent=2)
+                + "\n```"
+            )
+
+    bundle = "\n\n---\n\n".join(parts) if parts else "(no relevant context found)"
+
+    user = load_user()
+    prompt = load_prompt("query").format(
+        user_first_name=user.first_name or user.name or "the user",
+        user_profile=(user.profile_md or "").strip() or "(no profile yet)",
+        question=question,
+        bundle=bundle,
+    )
+
+    client = GeminiClient()
+    try:
+        answer = await client._generate(
+            model="gemini-2.5-flash-lite",
+            contents=prompt,
+            config_dict={
+                "max_output_tokens": 2048,
+                "temperature": 0.3,
+            },
+        )
+    except Exception as e:
+        log.exception("query: Flash-Lite call failed")
+        raise HTTPException(500, f"Synthesis failed: {e}") from e
+
+    answer = (answer or "").strip()
+    if not answer:
+        answer = "(no answer returned)"
+
+    audit.record(
+        "user_command",
+        target=f"query/{topic}"[:120],
+        reason=question[:200],
+        trigger={"kind": "user_cmd", "detail": "query"},
+    )
+
+    return {"answer": answer, "topic": topic, "bundle_chars": len(bundle)}
+
+
 def _dispatch_context(payload: dict) -> dict:
     """Append a user_note observation to observations.jsonl."""
     obs_path = DEJA_HOME / "observations.jsonl"
@@ -308,6 +402,11 @@ async def handle_command(body: CommandRequest) -> CommandResponse:
         details = _dispatch_automation(payload)
     elif cmd_type == "context":
         details = _dispatch_context(payload)
+    elif cmd_type == "query":
+        details = await _dispatch_query(payload)
+        # Overwrite the classifier's placeholder confirmation with the
+        # synthesized answer so the chat surface shows the actual reply.
+        confirmation = details.get("answer", confirmation)
     else:
         raise HTTPException(400, f"Unknown command type: {cmd_type!r}")
 

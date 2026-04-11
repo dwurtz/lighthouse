@@ -79,6 +79,18 @@ def get_status() -> dict:
     }
 
 
+@router.get("/api/briefing")
+def get_briefing() -> dict:
+    """Return the 'right now' briefing for the notch panel.
+
+    Deterministic — no LLM, no retrieval. Pure derivation from goals.md
+    (tasks with deadlines, stale waiting-fors, due reminders) so the
+    panel can render in milliseconds and refresh on a 30s poll.
+    """
+    from deja.briefing import build_briefing
+    return build_briefing()
+
+
 @router.get("/api/activity")
 def get_activity(limit: int = 50) -> dict:
     """Return the most recent audit entries for the notch Activity tab.

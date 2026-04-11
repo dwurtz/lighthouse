@@ -287,6 +287,45 @@ def create_server() -> Server:
 _WIKILINK_RE = re.compile(r"\[\[([^\]\n|]+?)(?:\|[^\]\n]*)?\]\]")
 
 
+def _goals_for_topic(topic: str) -> str:
+    """Return the slice of goals.md whose lines mention ``topic``.
+
+    Walks Tasks, Waiting for, and Reminders sections and keeps any
+    bullet whose text (case-insensitive) contains the topic or any
+    topic word. Returns a markdown fragment grouped by section, or an
+    empty string if nothing matches. Pure file read — no LLM, no
+    retrieval.
+    """
+    from deja.goals import GOALS_PATH, _parse_sections
+    if not GOALS_PATH.exists():
+        return ""
+    try:
+        text = GOALS_PATH.read_text(encoding="utf-8")
+    except OSError:
+        return ""
+
+    topic_lower = topic.lower().strip()
+    if not topic_lower:
+        return ""
+    topic_words = [w for w in re.split(r"\s+", topic_lower) if len(w) >= 3]
+
+    _, sections = _parse_sections(text)
+    out_parts: list[str] = []
+    for section_name in ("Tasks", "Waiting for", "Reminders"):
+        lines = sections.get(section_name, [])
+        hits: list[str] = []
+        for line in lines:
+            stripped = line.lstrip()
+            if not stripped.startswith("- "):
+                continue
+            low = line.lower()
+            if topic_lower in low or any(w in low for w in topic_words):
+                hits.append(line.rstrip())
+        if hits:
+            out_parts.append(f"### {section_name}\n" + "\n".join(hits))
+    return "\n\n".join(out_parts)
+
+
 def _qmd_query(topic: str, collection: str | None = None, limit: int = 5) -> str:
     """Run a QMD hybrid query (BM25 + vector + HyDE reranking).
 
@@ -373,6 +412,16 @@ def _get_context(topic: str) -> str:
                 f"## Wiki pages matching \"{topic}\"\n\n"
                 f"(no pages found — the user may not have a wiki entry for this topic yet)"
             )
+
+    # --- Open commitments touching this topic from goals.md ---
+    try:
+        goals_slice = _goals_for_topic(topic)
+        if goals_slice:
+            sections.append(
+                f"## Open commitments touching \"{topic}\"\n\n{goals_slice}"
+            )
+    except Exception:
+        log.debug("goals slice failed", exc_info=True)
 
     # --- Recent raw observations (last 60 min — real-time layer) ---
     if OBSERVATIONS_LOG.exists():

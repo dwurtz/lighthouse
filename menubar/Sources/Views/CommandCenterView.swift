@@ -23,6 +23,8 @@ struct CommandCenterView: View {
 
             Divider().background(Color.white.opacity(0.05))
 
+            BriefingView(monitor: monitor)
+
             CommandActivityFeed(monitor: monitor)
 
             CommandInputBar(monitor: monitor)
