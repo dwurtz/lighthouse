@@ -138,23 +138,29 @@ def _collect_category(category: str) -> list[tuple[str, str, str, float]]:
 _HEADER = (
     "# Wiki Index\n"
     "\n"
-    "*Auto-generated catalog of every page. The LLM reads this first to "
-    "decide what's relevant, then drills into specific pages. Do not edit "
-    "by hand — rebuilt on every wiki change.*\n"
+    "*Auto-generated catalog of every page, ordered by most-recently-"
+    "touched first. LLM consumers (vision prompt, triage prefilter, "
+    "integrate retrieval) read this top-down and get attention-weighted "
+    "relevance for free. Do not edit by hand — rebuilt on every wiki "
+    "change. Browse by category in the ``people/`` and ``projects/`` "
+    "folders if you want structure.*\n"
 )
-
-_CATEGORY_TITLES = {
-    "people": "People",
-    "projects": "Projects",
-}
 
 
 def rebuild_index() -> int:
-    """Scan every wiki page and rewrite index.md.
+    """Scan every wiki page and rewrite index.md as a flat recency list.
 
-    Walks `WIKI_DIR/{people,projects}/*.md`, extracts the title (first H1
-    line) and a one-line summary (first non-heading sentence, truncated).
-    Writes a categorized index to `index.md` at the wiki root.
+    Walks ``WIKI_DIR/{people,projects}/*.md``, extracts the title (first
+    H1 line) and a one-line summary (first non-heading sentence), and
+    writes a single flat list to ``index.md`` sorted by mtime descending
+    with slug as an alphabetical tiebreak.
+
+    There are no ``## People`` / ``## Projects`` sections. The power
+    users of this file are LLMs (vision prompt, triage prefilter,
+    integrate retrieval) and none of them parse the category headers —
+    they all want the hottest entries at the top regardless of type.
+    Humans who want to browse by category can use the ``people/`` and
+    ``projects/`` folders directly in Obsidian.
 
     Returns the number of pages indexed. Swallows errors and logs them —
     never raises. Safe to call on every wiki change.
@@ -164,49 +170,37 @@ def rebuild_index() -> int:
             logger.warning("wiki_index: wiki dir does not exist: %s", WIKI_DIR)
             return 0
 
-        per_category: dict[str, list[tuple[str, str, str, float]]] = {}
-        total = 0
-        for category in CATEGORIES:
-            entries = _collect_category(category)
-            per_category[category] = entries
-            total += len(entries)
+        # Flat collection across all categories. We still iterate
+        # CATEGORIES for the directory walk (that's where _collect_category
+        # pulls from), but the per-category grouping ends here — after
+        # this list comp, `entries` is one flat (slug, title, summary,
+        # mtime) list ready to sort globally.
+        entries: list[tuple[str, str, str, float]] = [
+            row
+            for category in CATEGORIES
+            for row in _collect_category(category)
+        ]
+        total = len(entries)
 
-        # Apply the hard cap across categories. When we're over budget, keep
+        # Apply the hard cap across categories. When over budget, keep
         # the most-recently-touched pages — those are the ones David is
-        # actively thinking about. Everything else still exists on disk and
-        # is retrievable via QMD, it's just not in the at-a-glance catalog.
+        # actively thinking about. Everything else still exists on disk
+        # and is retrievable via QMD, it's just not in the at-a-glance
+        # catalog.
         if total > _MAX_ENTRIES:
-            flat = [
-                (category, slug, title, summary, mtime)
-                for category in CATEGORIES
-                for (slug, title, summary, mtime) in per_category[category]
-            ]
-            flat.sort(key=lambda t: t[4], reverse=True)
-            kept = flat[:_MAX_ENTRIES]
-            dropped = total - len(kept)
+            entries.sort(key=lambda t: t[3], reverse=True)
+            dropped = total - _MAX_ENTRIES
+            entries = entries[:_MAX_ENTRIES]
             logger.info(
                 "wiki_index: %d pages exceeds cap %d — keeping %d most-recent, dropping %d from index",
-                total, _MAX_ENTRIES, len(kept), dropped,
+                total, _MAX_ENTRIES, len(entries), dropped,
             )
-            per_category = {cat: [] for cat in CATEGORIES}
-            for category, slug, title, summary, mtime in kept:
-                per_category[category].append((slug, title, summary, mtime))
-            for cat in CATEGORIES:
-                # Sort by recency (mtime descending) so downstream consumers
-                # (vision prompt, triage prefilter) see the hot entries first.
-                # Tiebreak alphabetically for stable ordering when mtimes are
-                # identical (rare, but happens on fresh bulk-created wikis).
-                per_category[cat].sort(key=lambda t: (-t[3], t[0].lower()))
-            total = len(kept)
+            total = len(entries)
 
-        # Final ordering: recency-descending within each category so
-        # downstream consumers (vision prompt, triage prefilter) see David's
-        # currently-hot entities first. Tiebreak alphabetically for stable
-        # ordering when mtimes are identical (rare, but happens on fresh
-        # bulk-created wikis). This overrides the alphabetical sort that
-        # _collect_category applies as it scans.
-        for cat in CATEGORIES:
-            per_category[cat].sort(key=lambda t: (-t[3], t[0].lower()))
+        # Final ordering: recency-descending globally, alphabetical
+        # tiebreak for stable ordering when mtimes are identical (rare,
+        # but happens on fresh bulk-created wikis).
+        entries.sort(key=lambda t: (-t[3], t[0].lower()))
 
         if total == 0:
             placeholder = _HEADER + "\n*No pages yet.*\n"
@@ -216,17 +210,12 @@ def rebuild_index() -> int:
                 logger.warning("wiki_index: failed to write placeholder index: %s", e)
             return 0
 
-        parts: list[str] = [_HEADER]
-        for category in CATEGORIES:
-            entries = per_category[category]
-            if not entries:
-                continue
-            parts.append(f"\n## {_CATEGORY_TITLES[category]}\n\n")
-            for slug, _title, summary, _mtime in entries:
-                if summary:
-                    parts.append(f"- [[{slug}]] — {summary}\n")
-                else:
-                    parts.append(f"- [[{slug}]]\n")
+        parts: list[str] = [_HEADER, "\n"]
+        for slug, _title, summary, _mtime in entries:
+            if summary:
+                parts.append(f"- [[{slug}]] — {summary}\n")
+            else:
+                parts.append(f"- [[{slug}]]\n")
 
         content = "".join(parts)
         try:
