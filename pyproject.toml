@@ -21,6 +21,7 @@ dependencies = [
     "httpx>=0.28",
     "mlx-vlm>=0.1",
     "huggingface-hub>=0.24",
+    "sqlite-vec>=0.1",
 ]
 
 [project.scripts]

@@ -105,10 +105,10 @@ def _check_wiki() -> list[CheckResult]:
             name="wiki/prompts/",
             ok=False,
             detail="missing",
-            fix=f"Create {prompts_dir} and populate with integrate.md, deduplicate.md, describe_screen.md, prefilter.md, chat.md.",
+            fix=f"Create {prompts_dir} and populate with integrate.md, dedup_confirm.md, describe_screen.md, prefilter.md, chat.md.",
         ))
     else:
-        required = ("integrate.md", "deduplicate.md", "describe_screen.md", "prefilter.md", "chat.md")
+        required = ("integrate.md", "dedup_confirm.md", "describe_screen.md", "prefilter.md", "chat.md")
         missing = [n for n in required if not (prompts_dir / n).exists()]
         if missing:
             results.append(CheckResult(

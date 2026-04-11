@@ -1,8 +1,12 @@
-"""Reflection scheduling — when to run, cooldowns, last-run marker.
+"""Dedup scheduling — when to run, cooldowns, last-run marker.
 
-Extracted from reflection.py. Contains the slot-based scheduling logic,
-the last-run marker persistence, and the ``run_reflection`` wrapper that
-serializes concurrent invocations and updates the marker on success.
+Formerly the reflection scheduler; the LLM-only reflect/deduplicate pass
+has been replaced by the vector+Flash-Lite dedup pipeline in
+``deja.dedup``. The function names and marker file are kept as
+``*_reflection`` because callers and tests still import them under those
+names, and the cadence (3x/day slot boundaries) is unchanged. Think of
+"reflection" here as "the periodic deep wiki pass that runs a few times
+a day" — today that pass is dedup.
 """
 
 from __future__ import annotations
@@ -126,22 +130,27 @@ def should_run_reflection(now: datetime | None = None) -> bool:
 
 
 async def run_reflection() -> dict:
-    """Run one reflection pass. Returns the parsed LLM output.
+    """Run one dedup pass. Returns the DedupSummary dict.
 
     Concurrent invocations are coalesced: the second caller sees the
     lock held and returns an empty result immediately rather than
-    waiting or double-running Pro.
+    waiting or double-running the vector+LLM pipeline.
+
+    The name is kept as ``run_reflection`` because existing callers
+    (``agent/loop.py``) and tests import it under this name. The body
+    is now ``deja.dedup.run_dedup``.
     """
     if _run_lock.locked():
-        log.info("Reflection already running — skipping concurrent invocation")
-        return {"wiki_updates": [], "thoughts": "", "skipped": "concurrent"}
+        log.info("Dedup already running — skipping concurrent invocation")
+        return {"skipped": "concurrent"}
 
     async with _run_lock:
-        try:
-            from deja.reflection import _run_reflection_body
-            result = await _run_reflection_body()
-        except Exception:
-            log.exception("Reflection failed — not updating last-run marker")
-            return {"wiki_updates": [], "thoughts": "", "error": True}
+        from deja.dedup import run_dedup
+        # No silent fallback — dedup.run_dedup is expected to raise on
+        # any failure so the user sees the real problem. We deliberately
+        # do NOT catch-and-log here: if dedup raises, the exception
+        # propagates up to the caller (the agent loop) and the last-run
+        # marker is NOT updated, so the next heartbeat retries.
+        result = await run_dedup()
         _write_last_run()
         return result
