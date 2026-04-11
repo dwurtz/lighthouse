@@ -190,28 +190,62 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: Status item setup
 
-    private func setupStatusItem() {
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        if let button = statusItem.button {
-            if let resourcePath = Bundle.main.resourcePath {
-                let iconURL = URL(fileURLWithPath: resourcePath).appendingPathComponent("tray-icon.png")
-                if let img = NSImage(contentsOf: iconURL) {
-                    img.isTemplate = false
-                    img.size = NSSize(width: 22, height: 22)
-                    button.image = img
-                } else {
-                    NSLog("deja: ERROR — tray-icon.png not found at \(iconURL.path)")
-                    button.title = "Déjà"
+    private func setupStatusItem(attempt: Int = 1) {
+        // Use a fixed length so macOS reserves the slot even when the
+        // menu bar is crowded. variableLength is a hint that the system
+        // can resolve to zero on constrained menu bars (e.g. MacBook Pro
+        // notch with many apps installed), and in that case
+        // `statusItem.button` comes back nil and the entire setup block
+        // below silently no-ops. Fixed length is more aggressive and
+        // retries (below) give the menu bar a chance to free up space
+        // during the first few seconds of login.
+        statusItem = NSStatusBar.system.statusItem(withLength: 22)
+        statusItem.isVisible = true
+
+        guard let button = statusItem.button else {
+            NSLog(
+                "deja: ERROR — NSStatusItem.button is nil (attempt %d). "
+                + "Menu bar is likely full — macOS couldn't allocate a "
+                + "slot. Will retry in 2s.",
+                attempt
+            )
+            // Retry up to 3 times with a 2s delay — status items that
+            // fail at app launch sometimes recover a few seconds later
+            // once other apps finish claiming their slots.
+            if attempt < 3 {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+                    self?.setupStatusItem(attempt: attempt + 1)
                 }
             } else {
-                NSLog("deja: ERROR — no resourcePath in bundle")
+                NSLog(
+                    "deja: ERROR — giving up on status item after 3 attempts. "
+                    + "The Déjà tray icon will not appear. Close some menu bar "
+                    + "apps to free up a slot, then relaunch Déjà."
+                )
+            }
+            return
+        }
+
+        NSLog("deja: status item created on attempt %d", attempt)
+
+        if let resourcePath = Bundle.main.resourcePath {
+            let iconURL = URL(fileURLWithPath: resourcePath).appendingPathComponent("tray-icon.png")
+            if let img = NSImage(contentsOf: iconURL) {
+                img.isTemplate = false
+                img.size = NSSize(width: 22, height: 22)
+                button.image = img
+            } else {
+                NSLog("deja: ERROR — tray-icon.png not found at \(iconURL.path)")
                 button.title = "Déjà"
             }
-            button.toolTip = "Déjà"
-            button.target = self
-            button.action = #selector(statusItemClicked(_:))
-            button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+        } else {
+            NSLog("deja: ERROR — no resourcePath in bundle")
+            button.title = "Déjà"
         }
+        button.toolTip = "Déjà"
+        button.target = self
+        button.action = #selector(statusItemClicked(_:))
+        button.sendAction(on: [.leftMouseUp, .rightMouseUp])
 
         // Tray menu — built dynamically per click so the primary item
         // reflects current state ("Resume Setup" vs "Open Déjà").
