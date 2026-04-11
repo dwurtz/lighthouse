@@ -13,8 +13,111 @@ from datetime import datetime, timezone
 
 from deja import wiki as wiki_store
 from deja.agent.integration import log_analysis
+from deja.config import DEJA_HOME
 
 log = logging.getLogger(__name__)
+
+# Module-level mutex + active-loop reference so user-initiated triggers
+# can fire run_analysis_cycle immediately without stomping the scheduler.
+# Set by AgentLoop.run() (in-process callers like the mic/command
+# endpoints bypass this if web and monitor run in separate processes —
+# see _TRIGGER_FILE for the cross-process fallback).
+_active_loop: "AgentLoop | None" = None  # noqa: F821 — forward ref
+_cycle_lock: asyncio.Lock = asyncio.Lock()
+
+# Cross-process trigger marker. The web process writes this file when
+# mic_routes or command_routes want to force an immediate integrate;
+# the monitor process (which owns AgentLoop) picks it up at the top of
+# each analysis iteration via ``consume_trigger()``.
+_TRIGGER_FILE = DEJA_HOME / "integrate_trigger.json"
+
+
+def set_active_loop(loop_ref) -> None:
+    """Register the running AgentLoop so in-process triggers can use it."""
+    global _active_loop
+    _active_loop = loop_ref
+
+
+def clear_active_loop() -> None:
+    global _active_loop
+    _active_loop = None
+
+
+def consume_trigger() -> dict | None:
+    """Pop the cross-process integrate trigger if present. Monitor-side.
+
+    Returns the trigger payload (``{reason}``) or None.
+    Deletes the file so the next cycle doesn't re-trigger.
+    """
+    try:
+        if not _TRIGGER_FILE.exists():
+            return None
+        raw = _TRIGGER_FILE.read_text(encoding="utf-8")
+        _TRIGGER_FILE.unlink(missing_ok=True)
+        if not raw.strip():
+            return {"reason": "file_empty"}
+        return json.loads(raw)
+    except Exception:
+        log.exception("consume_trigger: failed to read/parse trigger file")
+        try:
+            _TRIGGER_FILE.unlink(missing_ok=True)
+        except Exception:
+            pass
+        return None
+
+
+async def trigger_integrate_now(reason: str) -> None:
+    """Fire run_analysis_cycle immediately against the active agent loop.
+
+    Called from mic_routes (after voice transcript finalization) and
+    from command_routes (after context-type commands).
+
+    Uses a module-level mutex so overlapping triggers don't stomp each
+    other — if a cycle is already in progress, the new trigger is a
+    no-op and the scheduler's next tick picks up any additional signals.
+
+    If no AgentLoop is registered in this process (web and monitor run
+    as separate processes), drops a JSON marker at
+    ``~/.deja/integrate_trigger.json`` so the monitor process's analysis
+    loop can pick it up on its next iteration.
+    """
+    loop_ref = _active_loop
+    if loop_ref is None:
+        # Cross-process path: write a trigger marker the monitor polls.
+        try:
+            DEJA_HOME.mkdir(parents=True, exist_ok=True)
+            _TRIGGER_FILE.write_text(
+                json.dumps(
+                    {
+                        "reason": reason,
+                        "ts": datetime.now(timezone.utc).isoformat(),
+                    }
+                )
+            )
+            log.info(
+                "trigger_integrate_now: no in-process loop, wrote marker %s",
+                _TRIGGER_FILE.name,
+            )
+        except Exception:
+            log.exception("trigger_integrate_now: failed to write marker")
+        return
+
+    if _cycle_lock.locked():
+        log.debug(
+            "trigger_integrate_now: cycle already running (%s) — skipping",
+            reason,
+        )
+        return
+
+    async with _cycle_lock:
+        log.info(
+            "trigger_integrate_now: running immediate cycle (reason=%s)",
+            reason,
+        )
+        try:
+            await run_analysis_cycle(loop_ref)
+        except Exception:
+            log.exception("trigger_integrate_now: cycle failed")
 
 
 async def run_analysis_cycle(loop_ref) -> None:
@@ -29,6 +132,13 @@ async def run_analysis_cycle(loop_ref) -> None:
     signals (calendar, tasks, drive, screenshot, clipboard) pass
     through untouched. If everything in the batch is dropped, we skip
     the Flash call entirely.
+
+    All kept signals run through ONE combined integrate call — no
+    split between messages and context — so the model can correlate
+    across modalities (e.g. a voice note + a screenshot + an email
+    arriving in the same window get reasoned about together). The
+    5-minute cadence keeps batches small enough that attention isn't
+    diluted.
 
     **Catch-up nightly:** before the regular analysis work, we
     check whether the nightly Pro pass has run since the most
@@ -70,19 +180,11 @@ async def run_analysis_cycle(loop_ref) -> None:
         loop_ref.phase = "IDLE"
         return
 
-    # Split into message-type (conversations, high-detail events) and
-    # context-type (screenshots, browser, clipboard — ambient context).
-    _MESSAGE_SOURCES = {"imessage", "whatsapp", "email", "chat", "microphone"}
-    message_items = [d for d in kept_items if d.get("source") in _MESSAGE_SOURCES]
-    context_items = [d for d in kept_items if d.get("source") not in _MESSAGE_SOURCES]
-
     if len(kept_items) < len(signal_items):
         log.info(
-            "Triage kept %d / %d signals for Flash (%d messages, %d context)",
+            "Triage kept %d / %d signals for Flash",
             len(kept_items),
             len(signal_items),
-            len(message_items),
-            len(context_items),
         )
 
     # 2. Rebuild the wiki index so any out-of-band changes (manual
@@ -103,13 +205,17 @@ async def run_analysis_cycle(loop_ref) -> None:
         log.exception("wiki_retrieval failed -- falling back to full wiki")
         wiki_text = wiki_store.render_for_prompt()
 
-    # 3. Run integrate — message batch and context batch separately.
+    # 3. Run integrate — all kept signals as one combined batch so the
+    #    LLM can correlate across modalities. The 5-minute cadence keeps
+    #    batches small enough that attention isn't diluted.
     all_wiki_updates: list[dict] = []
     all_reasoning: list[str] = []
     all_goal_actions: list[dict] = []
     all_tasks_updates: list[dict] = []
 
-    for batch_name, batch_items in [("messages", message_items), ("context", context_items)]:
+    batches_to_run: list[tuple[str, list[dict]]] = [("combined", kept_items)]
+
+    for batch_name, batch_items in batches_to_run:
         if not batch_items:
             continue
         batch_text = format_signals(batch_items)

@@ -14,7 +14,7 @@ from fastapi import FastAPI
 
 from deja.mcp_install import _repair_stale_paths, _run_mcp_first_install
 from deja.web.setup_routes import router as setup_router
-from deja.web.chat_routes import router as chat_router
+from deja.web.command_routes import router as command_router
 from deja.web.contact_routes import router as contact_router
 from deja.web.mcp_routes import router as mcp_router
 from deja.web.meeting_routes import router as meeting_router
@@ -63,7 +63,7 @@ def create_app() -> FastAPI:
     application.include_router(setup_router)
     application.include_router(status_router)
     application.include_router(contact_router)
-    application.include_router(chat_router)
+    application.include_router(command_router)
     application.include_router(mic_router)
     application.include_router(meeting_router)
     application.include_router(mcp_router)

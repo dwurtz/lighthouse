@@ -9,10 +9,10 @@
 /* Begin PBXBuildFile section */
 		070169F7CFC7C96432745E16 /* MeetingPillView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E78982A7A76CA05C3EB71ABE /* MeetingPillView.swift */; };
 		0C01FC2FFCC37AF1B2A160EB /* MeetingRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 546E703E0F803FFACC8456F1 /* MeetingRecorder.swift */; };
+		102162F0747EB5287C007B9C /* CommandCenterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFC477EE190FBC248A2EDB69 /* CommandCenterView.swift */; };
 		12142699C3AB7EDE92148355 /* DejaRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4EB157B404F53D33F9512646 /* DejaRecorder.swift */; };
 		222D3A7333DB15AC31B0D93D /* ScreenCaptureKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = EFF72E223E893D4D84DE66CD /* ScreenCaptureKit.framework */; };
 		25F5D3FB4B46BDDDF0B85911 /* SetupPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E156BFF7025A36E0009125B6 /* SetupPanelView.swift */; };
-		26EF2D41EF33FF9682E58319 /* ChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3024499F04CAB34515366957 /* ChatView.swift */; };
 		2BB909BD53EAFA57BE316649 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78A8FC28E10F34A2E91C7923 /* AppDelegate.swift */; };
 		30EBCF81C0F2B19A20A82E7C /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 6EE364908535709A817F0EBF /* Sparkle */; };
 		32DEBC6FCAE27D0A5887E829 /* CoreMedia.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 511117673C0D6E68362ACC2F /* CoreMedia.framework */; };
@@ -22,7 +22,6 @@
 		4932CD8F57C136EC18EBD81A /* ImageIO.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5FBB5CB7483B90FD0ADB9A4A /* ImageIO.framework */; };
 		4A3956D1DCC05A9AC3623D12 /* ScreenCaptureKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = EFF72E223E893D4D84DE66CD /* ScreenCaptureKit.framework */; };
 		5878450BBB6A4FCF7D791AFC /* DejaApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC62B6B690ED57D0403A32A3 /* DejaApp.swift */; };
-		5FBCDF4D4459E775639BE862 /* ActivityView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0728911E37A1E45580AEBFB /* ActivityView.swift */; };
 		62A958FF0371CBDBFFD3919C /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = BCC51732D86F475138598563 /* Foundation.framework */; };
 		6A45A1CEF7C8496C3088E347 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = BCC51732D86F475138598563 /* Foundation.framework */; };
 		721E485344FC645BA7C04B43 /* AppIcon.icns in Resources */ = {isa = PBXBuildFile; fileRef = F16A3FDFD508206B3D67DFE3 /* AppIcon.icns */; };
@@ -83,7 +82,6 @@
 		226E8F65EA938B8663F5957F /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
 		271A14CAA2FA0EB2E1587002 /* SetupPanelWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetupPanelWindow.swift; sourceTree = "<group>"; };
 		288F28AA7634EFC49D2A4FBB /* VoicePillWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoicePillWindow.swift; sourceTree = "<group>"; };
-		3024499F04CAB34515366957 /* ChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatView.swift; sourceTree = "<group>"; };
 		30A978138C56BCDD8744D302 /* DatabaseReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DatabaseReader.swift; sourceTree = "<group>"; };
 		41C7170F3A82EC0FDD65B613 /* DejaRecorder */ = {isa = PBXFileReference; includeInIndex = 0; path = DejaRecorder; sourceTree = BUILT_PRODUCTS_DIR; };
 		4EB157B404F53D33F9512646 /* DejaRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DejaRecorder.swift; sourceTree = "<group>"; };
@@ -107,7 +105,7 @@
 		BC62B6B690ED57D0403A32A3 /* DejaApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DejaApp.swift; sourceTree = "<group>"; };
 		BCC51732D86F475138598563 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = System/Library/Frameworks/Foundation.framework; sourceTree = SDKROOT; };
 		C28EE339AA283B98EF4D7949 /* tray-icon.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "tray-icon.png"; sourceTree = "<group>"; };
-		D0728911E37A1E45580AEBFB /* ActivityView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityView.swift; sourceTree = "<group>"; };
+		CFC477EE190FBC248A2EDB69 /* CommandCenterView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandCenterView.swift; sourceTree = "<group>"; };
 		D53627C343AD928AAA34E847 /* AudioLevelMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioLevelMonitor.swift; sourceTree = "<group>"; };
 		DEBD0855AD78D7C16A60FE1D /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		E156BFF7025A36E0009125B6 /* SetupPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetupPanelView.swift; sourceTree = "<group>"; };
@@ -232,8 +230,7 @@
 		D5A78A5E20FF14E681A48B28 /* Views */ = {
 			isa = PBXGroup;
 			children = (
-				D0728911E37A1E45580AEBFB /* ActivityView.swift */,
-				3024499F04CAB34515366957 /* ChatView.swift */,
+				CFC477EE190FBC248A2EDB69 /* CommandCenterView.swift */,
 				E78982A7A76CA05C3EB71ABE /* MeetingPillView.swift */,
 				80E5DE1FB0E45B028FF313F4 /* NotificationBubbleView.swift */,
 				18CDCF2320DFBB2102143A62 /* PopoverContentView.swift */,
@@ -399,11 +396,10 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				5FBCDF4D4459E775639BE862 /* ActivityView.swift in Sources */,
 				2BB909BD53EAFA57BE316649 /* AppDelegate.swift in Sources */,
 				395E477F2677E05026F78505 /* AudioLevelMonitor.swift in Sources */,
 				41A94BA85426F5525FBCDC9E /* BackendProcessManager.swift in Sources */,
-				26EF2D41EF33FF9682E58319 /* ChatView.swift in Sources */,
+				102162F0747EB5287C007B9C /* CommandCenterView.swift in Sources */,
 				AF2024A02B1E811E745245BB /* DatabaseReader.swift in Sources */,
 				5878450BBB6A4FCF7D791AFC /* DejaApp.swift in Sources */,
 				BBEF67D44A7438C7C9F527AE /* HotkeyManager.swift in Sources */,

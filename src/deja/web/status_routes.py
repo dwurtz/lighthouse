@@ -1,8 +1,10 @@
-"""GET /api/status — liveness probe."""
+"""GET /api/status — liveness probe.
+GET /api/activity — recent activity feed for the notch popover."""
 
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timezone
 
 from fastapi import APIRouter
@@ -75,3 +77,46 @@ def get_status() -> dict:
         "last_analysis_time": last_analysis_time,
         "screen_recording": screen_recording,
     }
+
+
+_ACTIVITY_LINE_RE = re.compile(
+    r"^- \*\*\[(?P<ts>\d{4}-\d{2}-\d{2} \d{2}:\d{2})\]\*\*\s+"
+    r"(?P<kind>[^\s—-]+)\s+[—-]\s*(?P<summary>.*)$"
+)
+
+
+@router.get("/api/activity")
+def get_activity(limit: int = 50) -> dict:
+    """Return the most recent activity entries from the wiki log.md.
+
+    The activity feed is the notch popover's primary surface: it
+    shows what the agent has been doing (dedup merges, integrate
+    writes, commands, meetings). Each row parses one bullet from
+    ``~/Deja/log.md`` via the stable `- **[ts]** kind — summary`
+    format emitted by ``activity_log.append_log_entry``.
+    """
+    from deja.activity_log import LOG_PATH
+
+    entries: list[dict] = []
+    if LOG_PATH.exists():
+        try:
+            text = LOG_PATH.read_text(encoding="utf-8")
+        except Exception:
+            text = ""
+        for line in text.splitlines():
+            m = _ACTIVITY_LINE_RE.match(line.rstrip())
+            if not m:
+                continue
+            entries.append(
+                {
+                    "timestamp": m.group("ts"),
+                    "kind": m.group("kind"),
+                    "summary": m.group("summary").strip(),
+                }
+            )
+
+    # Newest first, capped at `limit`
+    entries.reverse()
+    if limit and limit > 0:
+        entries = entries[:limit]
+    return {"entries": entries}

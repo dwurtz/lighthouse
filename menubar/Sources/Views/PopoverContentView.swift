@@ -200,53 +200,9 @@ struct PopoverContentView: View {
             if monitor.showSettings {
                 SettingsView(monitor: monitor)
             } else {
-                // Tab content
-                VStack(spacing: 0) {
-                    // Tab bar
-                    HStack(spacing: 0) {
-                        tabButton("Chat", icon: "message.fill", tab: .chat)
-                        tabButton("Activity", icon: "list.bullet", tab: .activity)
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.top, 8)
-
-                    // Content
-                    ScrollView(.vertical, showsIndicators: false) {
-                        VStack(alignment: .leading, spacing: 10) {
-                            switch monitor.activeTab {
-                            case .chat:
-                                ChatView(monitor: monitor)
-                            case .activity:
-                                ActivityView(monitor: monitor)
-                            }
-                        }
-                        .padding(12)
-                    }
-                    .background(Color.black)
-                }
-                .background(Color.black)
-
-                // Chat input (always visible)
-                ChatInputBar(monitor: monitor)
+                CommandCenterView(monitor: monitor)
             }
         }
         .background(Color.black)
-    }
-
-    func tabButton(_ title: String, icon: String, tab: NotchTab) -> some View {
-        Button(action: { monitor.activeTab = tab }) {
-            HStack(spacing: 4) {
-                Image(systemName: icon)
-                    .font(.system(size: 10))
-                Text(title)
-                    .font(.system(size: 11, weight: .medium))
-            }
-            .foregroundColor(monitor.activeTab == tab ? .white : .white.opacity(0.35))
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            .background(monitor.activeTab == tab ? Color.white.opacity(0.1) : Color.clear)
-            .clipShape(Capsule())
-        }
-        .buttonStyle(.plain)
     }
 }

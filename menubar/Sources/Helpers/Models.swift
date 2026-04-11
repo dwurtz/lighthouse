@@ -4,21 +4,21 @@ import CoreMedia
 
 // MARK: - Data Models
 
-enum NotchTab {
-    case chat, activity
+/// One row in the notch Activity feed — parsed from the wiki's
+/// ``log.md`` by the backend's ``GET /api/activity`` endpoint.
+struct ActivityEntry: Identifiable, Codable {
+    var id: String { "\(timestamp)-\(kind)-\(summary.prefix(32))" }
+    let timestamp: String
+    let kind: String
+    let summary: String
 }
 
-struct ChatMessage: Identifiable {
-    let id = UUID()
-    let role: String
-    let content: String
-}
-
-struct ContactMatch: Identifiable {
-    let id = UUID()
-    let name: String
-    let phone: String
-    let email: String
+/// Transient toast message shown after a command dispatch (green on
+/// success, red on error). Auto-dismisses after a short delay.
+struct Toast: Equatable {
+    enum Style { case success, error }
+    let style: Style
+    let text: String
 }
 
 /// One MCP-compatible AI client detected on this machine. Mirrors the

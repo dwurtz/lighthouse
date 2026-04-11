@@ -15,13 +15,14 @@ class MonitorState: ObservableObject {
     @Published var lastSignalSource: String = ""
     @Published var lastSignalPreview: String = ""
     @Published var insights: [AnalysisInsight] = []
-    @Published var chatMessages: [ChatMessage] = []
-    @Published var chatInput: String = ""
-    @Published var chatLoading: Bool = false
-    @Published var contactResults: [ContactMatch] = []
-    @Published var showContactPicker: Bool = false
-    @Published var activeTab: NotchTab = .chat
     @Published var isRecording: Bool = false
+
+    // Command center state — replaces chat
+    @Published var activityEntries: [ActivityEntry] = []
+    @Published var commandInput: String = ""
+    @Published var commandPending: Bool = false
+    @Published var commandToast: Toast? = nil
+    private var activityTimer: Timer?
 
     // Voice pill state
     @Published var voicePillEnabled: Bool = true
@@ -576,39 +577,6 @@ class MonitorState: ObservableObject {
         return "\(outFmt.string(from: s)) - \(outFmt.string(from: e))"
     }
 
-    // MARK: - Contacts
-
-    func searchContacts(_ query: String) {
-        guard query.count >= 2 else {
-            DispatchQueue.main.async { self.contactResults = []; self.showContactPicker = false }
-            return
-        }
-        let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query
-        localAPICall("/api/contacts/search?q=\(encoded)&limit=5") { [weak self] data, _ in
-            guard let data = data,
-                  let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return }
-            let results = arr.map { c in
-                ContactMatch(
-                    name: c["name"] as? String ?? "",
-                    phone: (c["phones"] as? [String])?.first ?? "",
-                    email: (c["emails"] as? [String])?.first ?? ""
-                )
-            }
-            DispatchQueue.main.async {
-                self?.contactResults = results
-                self?.showContactPicker = !results.isEmpty
-            }
-        }
-    }
-
-    func insertContact(_ contact: ContactMatch) {
-        if let atRange = chatInput.range(of: "@", options: .backwards) {
-            chatInput = String(chatInput[chatInput.startIndex..<atRange.lowerBound]) + "@\(contact.name) "
-        }
-        contactResults = []
-        showContactPicker = false
-    }
-
     // MARK: - MCP Clients (Connected AI Assistants)
 
     func fetchMCPClients() {
@@ -706,7 +674,10 @@ class MonitorState: ObservableObject {
         voicePillStatus = "Transcribing..."
         voicePillTranscript = ""
 
-        // Stop recording and get transcript
+        // Stop recording and get transcript. The backend writes the
+        // transcript to observations.jsonl AND fires an immediate
+        // integrate trigger, so we don't need to POST anywhere from
+        // here — the monitor loop picks it up.
         localAPICall("/api/mic/stop", method: "POST", timeoutInterval: 30) { [weak self] data, error in
             guard let self = self else { return }
             guard let data = data,
@@ -720,83 +691,133 @@ class MonitorState: ObservableObject {
                 return
             }
             DispatchQueue.main.async {
-                // Show transcript briefly
                 self.voicePillProcessing = false
                 self.voicePillTranscript = transcript
 
                 // Force a fresh screenshot — the user just spoke, so this
                 // is the moment we want vision to see (and the next vision
-                // call will pick up the voice context for grounding).
+                // cycle will correlate the voice context with it).
                 self.captureScreenshot(force: true)
 
-                // Send to chat with screenshot context after a short display
+                // Show the transcript briefly, then clear. Voice dictation
+                // is just a context signal now — no chat round-trip.
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-                    self.chatInput = transcript
-                    self.sendChat(includeScreenshot: true)
                     self.voicePillTranscript = ""
                 }
+
+                // Refresh the activity feed so the transcript's downstream
+                // effect (dedup / integrate write) shows up quickly.
+                self.fetchActivity()
             }
         }
     }
 
-    // MARK: - Chat
+    // MARK: - Command Center
 
-    func sendChat(includeScreenshot: Bool = false) {
-        let message = chatInput.trimmingCharacters(in: .whitespaces)
-        guard !message.isEmpty, !chatLoading else { return }
-        chatMessages.append(ChatMessage(role: "user", content: message))
-        chatInput = ""
-        chatLoading = true
-        activeTab = .chat
+    /// POST /api/command with the current input. On success, shows a
+    /// green toast with the confirmation and refreshes the activity feed.
+    /// On failure, shows a red toast and keeps the input populated so the
+    /// user can edit and retry.
+    func submitCommand() {
+        let text = commandInput.trimmingCharacters(in: .whitespaces)
+        guard !text.isEmpty, !commandPending else { return }
 
-        let placeholderIdx = chatMessages.count
-        chatMessages.append(ChatMessage(role: "agent", content: ""))
-
-        var payload: [String: Any] = ["message": message]
-        if includeScreenshot {
-            payload["include_screenshot"] = true
-        }
-        let chatBody = try? JSONSerialization.data(withJSONObject: payload)
-        localAPICall("/api/chat", method: "POST", body: chatBody, timeoutInterval: 120) { [weak self] data, error in
-            guard let data = data else {
+        commandPending = true
+        let payload: [String: Any] = ["input": text, "source": "text"]
+        let body = try? JSONSerialization.data(withJSONObject: payload)
+        localAPICall(
+            "/api/command",
+            method: "POST",
+            body: body,
+            timeoutInterval: 60
+        ) { [weak self] data, error in
+            guard let self = self else { return }
+            DispatchQueue.main.async {
+                self.commandPending = false
+            }
+            if let error = error {
                 DispatchQueue.main.async {
-                    self?.chatLoading = false
-                    self?.chatMessages[placeholderIdx] = ChatMessage(role: "agent", content: "Error: \(error?.localizedDescription ?? "no response")")
+                    self.commandToast = Toast(
+                        style: .error,
+                        text: error.localizedDescription
+                    )
+                    self.scheduleToastDismiss()
                 }
                 return
             }
-
-            var fullText = ""
-            let text = String(data: data, encoding: .utf8) ?? ""
-            // IMPORTANT: use components(separatedBy:) rather than split(separator: "\n").
-            // Swift's String.split treats "\n" as a Character (grapheme cluster),
-            // and "\r\n" is a single cluster — so split would NOT cut at the LF
-            // inside a "\r\n" pair. The Unix-socket response body is HTTP/1.1
-            // chunked transfer encoding, which wraps each streamed chunk in
-            // "\r\n"-framed hex-length lines. With the grapheme-cluster split
-            // the framing bytes bleed into the "data: ..." lines and every
-            // event gets dropped, producing empty assistant bubbles.
-            // components(separatedBy:) does a scalar-level split and works.
-            for line in text.components(separatedBy: "\n") {
-                // Strip leading/trailing \r (both HTTP chunk framing and SSE CRLF)
-                let l = line.trimmingCharacters(in: CharacterSet(charactersIn: "\r"))
-                if l.hasPrefix("data: ") {
-                    let jsonStr = String(l.dropFirst(6))
-                    if let jsonData = jsonStr.data(using: .utf8),
-                       let obj = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any] {
-                        if let chunk = obj["chunk"] as? String {
-                            fullText += chunk
-                        }
-                    }
+            guard let data = data,
+                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                DispatchQueue.main.async {
+                    self.commandToast = Toast(
+                        style: .error,
+                        text: "Empty response from backend"
+                    )
+                    self.scheduleToastDismiss()
                 }
+                return
             }
-
-            let displayText = fullText.replacingOccurrences(of: "\\[ACTION:[^\\]]*\\]", with: "", options: .regularExpression)
-
+            if let errMsg = obj["error"] as? String, !errMsg.isEmpty {
+                DispatchQueue.main.async {
+                    self.commandToast = Toast(style: .error, text: errMsg)
+                    self.scheduleToastDismiss()
+                }
+                return
+            }
+            if let detail = obj["detail"] as? String, !detail.isEmpty {
+                DispatchQueue.main.async {
+                    self.commandToast = Toast(style: .error, text: detail)
+                    self.scheduleToastDismiss()
+                }
+                return
+            }
+            let confirmation = (obj["confirmation"] as? String) ?? "Done."
             DispatchQueue.main.async {
-                self?.chatLoading = false
-                self?.chatMessages[placeholderIdx] = ChatMessage(role: "agent", content: displayText.trimmingCharacters(in: .whitespacesAndNewlines))
+                self.commandInput = ""
+                self.commandToast = Toast(
+                    style: .success,
+                    text: confirmation
+                )
+                self.scheduleToastDismiss()
+                self.fetchActivity()
             }
         }
+    }
+
+    private func scheduleToastDismiss() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
+            self?.commandToast = nil
+        }
+    }
+
+    /// Fetch the last 50 activity entries from the backend log.
+    func fetchActivity() {
+        localAPICall("/api/activity?limit=50", method: "GET", timeoutInterval: 5) { [weak self] data, _ in
+            guard let data = data,
+                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let raw = obj["entries"] as? [[String: Any]] else { return }
+            let parsed: [ActivityEntry] = raw.compactMap { dict in
+                guard let ts = dict["timestamp"] as? String,
+                      let kind = dict["kind"] as? String,
+                      let summary = dict["summary"] as? String else { return nil }
+                return ActivityEntry(timestamp: ts, kind: kind, summary: summary)
+            }
+            DispatchQueue.main.async {
+                self?.activityEntries = parsed
+            }
+        }
+    }
+
+    /// Start polling the activity feed every 10s while the popover is open.
+    func startActivityPolling() {
+        activityTimer?.invalidate()
+        fetchActivity()
+        activityTimer = Timer.scheduledTimer(withTimeInterval: 10.0, repeats: true) { [weak self] _ in
+            self?.fetchActivity()
+        }
+    }
+
+    func stopActivityPolling() {
+        activityTimer?.invalidate()
+        activityTimer = nil
     }
 }

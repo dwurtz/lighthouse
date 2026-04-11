@@ -409,6 +409,16 @@ async def _mic_stop_inner(reason: str = "manual") -> dict:
     except Exception:
         pass
 
+    # 2a. Fire-and-forget immediate integrate trigger so the voice
+    # dictation gets processed right away (cross-modal merge with any
+    # screenshots / calendar / email signals from the same minute).
+    try:
+        from deja.agent.analysis_cycle import trigger_integrate_now
+
+        asyncio.create_task(trigger_integrate_now(reason="voice_transcript"))
+    except Exception:
+        log.debug("mic: failed to schedule integrate trigger", exc_info=True)
+
     # 3. Human-readable log in the wiki
     try:
         from deja.activity_log import append_log_entry

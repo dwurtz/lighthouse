@@ -126,3 +126,65 @@ def apply_tasks_update(update: dict) -> int:
             pass
 
     return changes
+
+
+def append_to_automations_section(rule_text: str) -> None:
+    """Append a user-authored automation rule to goals.md ## Automations.
+
+    Preserves the existing content of the section. Inserts the new bullet
+    immediately before the next "## " heading so rules stay grouped.
+
+    Raises RuntimeError if goals.md is missing or does not contain an
+    ``## Automations`` heading — the user-managed sections are not
+    auto-created; a clear error beats silently inventing structure.
+    """
+    rule_text = (rule_text or "").strip()
+    if not rule_text:
+        raise RuntimeError("append_to_automations_section: empty rule_text")
+
+    if not GOALS_PATH.exists():
+        raise RuntimeError(
+            f"goals.md not found at {GOALS_PATH}. Run setup or "
+            f"investigate — every installed wiki should have one."
+        )
+
+    text = GOALS_PATH.read_text(encoding="utf-8")
+
+    # Find the ## Automations heading and the next "## " heading after it.
+    marker = "## Automations"
+    idx = text.find(marker)
+    if idx == -1:
+        raise RuntimeError(
+            "goals.md is missing the '## Automations' section. Add it "
+            "manually (between ## Standing context and ## Tasks) and "
+            "retry — the agent will not auto-create user-managed sections."
+        )
+
+    # Dedup — if the rule already exists, skip silently.
+    if rule_text.lower() in text.lower():
+        log.info("automation: rule already in goals.md, skipping: %s", rule_text[:80])
+        return
+
+    # Find insertion point: just before the next "## " heading after Automations.
+    search_from = idx + len(marker)
+    next_heading_idx = text.find("\n## ", search_from)
+    insert_line = f"- {rule_text}\n"
+
+    if next_heading_idx == -1:
+        # Automations is the last section — append at EOF.
+        new_text = text.rstrip() + "\n" + insert_line
+    else:
+        # Insert right before the next "## " heading, separated by a blank line.
+        head = text[: next_heading_idx + 1]  # include the leading \n
+        tail = text[next_heading_idx + 1 :]
+        # Ensure there's a blank line before the new bullet and after
+        new_text = head.rstrip() + "\n" + insert_line + "\n" + tail
+
+    GOALS_PATH.write_text(new_text, encoding="utf-8")
+    log.info("automation: added rule to goals.md: %s", rule_text[:80])
+
+    try:
+        from deja.activity_log import append_log_entry
+        append_log_entry("goals", f"added automation: {rule_text[:120]}")
+    except Exception:
+        pass

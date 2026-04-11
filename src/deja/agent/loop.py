@@ -122,6 +122,8 @@ class AgentLoop:
 
     async def run(self) -> None:
         """Start the signal and analysis loops as concurrent tasks."""
+        from deja.agent.analysis_cycle import set_active_loop
+        set_active_loop(self)
         self.running = True
         log.info("Monitor loop starting")
 
@@ -226,6 +228,8 @@ class AgentLoop:
             log.info("Monitor loop cancelled")
         finally:
             self.running = False
+            from deja.agent.analysis_cycle import clear_active_loop
+            clear_active_loop()
 
     def stop(self) -> None:
         self.running = False
@@ -246,8 +250,18 @@ class AgentLoop:
             await asyncio.sleep(OBSERVE_INTERVAL)
 
     async def _analysis_loop(self) -> None:
-        """Run analysis every INTEGRATE_INTERVAL seconds."""
-        from deja.agent.analysis_cycle import run_analysis_cycle
+        """Run analysis every INTEGRATE_INTERVAL seconds.
+
+        Between scheduled cycles, polls every 2 seconds for a
+        cross-process integrate trigger (written by web-process
+        endpoints like mic/command context); when found, runs the
+        cycle immediately so the fresh user signal is correlated
+        against any other pending signals.
+        """
+        from deja.agent.analysis_cycle import (
+            consume_trigger,
+            run_analysis_cycle,
+        )
 
         await asyncio.sleep(30)  # short delay to collect initial signals
         while self.running:
@@ -255,7 +269,33 @@ class AgentLoop:
                 await run_analysis_cycle(self)
             except Exception:
                 log.exception("Error in analysis cycle")
-            await asyncio.sleep(INTEGRATE_INTERVAL)
+
+            # Wait out the full interval in small poll steps so a
+            # cross-process trigger (voice dictation, context command)
+            # can jump the queue.
+            waited = 0.0
+            poll_step = 2.0
+            while self.running and waited < INTEGRATE_INTERVAL:
+                trigger = consume_trigger()
+                if trigger:
+                    reason = str(trigger.get("reason", "unknown"))
+                    log.info(
+                        "Analysis loop: triggered immediately (reason=%s)",
+                        reason,
+                    )
+                    try:
+                        await run_analysis_cycle(self)
+                    except Exception:
+                        log.exception(
+                            "Error in triggered analysis cycle (reason=%s)",
+                            reason,
+                        )
+                    # After a triggered cycle, restart the wait window
+                    # so we don't pile on another cycle immediately.
+                    waited = 0.0
+                    continue
+                await asyncio.sleep(poll_step)
+                waited += poll_step
 
     # ------------------------------------------------------------------
     # Delegated cycle methods (kept as instance methods for backward compat)
