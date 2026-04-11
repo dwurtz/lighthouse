@@ -19,6 +19,7 @@
 		32DEBC6FCAE27D0A5887E829 /* CoreMedia.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 511117673C0D6E68362ACC2F /* CoreMedia.framework */; };
 		395E477F2677E05026F78505 /* AudioLevelMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = D53627C343AD928AAA34E847 /* AudioLevelMonitor.swift */; };
 		41A94BA85426F5525FBCDC9E /* BackendProcessManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8ACEA8F312916A3DB10B6583 /* BackendProcessManager.swift */; };
+		42DCBCFE4FF56376DD425BA3 /* SettingsPanelWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFCF4C5C14F22AA2EA07F25D /* SettingsPanelWindow.swift */; };
 		435160729688A388C539CF57 /* VoiceRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A5EB680B89515A07DFEB50D /* VoiceRecorder.swift */; };
 		479BBE1791DB6EBFC865AEE8 /* VoicePillView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63E38726CE176A2832663B80 /* VoicePillView.swift */; };
 		4932CD8F57C136EC18EBD81A /* ImageIO.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5FBB5CB7483B90FD0ADB9A4A /* ImageIO.framework */; };
@@ -28,11 +29,13 @@
 		6A45A1CEF7C8496C3088E347 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = BCC51732D86F475138598563 /* Foundation.framework */; };
 		721E485344FC645BA7C04B43 /* AppIcon.icns in Resources */ = {isa = PBXBuildFile; fileRef = F16A3FDFD508206B3D67DFE3 /* AppIcon.icns */; };
 		7530B2F920F0FFCF1E2D3AA1 /* PopoverContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18CDCF2320DFBB2102143A62 /* PopoverContentView.swift */; };
+		76CA58AB4C54B430399ACD7F /* BriefingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7752DD5823378D5E1029E779 /* BriefingView.swift */; };
 		7C47A76DB22E37B757401576 /* CoreGraphics.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = FF7DDEFB774D920864C65017 /* CoreGraphics.framework */; };
 		85D7F542B5AA0DA671A30BAB /* KeystrokeMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 932FEC9780873CEA3EF0CCDA /* KeystrokeMonitor.swift */; };
 		94559C662FE0F6196D5528E7 /* Utilities.swift in Sources */ = {isa = PBXBuildFile; fileRef = 577197DA62750145A9E65676 /* Utilities.swift */; };
 		A3419BAB5DF619CFC302DDB9 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEBD0855AD78D7C16A60FE1D /* SettingsView.swift */; };
 		AF2024A02B1E811E745245BB /* DatabaseReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 30A978138C56BCDD8744D302 /* DatabaseReader.swift */; };
+		B02D0905F40A7C82E4B6DD6E /* ExpandedNotchPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90144AB8D3E968559A8A162C /* ExpandedNotchPanel.swift */; };
 		B159333D857730B8493EB6E9 /* MeetingCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 129900B011818660B477E1AA /* MeetingCoordinator.swift */; };
 		B8128765737EF8AE5BE141EE /* SetupManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 651D730D288689BC54939D75 /* SetupManager.swift */; };
 		BBEF67D44A7438C7C9F527AE /* HotkeyManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 944177DAA03864CD41A829C7 /* HotkeyManager.swift */; };
@@ -96,10 +99,12 @@
 		651D730D288689BC54939D75 /* SetupManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetupManager.swift; sourceTree = "<group>"; };
 		6657279FEB277AA5D969A150 /* Deja.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Deja.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		76FFD515F2B4CE855C9FB52D /* VoiceCommandDispatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceCommandDispatcher.swift; sourceTree = "<group>"; };
+		7752DD5823378D5E1029E779 /* BriefingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BriefingView.swift; sourceTree = "<group>"; };
 		78A8FC28E10F34A2E91C7923 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		80E5DE1FB0E45B028FF313F4 /* NotificationBubbleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationBubbleView.swift; sourceTree = "<group>"; };
 		876F7AA11CEC762975464D2F /* AppKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AppKit.framework; path = System/Library/Frameworks/AppKit.framework; sourceTree = SDKROOT; };
 		8ACEA8F312916A3DB10B6583 /* BackendProcessManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackendProcessManager.swift; sourceTree = "<group>"; };
+		90144AB8D3E968559A8A162C /* ExpandedNotchPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExpandedNotchPanel.swift; sourceTree = "<group>"; };
 		92314037C78AB4CCDD214FC1 /* client_secret.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = client_secret.json; sourceTree = "<group>"; };
 		932FEC9780873CEA3EF0CCDA /* KeystrokeMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeystrokeMonitor.swift; sourceTree = "<group>"; };
 		944177DAA03864CD41A829C7 /* HotkeyManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HotkeyManager.swift; sourceTree = "<group>"; };
@@ -110,6 +115,7 @@
 		BCC51732D86F475138598563 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = System/Library/Frameworks/Foundation.framework; sourceTree = SDKROOT; };
 		C28EE339AA283B98EF4D7949 /* tray-icon.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "tray-icon.png"; sourceTree = "<group>"; };
 		CFC477EE190FBC248A2EDB69 /* CommandCenterView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandCenterView.swift; sourceTree = "<group>"; };
+		CFCF4C5C14F22AA2EA07F25D /* SettingsPanelWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsPanelWindow.swift; sourceTree = "<group>"; };
 		D53627C343AD928AAA34E847 /* AudioLevelMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioLevelMonitor.swift; sourceTree = "<group>"; };
 		DEBD0855AD78D7C16A60FE1D /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		E156BFF7025A36E0009125B6 /* SetupPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetupPanelView.swift; sourceTree = "<group>"; };
@@ -236,10 +242,13 @@
 		D5A78A5E20FF14E681A48B28 /* Views */ = {
 			isa = PBXGroup;
 			children = (
+				7752DD5823378D5E1029E779 /* BriefingView.swift */,
 				CFC477EE190FBC248A2EDB69 /* CommandCenterView.swift */,
+				90144AB8D3E968559A8A162C /* ExpandedNotchPanel.swift */,
 				E78982A7A76CA05C3EB71ABE /* MeetingPillView.swift */,
 				80E5DE1FB0E45B028FF313F4 /* NotificationBubbleView.swift */,
 				18CDCF2320DFBB2102143A62 /* PopoverContentView.swift */,
+				CFCF4C5C14F22AA2EA07F25D /* SettingsPanelWindow.swift */,
 				DEBD0855AD78D7C16A60FE1D /* SettingsView.swift */,
 				E156BFF7025A36E0009125B6 /* SetupPanelView.swift */,
 				271A14CAA2FA0EB2E1587002 /* SetupPanelWindow.swift */,
@@ -405,9 +414,11 @@
 				2BB909BD53EAFA57BE316649 /* AppDelegate.swift in Sources */,
 				395E477F2677E05026F78505 /* AudioLevelMonitor.swift in Sources */,
 				41A94BA85426F5525FBCDC9E /* BackendProcessManager.swift in Sources */,
+				76CA58AB4C54B430399ACD7F /* BriefingView.swift in Sources */,
 				102162F0747EB5287C007B9C /* CommandCenterView.swift in Sources */,
 				AF2024A02B1E811E745245BB /* DatabaseReader.swift in Sources */,
 				5878450BBB6A4FCF7D791AFC /* DejaApp.swift in Sources */,
+				B02D0905F40A7C82E4B6DD6E /* ExpandedNotchPanel.swift in Sources */,
 				BBEF67D44A7438C7C9F527AE /* HotkeyManager.swift in Sources */,
 				85D7F542B5AA0DA671A30BAB /* KeystrokeMonitor.swift in Sources */,
 				B159333D857730B8493EB6E9 /* MeetingCoordinator.swift in Sources */,
@@ -417,6 +428,7 @@
 				F5D1F9EDFD861854AD0E9D85 /* MonitorState.swift in Sources */,
 				C21BEA9674BCB5B70046B6C6 /* NotificationBubbleView.swift in Sources */,
 				7530B2F920F0FFCF1E2D3AA1 /* PopoverContentView.swift in Sources */,
+				42DCBCFE4FF56376DD425BA3 /* SettingsPanelWindow.swift in Sources */,
 				A3419BAB5DF619CFC302DDB9 /* SettingsView.swift in Sources */,
 				B8128765737EF8AE5BE141EE /* SetupManager.swift in Sources */,
 				25F5D3FB4B46BDDDF0B85911 /* SetupPanelView.swift in Sources */,

@@ -5,22 +5,28 @@ import Sparkle
 
 // MARK: - App Delegate
 //
-// Déjà is a pure menu-bar app. No notch, no floating panels. The
-// icon in the menu bar is the entire UI surface: left-click
-// opens a popover with Chat + Activity, right-click shows the options
-// menu. The Python monitor + web backend are spawned and supervised by
-// MonitorState.
+// Déjà's primary UI surface is the floating **voice pill** at the
+// bottom of the screen. The pill has three visual states — idle,
+// recording, and expanded — and the expanded state hosts the full
+// command center (briefing + activity feed + command input), so
+// there is no separate popover or main window. The menu-bar tray
+// icon remains only as an escape hatch: right- or left-clicking it
+// shows a minimal menu with Settings and Quit. Everything else
+// flows through the pill. See ``VoicePillWindow`` +
+// ``ExpandedNotchPanel``.
+//
+// The Python monitor + web backend are spawned and supervised by
+// ``MonitorState``.
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     var monitor = MonitorState()
     var statusItem: NSStatusItem!
-    var popover: NSPopover!
     var contextMenu: NSMenu!
-    var micToggleItem: NSMenuItem!
     var isRecording: Bool = false
     var micStatusTimer: Timer?
     var updaterController: SPUStandardUpdaterController!
     var setupPanelWindow: SetupPanelWindow?
+    var settingsPanelWindow: SettingsPanelWindow?
     var voicePillWindow: VoicePillWindow?
     var didSetupVoicePill: Bool = false
     let hotkeyManager = HotkeyManager()
@@ -30,7 +36,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.accessory)
         setupCrashReporting()
         setupStatusItem()       // First — before any work that could trigger menu bar layout
-        setupPopover()
         monitor.start()         // After UI is set up
 
         // Voice recording runs in-process now (was a DejaRecorder
@@ -102,32 +107,24 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         )
     }
 
-    var meetingPillPopover: NSPopover?
-
     @objc private func showMeetingPrompt() {
-        // Show a mini popover from the tray icon — same style as the main app
-        guard meetingPillPopover == nil || !(meetingPillPopover!.isShown) else { return }
-        guard let button = statusItem?.button else { return }
-
-        let pillView = MeetingPillView(monitor: monitor, onDismiss: { [weak self] in
-            self?.dismissMeetingPill()
-        })
-        .frame(width: 340)
-        .background(Color.black)
-
-        let pill = NSPopover()
-        pill.behavior = .semitransient  // stays until user clicks away or dismisses
-        pill.animates = true
-        pill.contentSize = NSSize(width: 340, height: 56)
-        pill.contentViewController = NSHostingController(rootView: pillView)
-        pill.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-
-        meetingPillPopover = pill
+        // A meeting was detected (either imminent from calendar or
+        // already running). Expand the notch panel so the user sees
+        // the meeting banner + "Take notes" button in the command
+        // center instead of a separate popover. The meeting banner
+        // is part of ``PopoverContentView`` and keys off
+        // ``monitor.meetingAvailable`` + ``monitor.meetingRecording``,
+        // so expanding the pill is enough — no extra wiring needed.
+        monitor.setPillExpanded(true)
     }
 
     func dismissMeetingPill() {
-        meetingPillPopover?.close()
-        meetingPillPopover = nil
+        // Collapse the pill unless the user is actively engaged with
+        // the expanded panel. Engagement-cancelled auto-collapse is
+        // handled inside ``MonitorState.setPillExpanded``.
+        if !monitor.expandedEngagement {
+            monitor.setPillExpanded(false)
+        }
     }
 
     private func showSetupPanel() {
@@ -164,6 +161,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var notificationPopover: NSPopover?
 
     @objc private func showNotificationBubble() {
+        // Notification bubbles still anchor to the tray icon so the
+        // user notices them even when the pill isn't expanded. This
+        // is the one remaining tray-anchored popover — everything
+        // else moved to the expanded notch panel.
         guard notificationPopover == nil || !(notificationPopover!.isShown) else { return }
         guard let button = statusItem?.button else { return }
 
@@ -184,18 +185,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func dismissNotificationBubble() {
         notificationPopover?.close()
         notificationPopover = nil
-    }
-
-    // MARK: Popover setup
-
-    private func setupPopover() {
-        popover = NSPopover()
-        popover.behavior = .transient          // auto-dismiss on click outside
-        popover.animates = true
-        popover.contentSize = NSSize(width: 420, height: 600)
-        popover.contentViewController = NSHostingController(
-            rootView: PopoverContentView(monitor: monitor)
-        )
     }
 
     // MARK: Status item setup
@@ -262,9 +251,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         contextMenu = NSMenu()
     }
 
-    /// Build the tray icon menu fresh each time it's shown so the
-    /// primary action reflects whether setup is incomplete (Resume Setup)
-    /// or complete (Open Déjà).
+    /// Build the tray icon menu fresh each time it's shown. The tray
+    /// is now an escape hatch only — Settings and Quit. The main UI
+    /// (briefing, activity, command input) lives in the expanded
+    /// notch pill, not in a tray popover.
     private func buildTrayMenu() -> NSMenu {
         let menu = NSMenu()
 
@@ -276,15 +266,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             )
             resume.target = self
             menu.addItem(resume)
-        } else {
-            let open = NSMenuItem(
-                title: "Open Déjà",
-                action: #selector(openPopoverFromMenu),
-                keyEquivalent: ""
-            )
-            open.target = self
-            menu.addItem(open)
+            menu.addItem(NSMenuItem.separator())
         }
+
+        let settings = NSMenuItem(
+            title: "Settings…",
+            action: #selector(showSettingsFromMenu),
+            keyEquivalent: ","
+        )
+        settings.target = self
+        menu.addItem(settings)
 
         menu.addItem(NSMenuItem.separator())
 
@@ -303,8 +294,22 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         showSetupPanel()
     }
 
-    @objc private func openPopoverFromMenu() {
-        togglePopover()
+    @objc private func showSettingsFromMenu() {
+        showSettingsPanel()
+    }
+
+    private func showSettingsPanel() {
+        if let existing = settingsPanelWindow {
+            existing.orderFront(nil)
+            existing.makeKey()
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+        let panel = SettingsPanelWindow(monitor: monitor)
+        panel.orderFront(nil)
+        panel.makeKey()
+        NSApp.activate(ignoringOtherApps: true)
+        settingsPanelWindow = panel
     }
 
     // MARK: Mic control — polls the shared MonitorState so the popover
@@ -338,9 +343,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func applyMicState(recording: Bool) {
         self.isRecording = recording
-        self.micToggleItem.title = recording ? "Stop Recording" : "Take Notes"
-        // Icon stays the same — the popover shows recording state via the red timer.
-        // Swapping the icon caused macOS to reposition the status item.
+        // Icon stays the same — the pill shows recording state via
+        // its waveform animation. The tray item is a static escape
+        // hatch and no longer reflects live recording state.
     }
 
     @objc private func toggleMic() {
@@ -355,28 +360,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: Click handling
 
     @objc private func statusItemClicked(_ sender: Any?) {
-        // Both left and right click show the same dynamic menu. The
-        // first item (Resume Setup / Open Déjà) is the primary action;
-        // Quit always lives below the separator. This is the only
-        // discoverable way for users to find Quit on a borderless
-        // LSUIElement app — right-click on tray icons is invisible
-        // unless you already know the convention.
+        // The tray icon is a minimal escape hatch: both left and
+        // right click just show the Settings/Quit menu. The main
+        // UI lives in the expanded notch pill.
         let menu = buildTrayMenu()
         statusItem.menu = menu
         statusItem.button?.performClick(nil)
         statusItem.menu = nil
-    }
-
-    private func togglePopover() {
-        guard let button = statusItem.button else { return }
-        if popover.isShown {
-            popover.performClose(nil)
-        } else {
-            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-            // Activate the app so TextField focus works for typing
-            NSApp.activate(ignoringOtherApps: true)
-            popover.contentViewController?.view.window?.makeKey()
-        }
     }
 
     // MARK: Menu actions

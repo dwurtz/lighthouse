@@ -1,13 +1,29 @@
 import SwiftUI
 
 /// Floating voice pill — collapsed is a subtle dark capsule at screen bottom.
-/// Expanded shows 3 animated sine waves (Voquill-style), then transcript.
+///
+/// Three visual states drive the pill:
+///
+///   1. **Idle** — the subtle 100×5 capsule (or a hover-expanded "Click to
+///      expand" hint).
+///   2. **Recording** — the animated sine waveform. Shown whenever the
+///      user is actively capturing audio: push-to-talk voice dictation
+///      (``voicePillActive``) OR a meeting recording in progress
+///      (``meetingRecording``). Both share this visual so there's a
+///      single "Deja is listening" affordance.
+///   3. **Processing / transcript** — spinner or the resulting transcript
+///      toast, only for the dictation flow (meetings don't emit a
+///      transcript when they stop).
 struct VoicePillView: View {
     @ObservedObject var monitor: MonitorState
 
+    private var isRecording: Bool {
+        monitor.voicePillActive || monitor.meetingRecording
+    }
+
     var body: some View {
         ZStack {
-            if monitor.voicePillActive {
+            if isRecording {
                 expandedPill
             } else if monitor.voicePillProcessing {
                 processingPill
@@ -18,7 +34,7 @@ struct VoicePillView: View {
             }
         }
         .frame(width: 400, height: 56, alignment: .bottom)
-        .animation(.spring(response: 0.3, dampingFraction: 0.75), value: monitor.voicePillActive)
+        .animation(.spring(response: 0.3, dampingFraction: 0.75), value: isRecording)
         .animation(.easeInOut(duration: 0.2), value: monitor.voicePillProcessing)
         .animation(.easeInOut(duration: 0.2), value: monitor.voicePillTranscript.isEmpty)
         .animation(.easeInOut(duration: 0.15), value: monitor.voicePillHovered)
@@ -30,10 +46,10 @@ struct VoicePillView: View {
         VStack(spacing: 4) {
             if monitor.voicePillHovered {
                 HStack(spacing: 6) {
-                    Image(systemName: "mic.fill")
+                    Image(systemName: monitor.pillExpanded ? "chevron.down" : "chevron.up")
                         .font(.system(size: 10))
                         .foregroundColor(.white.opacity(0.5))
-                    Text("Click to dictate")
+                    Text(monitor.pillExpanded ? "Click to collapse" : "Click to expand · hotkey to dictate")
                         .font(.system(size: 11, weight: .medium))
                         .foregroundColor(.white.opacity(0.5))
                 }

@@ -25,6 +25,26 @@ class MonitorState: ObservableObject {
     @Published var commandToast: Toast? = nil
     private var activityTimer: Timer?
 
+    // Notch expansion state — the pill has three visual modes:
+    //   .idle       small pill at the bottom of the screen
+    //   .recording  waveform or meeting-recording UI in the pill
+    //   .expanded   the full command-center panel hosted above the pill
+    // Click on the pill toggles between idle and expanded. A voice or
+    // command response can force-expand and display a classification
+    // banner; for short confirmations the panel auto-collapses after
+    // ``autoCollapseSeconds`` unless the user engages with it.
+    @Published var pillExpanded: Bool = false
+    @Published var lastResponseType: String = ""       // "query", "action", "goal", "automation", "context"
+    @Published var lastResponseMessage: String = ""    // confirmation text or query answer (markdown ok)
+    @Published var lastResponseIsQuery: Bool = false   // queries pin open; others auto-collapse
+    @Published var lastResponseAt: Date? = nil
+    private var autoCollapseTimer: Timer?
+    private let autoCollapseSeconds: TimeInterval = 4.0
+
+    /// Whether the expanded panel has any engagement that should cancel
+    /// an in-flight auto-collapse (hover, focused text field, etc.).
+    @Published var expandedEngagement: Bool = false
+
     // Voice pill state
     @Published var voicePillEnabled: Bool = true
     @Published var voicePillActive: Bool = false
@@ -763,21 +783,25 @@ class MonitorState: ObservableObject {
                 // cycle will correlate the voice context with it).
                 self.captureScreenshot(force: true)
 
-                // Show the transcript briefly, then clear.
+                // Show the transcript briefly on the pill, then clear.
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
                     self.voicePillTranscript = ""
                 }
 
-                // Non-context commands (action/goal/automation) emit a
-                // green toast with the classifier's confirmation so the
-                // user sees "Added to calendar." etc. Context-type voice
-                // notes stay quiet — they're just observations.
+                // Expand the notch to show the classification banner +
+                // the result. Context-type voice notes stay quiet — they
+                // don't deserve their own panel pop-up because they're
+                // just observations the next integrate cycle will
+                // process. Query-type responses pin the panel open until
+                // the user dismisses it (the answer is worth reading).
+                // Everything else (action/goal/automation) auto-collapses
+                // after ~4 seconds.
                 if !confirmation.isEmpty && cmdType != "context" {
-                    self.commandToast = Toast(
-                        style: .success,
-                        text: confirmation
+                    self.showResponse(
+                        type: cmdType,
+                        message: confirmation,
+                        isQuery: cmdType == "query"
                     )
-                    self.scheduleToastDismiss()
                 }
 
                 // Refresh the activity feed so downstream effects
@@ -846,13 +870,14 @@ class MonitorState: ObservableObject {
                 return
             }
             let confirmation = (obj["confirmation"] as? String) ?? "Done."
+            let cmdType = (obj["type"] as? String) ?? ""
             DispatchQueue.main.async {
                 self.commandInput = ""
-                self.commandToast = Toast(
-                    style: .success,
-                    text: confirmation
+                self.showResponse(
+                    type: cmdType,
+                    message: confirmation,
+                    isQuery: cmdType == "query"
                 )
-                self.scheduleToastDismiss()
                 self.fetchActivity()
             }
         }
@@ -893,6 +918,86 @@ class MonitorState: ObservableObject {
                 self?.briefing = decoded
             }
         }
+    }
+
+    // MARK: - Pill expand / collapse
+
+    /// Toggle the expanded notch panel. Called from the pill click handler.
+    func togglePillExpanded() {
+        setPillExpanded(!pillExpanded)
+    }
+
+    func setPillExpanded(_ expanded: Bool) {
+        // Cancel any pending auto-collapse whenever the state is
+        // explicitly driven from outside the timer path.
+        cancelAutoCollapse()
+        if pillExpanded == expanded { return }
+        pillExpanded = expanded
+        if expanded {
+            // Kick off the briefing + activity poll so the panel has
+            // fresh data the moment it's visible — otherwise it would
+            // show whatever was cached on last close.
+            startActivityPolling()
+        } else {
+            stopActivityPolling()
+            // Clear the transient response banner so the next open
+            // doesn't show a stale "Calendar event created" line.
+            lastResponseType = ""
+            lastResponseMessage = ""
+            lastResponseIsQuery = false
+            lastResponseAt = nil
+            expandedEngagement = false
+        }
+    }
+
+    /// Show a command/query response in the expanded panel. Called from
+    /// the voice dispatch completion and from typed-command responses.
+    /// ``type`` is the classification tag (action/goal/automation/context/query).
+    /// ``isQuery`` true ⇒ the panel stays open until the user dismisses;
+    /// false ⇒ auto-collapse after ``autoCollapseSeconds`` unless engaged.
+    func showResponse(type: String, message: String, isQuery: Bool) {
+        lastResponseType = type
+        lastResponseMessage = message
+        lastResponseIsQuery = isQuery
+        lastResponseAt = Date()
+        if !pillExpanded {
+            setPillExpanded(true)
+        } else {
+            // Already expanded — refresh activity so the new cycle
+            // entry shows up in the feed below the banner.
+            fetchActivity()
+        }
+        if !isQuery {
+            scheduleAutoCollapse()
+        }
+    }
+
+    /// Cancel an in-flight auto-collapse (called on hover / focus /
+    /// typing in the expanded panel).
+    func markEngagement() {
+        expandedEngagement = true
+        cancelAutoCollapse()
+    }
+
+    private func scheduleAutoCollapse() {
+        cancelAutoCollapse()
+        let seconds = autoCollapseSeconds
+        autoCollapseTimer = Timer.scheduledTimer(withTimeInterval: seconds, repeats: false) { [weak self] _ in
+            guard let self = self else { return }
+            DispatchQueue.main.async {
+                // Final engagement check — if the user grabbed focus
+                // between the timer firing and now, keep it open.
+                if !self.expandedEngagement {
+                    self.setPillExpanded(false)
+                }
+                self.autoCollapseTimer = nil
+            }
+        }
+    }
+
+    private func cancelAutoCollapse() {
+        autoCollapseTimer?.invalidate()
+        autoCollapseTimer = nil
     }
 
     /// Start polling the activity feed + briefing every 10s while the popover is open.
