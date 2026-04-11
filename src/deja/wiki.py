@@ -286,9 +286,12 @@ def apply_updates(updates: list[dict]) -> int:
         except Exception:
             log.debug("wiki_index rebuild failed", exc_info=True)
 
-        # Refresh QMD so chat retrieval + Context Engine see fresh content.
-        # `qmd update` re-indexes changed files (including new event pages).
-        # We skip `qmd embed` here (it's slower) — reflect handles that 3×/day.
+        # Refresh QMD so the next integrate cycle's retrieval + the MCP
+        # Context Engine see fresh content. `qmd update` re-indexes changed
+        # files (including new event pages). We skip `qmd embed` here
+        # (it's slower) — dedup (src/deja/dedup.py) runs `qmd update &&
+        # qmd embed` at the start of every 3×/day pass, which is the
+        # scheduled refresh point for the vector index.
         try:
             from deja.llm.search import refresh_index
             refresh_index()
