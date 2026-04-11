@@ -31,6 +31,14 @@ from deja.identity import load_user
 from deja.llm_client import GeminiClient
 from deja.prompts import load as load_prompt
 
+# Retrieval budget for the command classifier. Keep this tight: the
+# classifier is on the hot path for every typed/spoken command, and Flash-
+# Lite latency matters more than recall here. We just need enough hits to
+# disambiguate entities ("amanda" -> Amanda Peffer) and ground parameter
+# extraction — not a full briefing.
+_CLASSIFIER_RETRIEVAL_LIMIT = 5
+_CLASSIFIER_RETRIEVAL_TIMEOUT_S = 5.0
+
 log = logging.getLogger(__name__)
 
 router = APIRouter()
@@ -67,13 +75,60 @@ def _load_goals_text() -> str:
     return goals_path.read_text(encoding="utf-8")
 
 
+async def _retrieve_relevant_pages(input_text: str) -> str:
+    """Run a best-effort hybrid QMD query against the raw user input.
+
+    Returns a compact text block listing the top wiki hits, ready to
+    paste into the classifier prompt. Any failure (qmd missing, timeout,
+    empty index, etc.) yields ``"(none)"`` so the classifier still runs
+    — we never block command latency on retrieval. A 5-second hard
+    timeout protects against a hung qmd subprocess pinning the hot
+    path.
+    """
+    topic = (input_text or "").strip()
+    if not topic:
+        return "(none)"
+
+    def _run() -> str:
+        # Import lazily so a busted mcp_server module can't break command
+        # classification at import time.
+        from deja.mcp_server import _qmd_query
+
+        return _qmd_query(
+            topic,
+            collection=QMD_COLLECTION,
+            limit=_CLASSIFIER_RETRIEVAL_LIMIT,
+        )
+
+    try:
+        result = await asyncio.wait_for(
+            asyncio.to_thread(_run),
+            timeout=_CLASSIFIER_RETRIEVAL_TIMEOUT_S,
+        )
+    except asyncio.TimeoutError:
+        log.warning(
+            "command classifier retrieval timed out after %.1fs; "
+            "classifying without wiki context",
+            _CLASSIFIER_RETRIEVAL_TIMEOUT_S,
+        )
+        return "(none)"
+    except Exception:
+        log.debug("command classifier retrieval failed", exc_info=True)
+        return "(none)"
+
+    text = (result or "").strip()
+    return text or "(none)"
+
+
 async def _classify(input_text: str) -> tuple[dict, float, int]:
     """Call Flash-Lite classifier. Returns (parsed, cost_usd, latency_ms)."""
     template = load_prompt("command")
     user_fields = load_user().as_prompt_fields()
+    relevant_pages = await _retrieve_relevant_pages(input_text)
     prompt = template.format(
         user_first_name=user_fields.get("user_first_name", "the user"),
         current_goals=_load_goals_text(),
+        relevant_pages=relevant_pages,
         current_time_iso=datetime.now().astimezone().isoformat(),
         user_input=input_text,
     )
