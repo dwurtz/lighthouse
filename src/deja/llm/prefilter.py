@@ -1,14 +1,15 @@
-"""Signal triage via Gemini Flash-Lite.
+"""Signal triage via Groq llama-3.1-8b-instant.
 
 One batched call per cycle filters all candidate signals at once. This used
-to be a local llama.cpp integration; benchmarks showed Flash-Lite was ~100x
-faster and more accurate than any local Gemma variant, so the local path was
-removed. The module name is vestigial — it still hosts the triage contract,
-just routed through the cloud.
+to be a local llama.cpp integration, then Gemini Flash-Lite; Groq 8B via the
+Deja /v1/chat proxy is ~3× faster and ~3× cheaper than Flash-Lite with
+quality that saturates well above what's needed for binary classification
+with short reason strings. The module name is vestigial — it still hosts
+the triage contract, just routed through the cloud.
 
 A single cycle typically has 5-30 message-type signals. Instead of firing
 N parallel calls (N × wiki-index tokens, N × HTTP overhead), we build one
-prompt containing all candidates and ask Flash-Lite to return one verdict
+prompt containing all candidates and ask the model to return one verdict
 per input. The wiki index is transmitted exactly once per cycle.
 
 Recall-biased: on any failure — API error, JSON parse error, mismatched
@@ -29,6 +30,9 @@ log = logging.getLogger(__name__)
 # passes through unfiltered — those sources are already low-volume and curated
 # by upstream logic (e.g. microphone transcripts are user-initiated).
 TRIAGE_SOURCES = {"imessage", "whatsapp", "email", "browser"}
+
+
+_TRIAGE_MODEL = "llama-3.1-8b-instant"
 
 
 def _load_index_md() -> str:
@@ -69,7 +73,7 @@ async def triage_batch(
     *,
     index_md: str | None = None,
 ) -> list[tuple[bool, str]]:
-    """Triage a batch of signals in a single Flash-Lite call.
+    """Triage a batch of signals in a single Groq 8B call.
 
     Takes a list of signal dicts (each with source/sender/text fields) and
     returns a list of ``(relevant, reason)`` tuples in the same order.
@@ -80,8 +84,6 @@ async def triage_batch(
     if not items:
         return []
 
-    from deja.config import INTEGRATE_MODEL
-    from deja.llm_client import GeminiClient
     from deja.prompts import load as load_prompt
 
     if index_md is None:
@@ -109,19 +111,30 @@ async def triage_batch(
         log.warning("prefilter prompt missing placeholder %s", e)
         return [(True, "triage template error — keeping")] * len(items)
 
-    gemini = GeminiClient()
     try:
-        raw = await gemini._generate(
-            model=INTEGRATE_MODEL,
-            contents=prompt,
-            config_dict={
-                "response_mime_type": "application/json",
-                "max_output_tokens": 2048,
-                "temperature": 0.1,
-            },
-        ) or ""
+        import httpx
+        from deja.llm_client import DEJA_API_URL
+        from deja.auth import get_auth_token
+
+        token = get_auth_token()
+        headers = {"Authorization": f"Bearer {token}"} if token else {}
+
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
+                f"{DEJA_API_URL}/v1/chat",
+                headers=headers,
+                json={
+                    "model": _TRIAGE_MODEL,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "temperature": 0.1,
+                    "max_tokens": 2048,
+                    "response_format": {"type": "json_object"},
+                },
+            )
+            resp.raise_for_status()
+            raw = (resp.json().get("text") or "").strip()
     except Exception as e:
-        log.warning("triage batch Flash-Lite call failed: %s", e)
+        log.warning("triage batch Groq 8B call failed: %s", e)
         return [(True, "triage API failed — keeping")] * len(items)
 
     try:
