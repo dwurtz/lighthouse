@@ -24,39 +24,55 @@ from deja import local_models
 log = logging.getLogger(__name__)
 
 
-# Vision takes the full wiki index today — no max_lines cap. index.md is
-# recency-sorted and flat, so position 1 is always whatever David just
-# touched, which is the best possible grounding for a small model. The
-# file is comprehensive (no reflect-side cap either), so as the wiki
-# grows this may become costly — at which point add ``max_lines=N`` to
-# the render_index_for_prompt call below. FastVLM 0.5B's 32K context
-# window leaves plenty of headroom: ~150 chars per entry × 200 entries
-# = ~7.5K tokens, still only ~23% of context. Revisit when the wiki
-# crosses a few hundred entries or when FastVLM descriptions start
-# drifting toward stale entities in the tail.
+# How many head lines of index.md to inject into the vision prompt.
+# index.md is recency-sorted and flat, so the first N lines are always
+# the N most-recently-touched pages regardless of category. 50 is a
+# sweet spot for FastVLM 0.5B: plenty of coverage of "what David is
+# working on right now", while leaving attention budget for the image,
+# the AX context block, and the task instructions. Triage and the
+# integrate retrieval read the full index separately — they have
+# larger context budgets (Flash-Lite 1M ctx) and benefit from seeing
+# dormant entries that vision would just dilute on.
+#
+# Revisit this if FastVLM starts missing obvious entities in the tail
+# (raise) or starts confusing hot entities with each other (lower).
+_VISION_INDEX_HEAD_LINES = 50
 
 
 # The grounded template uses ``{ax_block}`` as a placeholder for the
 # Current UI context section. That block is either empty string (no AX
-# data, no access, broken AX support) or a fully-formatted two-section
-# chunk ending in two newlines. Using a single interpolation slot means
-# we never leave a dangling header when AX data is missing — the skip-
-# if-empty discipline is enforced at the formatter, not here.
+# data, no access, broken AX support) or a fully-formatted chunk
+# ending in two newlines. Using a single interpolation slot means we
+# never leave a dangling header when AX data is missing — the skip-if-
+# empty discipline is enforced at the formatter, not here.
+#
+# The task instruction deliberately does NOT ask "what app is David
+# using?" — the AX block already states the app name when available,
+# and asking the model to re-derive it from pixels wastes attention
+# that should go to content. The downstream integrate cycle needs
+# specific facts (names, subject lines, numbers, quotes) to ground
+# wiki updates, not a summary of app chrome.
 _PROMPT_GROUNDED = (
     "This is {user_name}'s Mac.\n\n"
     "{ax_block}"
     "# People and projects {first_name} cares about\n\n"
     "{index_block}\n\n"
     "# Your task\n\n"
-    "Read this screenshot carefully. What app is {first_name} using? "
-    "Read any visible messages, emails, or conversations — quote the "
-    "actual text you can see. Who is talking to whom, and about what?"
+    "Describe what {first_name} is doing right now. Quote the specific "
+    "details visible on screen — names, subject lines, message text, "
+    "numbers, URLs, timestamps — so downstream reasoning has hard facts "
+    "to work with, not a vague summary. Then explain why this matters: "
+    "how does it connect to the people and projects above? What "
+    "commitment, question, decision, or new information does this "
+    "screenshot surface?"
 )
 
 _PROMPT_FALLBACK = (
-    "Read this screenshot carefully. What apps are open? "
-    "What names appear? What is the user doing? "
-    "Quote any visible text."
+    "Describe what the user is doing in this screenshot. Quote the "
+    "specific details visible on screen — names, subject lines, "
+    "message text, numbers, URLs, timestamps — so downstream reasoning "
+    "has hard facts to work with. What commitment, question, decision, "
+    "or new information does this screenshot surface?"
 )
 
 # Lazy-loaded model state — survives for the process lifetime.
@@ -96,6 +112,7 @@ def _build_prompt(
         user = load_user()
         if not user.is_generic:
             index_block = render_index_for_prompt(
+                max_lines=_VISION_INDEX_HEAD_LINES,
                 rebuild=False,
             ).strip() or "(no wiki entries yet)"
             base = _PROMPT_GROUNDED.format(
