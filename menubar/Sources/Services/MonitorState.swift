@@ -54,9 +54,10 @@ class MonitorState: ObservableObject {
     @Published var voicePillHovered: Bool = false
     // 16 rolling audio-level samples, 0.0–1.0 each. Newest sample gets
     // appended at the end and the oldest is dropped off the front, so
-    // the bars animate right-to-left as you speak.
+    // the bars animate right-to-left as you speak. Fed by VoiceRecorder's
+    // tap via VoiceCommandDispatcher's level callback — one engine, one
+    // tap, same samples that the WAV is written from.
     @Published var levelHistory: [CGFloat] = Array(repeating: 0, count: 16)
-    private let audioLevelMonitor = AudioLevelMonitor()
 
     // Permission state — checked on launch and periodically
     @Published var hasScreenRecording: Bool = false
@@ -694,26 +695,29 @@ class MonitorState: ObservableObject {
         voicePillActive = true
         voicePillTranscript = ""
 
-        // Start ffmpeg recording immediately
-        localAPICall("/api/mic/start", method: "POST", timeoutInterval: 5) { _, _ in }
-
-        // Start the level monitor — drives the reactive bar animation in
-        // VoicePillView by shifting new RMS samples into levelHistory from
-        // the right. Runs alongside VoiceRecorder on a separate engine.
+        // Reset the bar history so the pill starts at rest. New RMS
+        // samples will flow in via recordVoiceLevel() as VoiceRecorder's
+        // tap fires. Start the mic recorder by POSTing to the backend
+        // (which in turn writes the voice_cmd.json marker that the
+        // in-process VoiceCommandDispatcher picks up).
         levelHistory = Array(repeating: 0, count: 16)
-        audioLevelMonitor.start { [weak self] level in
-            guard let self = self else { return }
-            var next = self.levelHistory
-            next.removeFirst()
-            next.append(level)
-            self.levelHistory = next
-        }
+        localAPICall("/api/mic/start", method: "POST", timeoutInterval: 5) { _, _ in }
+    }
+
+    /// Called from VoiceCommandDispatcher's level callback for every
+    /// audio buffer the VoiceRecorder tap processes. Shifts levelHistory
+    /// left and appends the new level so VoicePillView's bars march
+    /// right-to-left as new samples arrive.
+    func recordVoiceLevel(_ level: CGFloat) {
+        var next = levelHistory
+        next.removeFirst()
+        next.append(level)
+        levelHistory = next
     }
 
     func stopVoiceCapture() {
         guard voicePillActive else { return }
         voicePillActive = false
-        audioLevelMonitor.stop()
         levelHistory = Array(repeating: 0, count: 16)
 
         // Show processing state

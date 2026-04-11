@@ -17,7 +17,6 @@
 		2BB909BD53EAFA57BE316649 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78A8FC28E10F34A2E91C7923 /* AppDelegate.swift */; };
 		30EBCF81C0F2B19A20A82E7C /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 6EE364908535709A817F0EBF /* Sparkle */; };
 		32DEBC6FCAE27D0A5887E829 /* CoreMedia.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 511117673C0D6E68362ACC2F /* CoreMedia.framework */; };
-		395E477F2677E05026F78505 /* AudioLevelMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = D53627C343AD928AAA34E847 /* AudioLevelMonitor.swift */; };
 		41A94BA85426F5525FBCDC9E /* BackendProcessManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8ACEA8F312916A3DB10B6583 /* BackendProcessManager.swift */; };
 		42DCBCFE4FF56376DD425BA3 /* SettingsPanelWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFCF4C5C14F22AA2EA07F25D /* SettingsPanelWindow.swift */; };
 		435160729688A388C539CF57 /* VoiceRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A5EB680B89515A07DFEB50D /* VoiceRecorder.swift */; };
@@ -116,7 +115,6 @@
 		C28EE339AA283B98EF4D7949 /* tray-icon.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "tray-icon.png"; sourceTree = "<group>"; };
 		CFC477EE190FBC248A2EDB69 /* CommandCenterView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandCenterView.swift; sourceTree = "<group>"; };
 		CFCF4C5C14F22AA2EA07F25D /* SettingsPanelWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsPanelWindow.swift; sourceTree = "<group>"; };
-		D53627C343AD928AAA34E847 /* AudioLevelMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioLevelMonitor.swift; sourceTree = "<group>"; };
 		DEBD0855AD78D7C16A60FE1D /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		E156BFF7025A36E0009125B6 /* SetupPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetupPanelView.swift; sourceTree = "<group>"; };
 		E78982A7A76CA05C3EB71ABE /* MeetingPillView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingPillView.swift; sourceTree = "<group>"; };
@@ -224,7 +222,6 @@
 		8CBDAE53684B385B522E7DE1 /* Services */ = {
 			isa = PBXGroup;
 			children = (
-				D53627C343AD928AAA34E847 /* AudioLevelMonitor.swift */,
 				8ACEA8F312916A3DB10B6583 /* BackendProcessManager.swift */,
 				30A978138C56BCDD8744D302 /* DatabaseReader.swift */,
 				944177DAA03864CD41A829C7 /* HotkeyManager.swift */,
@@ -412,7 +409,6 @@
 			buildActionMask = 2147483647;
 			files = (
 				2BB909BD53EAFA57BE316649 /* AppDelegate.swift in Sources */,
-				395E477F2677E05026F78505 /* AudioLevelMonitor.swift in Sources */,
 				41A94BA85426F5525FBCDC9E /* BackendProcessManager.swift in Sources */,
 				76CA58AB4C54B430399ACD7F /* BriefingView.swift in Sources */,
 				102162F0747EB5287C007B9C /* CommandCenterView.swift in Sources */,

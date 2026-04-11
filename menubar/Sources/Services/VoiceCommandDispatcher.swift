@@ -28,11 +28,13 @@ final class VoiceCommandDispatcher {
     private var pollTimer: Timer?
     private var lastStateKey: String = ""
     private var currentWavPath: URL?
+    private let onLevel: ((CGFloat) -> Void)?
 
-    init() {
+    init(onLevel: ((CGFloat) -> Void)? = nil) {
         let home = FileManager.default.homeDirectoryForCurrentUser
         self.cmdPath = home.appendingPathComponent(".deja/voice_cmd.json")
         self.statusPath = home.appendingPathComponent(".deja/voice_status.json")
+        self.onLevel = onLevel
     }
 
     func start() {
@@ -69,7 +71,7 @@ final class VoiceCommandDispatcher {
             }
             let url = URL(fileURLWithPath: pathStr)
             do {
-                try recorder.start(outputPath: url)
+                try recorder.start(outputPath: url, onLevel: onLevel)
                 currentWavPath = url
                 writeStatus(status: "recording", wavPath: pathStr)
                 NSLog("deja: voice recording started → \(pathStr)")

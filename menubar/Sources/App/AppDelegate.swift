@@ -41,8 +41,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Voice recording runs in-process now (was a DejaRecorder
         // subprocess, which didn't hold mic TCC because it has no
         // bundle identity). The dispatcher polls ~/.deja/voice_cmd.json
-        // so the Python mic_routes handlers can drive it.
-        let dispatcher = VoiceCommandDispatcher()
+        // so the Python mic_routes handlers can drive it. The level
+        // callback feeds MonitorState.levelHistory so VoicePillView's
+        // reactive bars animate from the same audio samples the WAV
+        // is written from.
+        let monitorRef = monitor
+        let dispatcher = VoiceCommandDispatcher { [weak monitorRef] level in
+            monitorRef?.recordVoiceLevel(level)
+        }
         dispatcher.start()
         voiceDispatcher = dispatcher
 
