@@ -11,6 +11,7 @@
 		0C01FC2FFCC37AF1B2A160EB /* MeetingRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 546E703E0F803FFACC8456F1 /* MeetingRecorder.swift */; };
 		102162F0747EB5287C007B9C /* CommandCenterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFC477EE190FBC248A2EDB69 /* CommandCenterView.swift */; };
 		12142699C3AB7EDE92148355 /* DejaRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4EB157B404F53D33F9512646 /* DejaRecorder.swift */; };
+		1F24387ECE2ABE55E8446C0A /* VoiceCommandDispatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 76FFD515F2B4CE855C9FB52D /* VoiceCommandDispatcher.swift */; };
 		222D3A7333DB15AC31B0D93D /* ScreenCaptureKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = EFF72E223E893D4D84DE66CD /* ScreenCaptureKit.framework */; };
 		25F5D3FB4B46BDDDF0B85911 /* SetupPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E156BFF7025A36E0009125B6 /* SetupPanelView.swift */; };
 		2BB909BD53EAFA57BE316649 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78A8FC28E10F34A2E91C7923 /* AppDelegate.swift */; };
@@ -18,6 +19,7 @@
 		32DEBC6FCAE27D0A5887E829 /* CoreMedia.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 511117673C0D6E68362ACC2F /* CoreMedia.framework */; };
 		395E477F2677E05026F78505 /* AudioLevelMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = D53627C343AD928AAA34E847 /* AudioLevelMonitor.swift */; };
 		41A94BA85426F5525FBCDC9E /* BackendProcessManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8ACEA8F312916A3DB10B6583 /* BackendProcessManager.swift */; };
+		435160729688A388C539CF57 /* VoiceRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A5EB680B89515A07DFEB50D /* VoiceRecorder.swift */; };
 		479BBE1791DB6EBFC865AEE8 /* VoicePillView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63E38726CE176A2832663B80 /* VoicePillView.swift */; };
 		4932CD8F57C136EC18EBD81A /* ImageIO.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5FBB5CB7483B90FD0ADB9A4A /* ImageIO.framework */; };
 		4A3956D1DCC05A9AC3623D12 /* ScreenCaptureKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = EFF72E223E893D4D84DE66CD /* ScreenCaptureKit.framework */; };
@@ -93,6 +95,7 @@
 		63E38726CE176A2832663B80 /* VoicePillView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoicePillView.swift; sourceTree = "<group>"; };
 		651D730D288689BC54939D75 /* SetupManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetupManager.swift; sourceTree = "<group>"; };
 		6657279FEB277AA5D969A150 /* Deja.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Deja.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		76FFD515F2B4CE855C9FB52D /* VoiceCommandDispatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceCommandDispatcher.swift; sourceTree = "<group>"; };
 		78A8FC28E10F34A2E91C7923 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		80E5DE1FB0E45B028FF313F4 /* NotificationBubbleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationBubbleView.swift; sourceTree = "<group>"; };
 		876F7AA11CEC762975464D2F /* AppKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AppKit.framework; path = System/Library/Frameworks/AppKit.framework; sourceTree = SDKROOT; };
@@ -100,6 +103,7 @@
 		92314037C78AB4CCDD214FC1 /* client_secret.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = client_secret.json; sourceTree = "<group>"; };
 		932FEC9780873CEA3EF0CCDA /* KeystrokeMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeystrokeMonitor.swift; sourceTree = "<group>"; };
 		944177DAA03864CD41A829C7 /* HotkeyManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HotkeyManager.swift; sourceTree = "<group>"; };
+		9A5EB680B89515A07DFEB50D /* VoiceRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceRecorder.swift; sourceTree = "<group>"; };
 		A2EB423F071542766FE3CFF1 /* ServiceManagement.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = ServiceManagement.framework; path = System/Library/Frameworks/ServiceManagement.framework; sourceTree = SDKROOT; };
 		A4706308135587855A7DE9E3 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
 		BC62B6B690ED57D0403A32A3 /* DejaApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DejaApp.swift; sourceTree = "<group>"; };
@@ -223,6 +227,8 @@
 				546E703E0F803FFACC8456F1 /* MeetingRecorder.swift */,
 				53B9C764CDEDAB4DC7902FAE /* MonitorState.swift */,
 				651D730D288689BC54939D75 /* SetupManager.swift */,
+				76FFD515F2B4CE855C9FB52D /* VoiceCommandDispatcher.swift */,
+				9A5EB680B89515A07DFEB50D /* VoiceRecorder.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -416,8 +422,10 @@
 				25F5D3FB4B46BDDDF0B85911 /* SetupPanelView.swift in Sources */,
 				BD60699959C55904B448FFD0 /* SetupPanelWindow.swift in Sources */,
 				94559C662FE0F6196D5528E7 /* Utilities.swift in Sources */,
+				1F24387ECE2ABE55E8446C0A /* VoiceCommandDispatcher.swift in Sources */,
 				479BBE1791DB6EBFC865AEE8 /* VoicePillView.swift in Sources */,
 				D04A2CA44B55BAF02C462405 /* VoicePillWindow.swift in Sources */,
+				435160729688A388C539CF57 /* VoiceRecorder.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

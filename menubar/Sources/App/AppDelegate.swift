@@ -24,6 +24,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var voicePillWindow: VoicePillWindow?
     var didSetupVoicePill: Bool = false
     let hotkeyManager = HotkeyManager()
+    private var voiceDispatcher: VoiceCommandDispatcher?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -31,6 +32,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         setupStatusItem()       // First — before any work that could trigger menu bar layout
         setupPopover()
         monitor.start()         // After UI is set up
+
+        // Voice recording runs in-process now (was a DejaRecorder
+        // subprocess, which didn't hold mic TCC because it has no
+        // bundle identity). The dispatcher polls ~/.deja/voice_cmd.json
+        // so the Python mic_routes handlers can drive it.
+        let dispatcher = VoiceCommandDispatcher()
+        dispatcher.start()
+        voiceDispatcher = dispatcher
+
         startMicStatusPolling()
 
         // Sparkle auto-updater — checks for updates on launch and periodically

@@ -1,8 +1,22 @@
 """Microphone recording endpoints.
 
-POST /api/mic/start  — begin push-to-record session (ffmpeg + TCC)
-POST /api/mic/stop   — end session, transcribe via Gemini native audio
-GET  /api/mic/status  — {recording, started_at}
+POST /api/mic/start  — begin push-to-record session
+POST /api/mic/stop   — end session, transcribe via Groq Whisper, dispatch
+GET  /api/mic/status — {recording, started_at}
+
+Recording runs inside the main Deja.app Swift process (see
+`menubar/Sources/Services/VoiceCommandDispatcher.swift` +
+`VoiceRecorder.swift`). We drive it via a file-marker protocol:
+
+    Python → Swift  ~/.deja/voice_cmd.json
+    Swift  → Python ~/.deja/voice_status.json
+
+Why this exists: the old path spawned `DejaRecorder --mic` as a
+subprocess, but DejaRecorder is a command-line tool with no bundle
+identifier and no NSMicrophoneUsageDescription, so macOS TCC didn't
+recognize it as holding mic permission — AVAudioEngine returned
+zero-filled buffers and Whisper transcribed the silence as "you".
+Running in-process means ONE mic TCC entry (com.deja.app).
 """
 
 from __future__ import annotations
@@ -15,7 +29,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
 from deja.config import DEJA_HOME
 from deja.web.helpers import (
@@ -131,25 +145,88 @@ async def _polish_transcript(raw: str) -> str:
 
 AUDIO_DIR = DEJA_HOME / "audio"
 
+# File-marker IPC paths. Swift side: VoiceCommandDispatcher.swift.
+VOICE_CMD_PATH = DEJA_HOME / "voice_cmd.json"
+VOICE_STATUS_PATH = DEJA_HOME / "voice_status.json"
 
-def _find_recorder() -> str:
-    """Find the DejaRecorder binary — bundled in app or in build output."""
-    import sys
 
-    candidates = []
-    # Inside Deja.app bundle
-    if getattr(sys, "frozen", False):
-        candidates.append(Path(sys.executable).parent / "DejaRecorder")
-    # App bundle in /Applications
-    candidates.append(Path("/Applications/Deja.app/Contents/MacOS/DejaRecorder"))
-    # Development build output
-    candidates.append(Path.home() / "projects" / "deja" / "build" / "Release" / "DejaRecorder")
+def _write_voice_cmd(action: str, **extra: str) -> str:
+    """Write a command for the Swift VoiceCommandDispatcher to pick up.
 
-    for p in candidates:
-        if p.exists():
-            return str(p)
+    Captures the pre-existing voice_status.json ts (if any) so the
+    caller can detect a *new* status write from Swift rather than
+    matching a stale marker from a previous recording.
+    """
+    # Snapshot the status ts BEFORE writing the command — this is what
+    # we compare against to detect Swift's response.
+    prev_ts = ""
+    prev = _read_voice_status()
+    if prev:
+        prev_ts = prev.get("ts", "")
 
-    raise FileNotFoundError("DejaRecorder binary not found")
+    ts = datetime.now(timezone.utc).isoformat()
+    payload = {"action": action, "ts": ts, **extra}
+    DEJA_HOME.mkdir(parents=True, exist_ok=True)
+    tmp = VOICE_CMD_PATH.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(payload))
+    tmp.replace(VOICE_CMD_PATH)
+    return prev_ts
+
+
+def _read_voice_status() -> dict | None:
+    if not VOICE_STATUS_PATH.exists():
+        return None
+    try:
+        return json.loads(VOICE_STATUS_PATH.read_text())
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+async def _await_voice_status(
+    expected: str,
+    *,
+    after_ts: str,
+    timeout: float,
+    poll_interval: float = 0.1,
+) -> dict:
+    """Wait for voice_status.json to show ``expected`` with a ts different
+    from ``after_ts`` (the snapshot taken just before we wrote the cmd).
+
+    ts comparison is by inequality, not ordering — Swift's
+    ISO8601DateFormatter and Python's datetime.isoformat() produce
+    different tail suffixes (`Z` vs `+00:00`), so lexicographic
+    ordering across the boundary is unreliable. An inequality check is
+    enough because the dispatcher writes a fresh ts every time it
+    handles a command.
+
+    Raises HTTPException(500) on timeout or on an "error" status from
+    Swift. No silent fallbacks — if the recorder didn't come up, we
+    surface it loudly.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        status = _read_voice_status()
+        if status:
+            status_ts = status.get("ts", "")
+            if status_ts and status_ts != after_ts:
+                name = status.get("status", "")
+                if name == expected:
+                    return status
+                if name == "error":
+                    detail = status.get("detail", "unknown error")
+                    raise HTTPException(
+                        status_code=500,
+                        detail=f"voice recorder error: {detail}",
+                    )
+        await asyncio.sleep(poll_interval)
+
+    raise HTTPException(
+        status_code=500,
+        detail=(
+            f"voice recorder did not reach status={expected!r} within "
+            f"{timeout}s — is the Deja.app Swift process running?"
+        ),
+    )
 
 
 def _has_speech(wav_path: Path, threshold: float = 0.003) -> bool:
@@ -248,7 +325,7 @@ def _find_mic_device() -> int:
 MIC_AUTO_STOP_SEC = 300  # 5 minutes
 
 _mic_state: dict = {
-    "process": None,
+    "recording": False,
     "wav_path": None,
     "started_at": None,
     "auto_stop_task": None,
@@ -256,56 +333,37 @@ _mic_state: dict = {
 
 
 async def _auto_stop_after(delay: float) -> None:
-    """Safety net: kill the mic session after *delay* seconds if still running."""
+    """Safety net: stop the mic session after *delay* seconds if still running."""
     try:
         await asyncio.sleep(delay)
     except asyncio.CancelledError:
         return
-    if _mic_state["process"] is not None:
+    if _mic_state.get("recording"):
         await _mic_stop_inner(reason="auto-stop (safety timeout)")
 
 
 async def _mic_stop_inner(reason: str = "manual") -> dict:
-    """Stop recording via SIGTERM, transcribe, emit signal. Idempotent."""
+    """Stop recording via the Swift dispatcher, transcribe, dispatch. Idempotent."""
     wav_path: Path | None = _mic_state.get("wav_path")
     started_at: str | None = _mic_state.get("started_at")
-    proc: subprocess.Popen | None = _mic_state.get("process")
 
     task = _mic_state.get("auto_stop_task")
     if task is not None and not task.done():
         task.cancel()
     _mic_state["auto_stop_task"] = None
 
-    if not _mic_state.get("recording") or wav_path is None or proc is None:
+    if not _mic_state.get("recording") or wav_path is None:
         _mic_state["recording"] = False
-        _mic_state["process"] = None
         _mic_state["wav_path"] = None
         _mic_state["started_at"] = None
         return {"recording": False, "reason": "no active session"}
 
-    # Ask DejaRecorder to stop: SIGTERM → signal handler flips
-    # _micShouldStop → timer runs stop() → AVAudioFile flushes → exit(0).
-    try:
-        proc.terminate()
-    except ProcessLookupError:
-        pass  # already dead
-    except Exception:
-        log.exception("mic_stop: proc.terminate failed")
-
-    # Wait up to 2s for clean exit; SIGKILL as a last resort.
-    loop = asyncio.get_running_loop()
-    try:
-        await loop.run_in_executor(None, lambda: proc.wait(timeout=2.0))
-    except subprocess.TimeoutExpired:
-        log.warning("mic_stop: recorder didn't exit after SIGTERM — SIGKILLing")
-        try:
-            proc.kill()
-            await loop.run_in_executor(None, proc.wait)
-        except Exception:
-            log.exception("mic_stop: proc.kill failed")
+    # Ask Swift to stop the in-process VoiceRecorder and flush the WAV.
+    # Wait up to 5s for `done`; raise on timeout (no silent fallback).
+    cmd_ts = _write_voice_cmd("stop")
+    await _await_voice_status("done", after_ts=cmd_ts, timeout=5.0)
 
     _mic_state["recording"] = False
-    _mic_state["process"] = None
     _mic_state["wav_path"] = None
     _mic_state["started_at"] = None
 
@@ -395,22 +453,26 @@ async def _mic_stop_inner(reason: str = "manual") -> dict:
             "mic_stop: filtered Whisper hallucination: %r (wav kept at %s)",
             raw, wav_path,
         )
-        # Activity log entry so the dropped transcription shows in feed
+        # Audit entry so the dropped transcription is traceable.
         try:
-            from deja.activity_log import append_log_entry
+            from deja import audit
 
             kb = wav_size // 1024
             rms_str = (
                 f" ({wav_rms_db:.1f}dBFS)"
                 if wav_rms_db is not None else ""
             )
-            append_log_entry(
-                "mic",
-                f"transcription dropped — Whisper hallucination: {raw!r} "
-                f"({kb}KB audio{rms_str})",
+            audit.record(
+                "voice_transcript",
+                target="mic/dropped",
+                reason=(
+                    f"Whisper hallucination: {raw!r} "
+                    f"({kb}KB audio{rms_str})"
+                ),
+                trigger={"kind": "user_cmd", "detail": "voice"},
             )
         except Exception:
-            log.debug("activity_log append failed for dropped transcription", exc_info=True)
+            log.debug("audit.record failed for dropped transcription", exc_info=True)
         return {
             "ok": False,
             "recording": False,
@@ -521,16 +583,18 @@ async def _mic_stop_inner(reason: str = "manual") -> dict:
             "transcript": transcript,
         }
 
-    # Activity log — mirror command_routes behavior for text commands
+    # Audit — mirror command_routes behavior for text commands
     try:
-        from deja.activity_log import append_log_entry
+        from deja import audit
 
-        append_log_entry(
-            "command",
-            f"{cmd_type} (spoken): {confirmation or transcript[:120]}",
+        audit.record(
+            "voice_transcript",
+            target=f"command/{cmd_type}",
+            reason=confirmation or transcript[:200],
+            trigger={"kind": "user_cmd", "detail": "voice"},
         )
     except Exception:
-        log.debug("activity_log append failed for voice command", exc_info=True)
+        log.debug("audit.record failed for voice command", exc_info=True)
 
     # Context-type commands fire an immediate integrate trigger so the
     # new signal gets processed against any other unprocessed signals.
@@ -586,30 +650,16 @@ async def mic_start() -> dict:
     AUDIO_DIR.mkdir(parents=True, exist_ok=True)
     wav_path = AUDIO_DIR / f"session-{int(time.time())}.wav"
 
-    # Spawn DejaRecorder fresh per recording. It runs until SIGTERM,
-    # which mic_stop sends. No persistent daemon, no warm-mic trick —
-    # the macOS mic indicator goes dark the instant this process exits.
-    try:
-        recorder_path = _find_recorder()
-    except FileNotFoundError as e:
-        log.error("mic_start: %s", e)
-        return {"recording": False, "error": "DejaRecorder binary not found"}
+    # Drive the in-process Swift VoiceRecorder via the voice_cmd.json
+    # marker. Wait up to 2s for Swift to echo back `recording` — if it
+    # doesn't, raise loudly (no silent fallback).
+    cmd_ts = _write_voice_cmd("start", wav_path=str(wav_path))
+    await _await_voice_status("recording", after_ts=cmd_ts, timeout=2.0)
 
-    try:
-        proc = subprocess.Popen(
-            [recorder_path, "--mic", str(wav_path)],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-    except Exception as e:
-        log.exception("mic_start: failed to spawn recorder")
-        return {"recording": False, "error": str(e)[:200]}
-
-    log.info("mic recorder started (pid=%d) → %s", proc.pid, wav_path.name)
+    log.info("voice recording started → %s", wav_path.name)
 
     started_at = datetime.now(timezone.utc).isoformat()
     _mic_state["recording"] = True
-    _mic_state["process"] = proc
     _mic_state["wav_path"] = wav_path
     _mic_state["started_at"] = started_at
 

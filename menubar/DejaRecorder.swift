@@ -13,6 +13,7 @@ import Foundation
 import ScreenCaptureKit
 import AVFoundation
 import CoreMedia
+import AppKit
 
 // MARK: - Audio Recorder
 
@@ -350,122 +351,28 @@ func log(_ message: String) {
     FileHandle.standardError.write("[\(ts)] \(message)\n".data(using: .utf8)!)
 }
 
-import AppKit
-
-// MARK: - One-shot mic recorder (for voice pill)
-//
-// Spawned fresh per recording. Creates an AVAudioEngine, writes the tap
-// directly to an AVAudioFile, and exits cleanly on SIGTERM/SIGINT so
-// the parent (Python backend) can just terminate() to stop recording.
-// No persistent daemon, no warm-mic ring buffer — the orange macOS
-// mic indicator is dark between recordings.
-
-class OneShotMicRecorder {
-    private let engine = AVAudioEngine()
-    private var file: AVAudioFile?
-
-    func start(outputPath: URL) throws {
-        let input = engine.inputNode
-        let inputFormat = input.outputFormat(forBus: 0)
-
-        guard inputFormat.sampleRate > 0 else {
-            throw NSError(
-                domain: "DejaRecorder",
-                code: 1,
-                userInfo: [NSLocalizedDescriptionKey: "no audio input available"],
-            )
-        }
-
-        let wavSettings: [String: Any] = [
-            AVFormatIDKey: kAudioFormatLinearPCM,
-            AVSampleRateKey: inputFormat.sampleRate,
-            AVNumberOfChannelsKey: 1,
-            AVLinearPCMBitDepthKey: 16,
-            AVLinearPCMIsFloatKey: false,
-            AVLinearPCMIsBigEndianKey: false,
-            AVLinearPCMIsNonInterleaved: false,
-        ]
-
-        guard let monoFormat = AVAudioFormat(
-            commonFormat: .pcmFormatFloat32,
-            sampleRate: inputFormat.sampleRate,
-            channels: 1,
-            interleaved: false,
-        ) else {
-            throw NSError(
-                domain: "DejaRecorder",
-                code: 2,
-                userInfo: [NSLocalizedDescriptionKey: "failed to build mono format"],
-            )
-        }
-
-        self.file = try AVAudioFile(forWriting: outputPath, settings: wavSettings)
-
-        input.installTap(onBus: 0, bufferSize: 4096, format: monoFormat) { [weak self] buffer, _ in
-            guard let self = self, let f = self.file else { return }
-            try? f.write(from: buffer)
-        }
-
-        try engine.start()
-    }
-
-    func stop() {
-        engine.inputNode.removeTap(onBus: 0)
-        engine.stop()
-        // Dropping the last strong ref to AVAudioFile triggers deinit,
-        // which flushes the WAV header (sample count, chunk sizes).
-        file = nil
-    }
-}
-
-
 // MARK: - Main
-
-var _micShouldStop = false
+//
+// DejaRecorder used to also handle one-shot mic capture for the voice
+// pill via a `--mic` flag. That path has moved into the main Deja.app
+// Swift process (see menubar/Sources/Services/VoiceRecorder.swift and
+// VoiceCommandDispatcher.swift) because DejaRecorder, as a standalone
+// CLI tool with no bundle identifier, doesn't hold mic TCC permission
+// and AVAudioEngine returned zero-filled buffers. Meeting recording
+// (ScreenCaptureKit + ffmpeg) remains here.
+//
+// Note: SourceKit's live analysis sometimes flags `@main` here with
+// "cannot be used in a module that contains top-level code" because
+// the target is a single-file `type: tool` that Xcode parses ambiguously.
+// This is a spurious warning — xcodebuild compiles successfully.
 
 @main
 struct DejaRecorderApp {
     static func main() {
         NSApplication.shared.setActivationPolicy(.accessory)
 
-        // --mic <output.wav> mode: one-shot recording for the voice pill.
-        // Spawned fresh per recording by the Python backend; terminated
-        // via SIGTERM from mic_routes.py when the user releases Listen.
-        // The macOS mic indicator goes dark as soon as this process
-        // exits.
-        if CommandLine.arguments.count >= 3 && CommandLine.arguments[1] == "--mic" {
-            let outputPath = URL(fileURLWithPath: CommandLine.arguments[2])
-
-            let recorder = OneShotMicRecorder()
-            do {
-                try recorder.start(outputPath: outputPath)
-                log("--mic: recording to \(outputPath.lastPathComponent)")
-            } catch {
-                log("--mic: start failed: \(error)")
-                exit(1)
-            }
-
-            signal(SIGINT) { _ in _micShouldStop = true }
-            signal(SIGTERM) { _ in _micShouldStop = true }
-            Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { timer in
-                if _micShouldStop {
-                    timer.invalidate()
-                    recorder.stop()
-                    log("--mic: recording stopped")
-                    // Small delay so the AVAudioFile deinit finishes
-                    // flushing the WAV header before the process exits.
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { exit(0) }
-                }
-            }
-
-            RunLoop.main.run()
-            return
-        }
-
-        // Default: meeting recording mode
         guard CommandLine.arguments.count >= 2 else {
             log("Usage: DejaRecorder <session-dir>")
-            log("       DejaRecorder --mic <output.wav>")
             exit(1)
         }
 
