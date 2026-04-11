@@ -211,40 +211,19 @@ async def _run_reflection_body() -> dict:
         log.exception("contact enrichment failed")
 
     wiki_text = wiki_store.render_for_prompt()
-    signals_text = _recent_signals_text()
-
-    goals_path = WIKI_DIR / "goals.md"
-    goals_text = goals_path.read_text() if goals_path.exists() else "(no goals.md)"
-
-    events_text = _recent_events_text(days=7)
-
-    from deja.observations.contacts import get_contacts_summary
-    contacts_text = get_contacts_summary()
-
-    orphan_candidates = _find_orphan_people_with_contacts()
-    orphan_text = _format_orphan_candidates(orphan_candidates)
-
-    from deja.wiki_schema import load_schema
-    schema = load_schema()
 
     from deja.identity import load_user
     user_fields = load_user().as_prompt_fields()
 
-    prompt = load_prompt("reflect").format(
+    prompt = load_prompt("deduplicate").format(
         current_time=datetime.now().strftime("%A, %B %d, %Y — %H:%M"),
-        contacts_text=contacts_text,
-        schema=schema,
-        goals=goals_text,
         wiki_text=wiki_text,
-        recent_events=events_text,
-        recent_observations=signals_text,
-        orphan_people=orphan_text,
         **user_fields,
     )
 
     log.info(
-        "Reflection: running Pro with %d chars of context (wiki=%d, events=%d, obs=%d)",
-        len(prompt), len(wiki_text), len(events_text), len(signals_text),
+        "Deduplicate: running Pro with %d chars of context (wiki=%d)",
+        len(prompt), len(wiki_text),
     )
 
     gemini = GeminiClient()

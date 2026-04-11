@@ -1,4 +1,4 @@
-# WorkAgent Wiki
+# Déjà Wiki
 
 This is my living knowledge base about the people and projects in my life. An LLM agent maintains it by watching signals from my digital life (email, calendar, messages, screenshots, chats with it). I read and edit it in Obsidian. This file is the shared agreement between me and the agent about how the wiki should feel.
 

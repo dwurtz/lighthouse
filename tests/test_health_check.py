@@ -58,7 +58,7 @@ def test_check_wiki_complete(isolated_home):
     (wiki / "index.md").write_text("index")
     prompts = wiki / "prompts"
     prompts.mkdir()
-    for name in ("integrate.md", "chat.md", "reflect.md", "describe_screen.md", "prefilter.md"):
+    for name in ("integrate.md", "chat.md", "deduplicate.md", "describe_screen.md", "prefilter.md"):
         (prompts / name).write_text("prompt")
     (wiki / ".git").mkdir()
 
@@ -73,7 +73,7 @@ def test_check_wiki_missing_prompt(isolated_home):
     prompts = wiki / "prompts"
     prompts.mkdir()
     # Deliberately missing prefilter.md
-    for name in ("integrate.md", "chat.md", "reflect.md", "describe_screen.md"):
+    for name in ("integrate.md", "chat.md", "deduplicate.md", "describe_screen.md"):
         (prompts / name).write_text("prompt")
     (wiki / ".git").mkdir()
 

@@ -153,24 +153,23 @@ def set_identity(body: dict) -> dict:
             f"The user behind Deja.\n"
         )
 
-    # Copy default prompts if not present
-    try:
-        import importlib.resources as pkg_resources
-        prompts_dir = WIKI_DIR / "prompts"
-        for prompt_name in ["integrate", "integrate_local", "reflect", "describe_screen", "prefilter", "chat", "onboard"]:
-            dest = prompts_dir / f"{prompt_name}.md"
-            if not dest.exists():
-                try:
-                    src = pkg_resources.files("deja") / "default_assets" / "prompts" / f"{prompt_name}.md"
-                    if src.is_file():
-                        dest.write_text(src.read_text())
-                        log.info("Copied default prompt: %s", prompt_name)
-                    else:
-                        log.warning("Default prompt not found in package: %s", prompt_name)
-                except Exception:
-                    log.warning("Failed to copy default prompt: %s", prompt_name, exc_info=True)
-    except Exception:
-        log.error("Default prompts copy failed entirely", exc_info=True)
+    # Copy default prompts. Missing source files are a packaging bug —
+    # fail loudly so the user sees the real problem instead of running
+    # on half-installed defaults.
+    import importlib.resources as pkg_resources
+    prompts_dir = WIKI_DIR / "prompts"
+    for prompt_name in ["integrate", "integrate_local", "deduplicate", "describe_screen", "prefilter", "chat", "onboard"]:
+        dest = prompts_dir / f"{prompt_name}.md"
+        if dest.exists():
+            continue
+        src = pkg_resources.files("deja") / "default_assets" / "prompts" / f"{prompt_name}.md"
+        if not src.is_file():
+            raise RuntimeError(
+                f"Packaging error: default_assets/prompts/{prompt_name}.md is "
+                f"missing from the deja package. Fix the source tree or rebuild."
+            )
+        dest.write_text(src.read_text())
+        log.info("Copied default prompt: %s", prompt_name)
 
     # Create goals.md if not present
     goals = WIKI_DIR / "goals.md"
@@ -184,14 +183,18 @@ def set_identity(body: dict) -> dict:
             "## Recurring\n\n"
         )
 
-    # Create CLAUDE.md if not present
+    # Copy CLAUDE.md from default_assets. Missing source is a packaging
+    # bug — fail loudly.
     claude_md = WIKI_DIR / "CLAUDE.md"
     if not claude_md.exists():
-        claude_md.write_text(
-            "# Wiki writing conventions\n\n"
-            "Entity pages describe current state in clean prose.\n"
-            "Event pages describe what happened with timestamps and [[wiki-links]].\n"
-        )
+        src = pkg_resources.files("deja") / "default_assets" / "CLAUDE.md"
+        if not src.is_file():
+            raise RuntimeError(
+                "Packaging error: default_assets/CLAUDE.md is missing from "
+                "the deja package. Fix the source tree or rebuild."
+            )
+        claude_md.write_text(src.read_text())
+        log.info("Copied default CLAUDE.md")
 
     # Initialize git repo
     try:
