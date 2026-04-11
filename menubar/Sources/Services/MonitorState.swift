@@ -768,9 +768,18 @@ class MonitorState: ObservableObject {
 
             var fullText = ""
             let text = String(data: data, encoding: .utf8) ?? ""
-            for line in text.split(separator: "\n") {
-                // Strip trailing \r from HTTP line endings
-                let l = String(line).trimmingCharacters(in: CharacterSet(charactersIn: "\r"))
+            // IMPORTANT: use components(separatedBy:) rather than split(separator: "\n").
+            // Swift's String.split treats "\n" as a Character (grapheme cluster),
+            // and "\r\n" is a single cluster — so split would NOT cut at the LF
+            // inside a "\r\n" pair. The Unix-socket response body is HTTP/1.1
+            // chunked transfer encoding, which wraps each streamed chunk in
+            // "\r\n"-framed hex-length lines. With the grapheme-cluster split
+            // the framing bytes bleed into the "data: ..." lines and every
+            // event gets dropped, producing empty assistant bubbles.
+            // components(separatedBy:) does a scalar-level split and works.
+            for line in text.components(separatedBy: "\n") {
+                // Strip leading/trailing \r (both HTTP chunk framing and SSE CRLF)
+                let l = line.trimmingCharacters(in: CharacterSet(charactersIn: "\r"))
                 if l.hasPrefix("data: ") {
                     let jsonStr = String(l.dropFirst(6))
                     if let jsonData = jsonStr.data(using: .utf8),
