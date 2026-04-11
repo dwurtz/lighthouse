@@ -45,6 +45,7 @@ tests/fixtures/screenshots/baseline_descriptions/
 # Temp / runtime outputs that only make sense on one machine
 logs/
 *.log
+.claude/scheduled_tasks.lock
 
 menubar/icon/app_icon.svg
 Deja.dmg
