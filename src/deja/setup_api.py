@@ -230,37 +230,34 @@ def complete_setup() -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Model download
+# Model download (unified vision + text via bundled llama.cpp)
 # ---------------------------------------------------------------------------
 
 @router.get("/model-status")
 def model_status() -> dict:
-    """Return the local vision model download/load status."""
-    from deja.vision_local import get_download_status, is_available, is_model_downloaded
-    status = get_download_status()
-    status["mlx_vlm_installed"] = is_available()
-    status["model_cached"] = is_model_downloaded()
+    """Return the on-device vision model download/load status."""
+    from deja import local_models
+    status = local_models.get_status()
+    status["mlx_vlm_installed"] = status.get("binaries_present", False)
+    status["model_cached"] = status.get("vision_ready", False)
     return status
 
 
 @router.post("/download-model")
 async def start_model_download() -> dict:
-    """Download the local vision model in the background.
+    """Download the on-device vision model in the background.
 
     Returns immediately. Poll /api/setup/model-status for progress.
     """
-    import asyncio
-    from deja.vision_local import download_model, get_download_status
+    from deja import local_models
 
-    status = get_download_status()
-    if status["status"] in ("downloading", "loading"):
+    status = local_models.get_status()
+    if status["status"] == "downloading":
         return {"ok": True, "already_running": True}
     if status["status"] == "ready":
         return {"ok": True, "already_ready": True}
 
-    # Run in background
-    loop = asyncio.get_event_loop()
-    loop.run_in_executor(None, download_model)
+    local_models.download_all_async()
     return {"ok": True}
 
 

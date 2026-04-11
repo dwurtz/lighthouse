@@ -1,23 +1,21 @@
-"""On-device screenshot description via bundled llama.cpp + Qwen2.5-VL 3B.
+"""On-device screenshot description via Apple FastVLM 0.5B + mlx-vlm.
 
-Runs Qwen2.5-VL 3B locally through ``llama-mtmd-cli`` — no data leaves
-the Mac. The model is downloaded from HuggingFace on first launch
-(~2.5GB total) and cached under ``~/.deja/models/``.
+Runs FastVLM 0.5B locally in-process using mlx-vlm — no data leaves
+the Mac. Weights are downloaded from HuggingFace on first launch
+(~1.4 GB) into ``~/Library/Application Support/com.deja.app/models/``.
 
 This replaces the Gemini-based ``describe_screen()`` for the screenshot
 observation pipeline. The text description (not the image) flows to the
 integration cycle as before.
 
-Why bundled binaries instead of mlx-vlm: see ``docs/llama-cpp-bundling.md``.
-The public API of this module is intentionally unchanged from the
-mlx-vlm version so callers in ``agent/observation_cycle.py`` don't
-need to be touched.
+Performance target: ~3.5s per screenshot on Apple Silicon after the
+model is warm. First call after backend start pays a one-time load
+cost of ~8s.
 """
 
 from __future__ import annotations
 
 import logging
-import subprocess
 import time
 from pathlib import Path
 
@@ -42,6 +40,11 @@ _PROMPT_FALLBACK = (
 # Cache the entity context so we don't re-read the wiki every 6 seconds
 _entity_context_cache: str | None = None
 _entity_context_ts: float = 0
+
+# Lazy-loaded model state — survives for the process lifetime.
+_model = None
+_processor = None
+_load_attempted = False
 
 
 def _build_entity_context() -> str:
@@ -113,12 +116,16 @@ def _build_prompt(voice_context: str = "") -> str:
 
 
 def is_available() -> bool:
-    """True iff the bundled llama-mtmd-cli binary is present."""
-    return local_models.llama_binary("llama-mtmd-cli") is not None
+    """True iff mlx_vlm can be imported."""
+    try:
+        import mlx_vlm  # noqa: F401
+        return True
+    except ImportError:
+        return False
 
 
 def is_model_downloaded() -> bool:
-    """True iff both the vision model and its mmproj are cached locally."""
+    """True iff FastVLM weights are cached locally."""
     return local_models.is_vision_downloaded()
 
 
@@ -128,17 +135,43 @@ def get_download_status() -> dict:
 
 
 def download_model() -> bool:
-    """Download all on-device models (vision + text).
-
-    Despite the name, this kicks off the unified download driver in
-    ``local_models``. Kept for backwards compatibility with the
-    setup-panel API which used to call only the vision module.
-    """
+    """Download FastVLM 0.5B weights. Blocks until complete."""
     return local_models.download_all()
 
 
+def _ensure_model() -> bool:
+    """Load FastVLM into memory on first call. Cached for process lifetime."""
+    global _model, _processor, _load_attempted
+
+    if _model is not None:
+        return True
+    if _load_attempted:
+        return False  # already failed once — don't thrash
+
+    _load_attempted = True
+
+    snapshot = local_models.fastvlm_path()
+    if snapshot is None:
+        log.debug("FastVLM weights not downloaded yet")
+        return False
+
+    try:
+        from mlx_vlm import load
+        log.info("Loading FastVLM 0.5B into memory...")
+        t0 = time.time()
+        _model, _processor = load(str(snapshot))
+        log.info("FastVLM loaded in %.1fs", time.time() - t0)
+        return True
+    except ImportError:
+        log.warning("mlx-vlm not installed — local vision disabled")
+        return False
+    except Exception:
+        log.exception("Failed to load FastVLM")
+        return False
+
+
 def describe_screen_local(image_path: str, voice_context: str = "") -> str | None:
-    """Describe a screenshot using on-device Qwen2.5-VL via llama-mtmd-cli.
+    """Describe a screenshot using on-device FastVLM via mlx-vlm.
 
     Args:
         image_path: Path to a PNG/JPEG screenshot file.
@@ -147,24 +180,19 @@ def describe_screen_local(image_path: str, voice_context: str = "") -> str | Non
             and grounds the description in their stated intent.
 
     Returns:
-        Text description of what's on screen, or None if local vision
-        is unavailable, the model isn't downloaded, or inference fails.
+        Text description, or None if local vision is unavailable,
+        the model isn't downloaded, or inference fails.
     """
-    binary = local_models.llama_binary("llama-mtmd-cli")
-    if binary is None:
-        log.debug("llama-mtmd-cli not bundled — local vision unavailable")
-        return None
-
-    if not local_models.is_vision_downloaded():
-        log.debug("Vision GGUF not downloaded yet")
-        return None
-
     image = Path(image_path)
     if not image.exists():
         log.warning("Screenshot file missing: %s", image_path)
         return None
 
-    prompt = _build_prompt(voice_context=voice_context)
+    if not _ensure_model():
+        return None
+
+    prompt_text = _build_prompt(voice_context=voice_context)
+
     request_id = None
     try:
         from deja.telemetry import new_request_id
@@ -172,64 +200,44 @@ def describe_screen_local(image_path: str, voice_context: str = "") -> str | Non
     except Exception:
         pass
 
-    cmd = [
-        str(binary),
-        "-m", str(local_models.VISION_MODEL_PATH),
-        "--mmproj", str(local_models.VISION_MMPROJ_PATH),
-        "--image", str(image),
-        "-p", prompt,
-        "--n-predict", "300",
-        "--temp", "0.1",
-        "-ngl", "999",
-        "--no-display-prompt",
-    ]
-
-    t0 = time.time()
     try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=120,
+        from mlx_vlm import generate
+        from mlx_vlm.prompt_utils import apply_chat_template
+
+        prompt = apply_chat_template(
+            _processor,
+            config=_model.config,
+            prompt=f"<image>\n{prompt_text}",
+            images=[str(image)],
         )
-    except subprocess.TimeoutExpired:
-        log.warning("llama-mtmd-cli timed out on %s", image.name)
-        _track_inference(False, time.time() - t0, 0, request_id, error="timeout")
-        return None
-    except Exception:
-        log.exception("llama-mtmd-cli failed to launch")
-        return None
 
-    elapsed = time.time() - t0
+        t0 = time.time()
+        result = generate(
+            _model, _processor, prompt, [str(image)],
+            max_tokens=300, temperature=0.1,
+        )
+        elapsed = time.time() - t0
 
-    if result.returncode != 0:
-        stderr_tail = (result.stderr or "")[-500:]
-        log.warning(
-            "llama-mtmd-cli exited %d in %.1fs: %s",
-            result.returncode,
+        text = (result.text or "").strip()
+        if not text:
+            log.warning("FastVLM returned empty output for %s", image.name)
+            _track_inference(False, elapsed, 0, request_id, error="empty")
+            return None
+
+        log.info(
+            "Vision (FastVLM): %.1fs, %d tokens, %.1f tok/s, %s",
             elapsed,
-            stderr_tail,
+            getattr(result, "generation_tokens", 0),
+            getattr(result, "generation_tps", 0.0) or 0.0,
+            image.name,
         )
-        _track_inference(
-            False, elapsed, len(result.stdout or ""), request_id,
-            error=f"exit_{result.returncode}",
-        )
-        return None
+        _track_inference(True, elapsed, len(text), request_id)
+        return text
 
-    text = (result.stdout or "").strip()
-    if not text:
-        log.warning("llama-mtmd-cli returned empty output for %s", image.name)
-        _track_inference(False, elapsed, 0, request_id, error="empty")
+    except Exception:
+        log.exception("FastVLM inference failed for %s", image.name)
+        _track_inference(False, 0.0, 0, request_id, error="exception")
         return None
-
-    log.info(
-        "Vision (Qwen2.5-VL): %.1fs, %d chars, %s",
-        elapsed,
-        len(text),
-        image.name,
-    )
-    _track_inference(True, elapsed, len(text), request_id)
-    return text
 
 
 def _track_inference(

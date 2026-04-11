@@ -135,33 +135,10 @@ async def run_analysis_cycle(loop_ref) -> None:
             pass
 
         try:
-            # Try local Qwen3 first (private, free, ~15s)
-            # Falls back to cloud Gemini if mlx-lm unavailable or fails
-            result = None
-            try:
-                from deja.integration_local import (
-                    integrate_observations_local,
-                    is_available as local_available,
-                )
-                if local_available():
-                    import asyncio as _asyncio
-                    _loop = _asyncio.get_running_loop()
-                    result = await _loop.run_in_executor(
-                        None,
-                        integrate_observations_local,
-                        batch_text,
-                        wiki_text,
-                    )
-                    if result:
-                        log.info("Integration via local Qwen3: %d updates", len(result.get("wiki_updates", [])))
-            except Exception:
-                log.debug("Local integration failed, falling back to Gemini", exc_info=True)
-
-            if result is None:
-                result = await loop_ref.gemini.integrate_observations(
-                    signals_text=batch_text,
-                    wiki_text=wiki_text,
-                )
+            result = await loop_ref.gemini.integrate_observations(
+                signals_text=batch_text,
+                wiki_text=wiki_text,
+            )
 
             # Save the response alongside the fixture
             try:

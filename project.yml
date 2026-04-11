@@ -10,12 +10,11 @@ packages:
   Sparkle:
     url: https://github.com/sparkle-project/Sparkle.git
     from: "2.6.0"
-  # mlx-swift-lm: blocked by Xcode 26 explicit modules regression
-  # See: https://forums.swift.org/t/xcode-26-unable-to-find-module-dependency/80516
-  # Revisit when mlx-swift updates Package.swift or Apple fixes Xcode 26
-  # MLXLM:
-  #   url: https://github.com/ml-explore/mlx-swift-lm.git
-  #   from: "2.31.3"
+  # Pure-Swift FastVLM via mlx-swift-lm is blocked by an Xcode 26
+  # explicit-modules regression that breaks the swift-numerics
+  # transitive dep (see docs/future-simplifications.md). Vision
+  # inference currently runs via Python/mlx-vlm inside the bundled
+  # python-env instead.
 
 settings:
   base:

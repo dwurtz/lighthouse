@@ -19,6 +19,8 @@ dependencies = [
     "pyobjc-framework-Cocoa>=10.0",
     "mcp>=1.0",
     "httpx>=0.28",
+    "mlx-vlm>=0.1",
+    "huggingface-hub>=0.24",
 ]
 
 [project.scripts]

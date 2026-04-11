@@ -28,6 +28,7 @@
 		721E485344FC645BA7C04B43 /* AppIcon.icns in Resources */ = {isa = PBXBuildFile; fileRef = F16A3FDFD508206B3D67DFE3 /* AppIcon.icns */; };
 		7530B2F920F0FFCF1E2D3AA1 /* PopoverContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18CDCF2320DFBB2102143A62 /* PopoverContentView.swift */; };
 		7C47A76DB22E37B757401576 /* CoreGraphics.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = FF7DDEFB774D920864C65017 /* CoreGraphics.framework */; };
+		85D7F542B5AA0DA671A30BAB /* KeystrokeMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 932FEC9780873CEA3EF0CCDA /* KeystrokeMonitor.swift */; };
 		94559C662FE0F6196D5528E7 /* Utilities.swift in Sources */ = {isa = PBXBuildFile; fileRef = 577197DA62750145A9E65676 /* Utilities.swift */; };
 		A3419BAB5DF619CFC302DDB9 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEBD0855AD78D7C16A60FE1D /* SettingsView.swift */; };
 		AF2024A02B1E811E745245BB /* DatabaseReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 30A978138C56BCDD8744D302 /* DatabaseReader.swift */; };
@@ -99,6 +100,7 @@
 		876F7AA11CEC762975464D2F /* AppKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AppKit.framework; path = System/Library/Frameworks/AppKit.framework; sourceTree = SDKROOT; };
 		8ACEA8F312916A3DB10B6583 /* BackendProcessManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackendProcessManager.swift; sourceTree = "<group>"; };
 		92314037C78AB4CCDD214FC1 /* client_secret.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = client_secret.json; sourceTree = "<group>"; };
+		932FEC9780873CEA3EF0CCDA /* KeystrokeMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeystrokeMonitor.swift; sourceTree = "<group>"; };
 		944177DAA03864CD41A829C7 /* HotkeyManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HotkeyManager.swift; sourceTree = "<group>"; };
 		A2EB423F071542766FE3CFF1 /* ServiceManagement.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = ServiceManagement.framework; path = System/Library/Frameworks/ServiceManagement.framework; sourceTree = SDKROOT; };
 		A4706308135587855A7DE9E3 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
@@ -218,6 +220,7 @@
 				8ACEA8F312916A3DB10B6583 /* BackendProcessManager.swift */,
 				30A978138C56BCDD8744D302 /* DatabaseReader.swift */,
 				944177DAA03864CD41A829C7 /* HotkeyManager.swift */,
+				932FEC9780873CEA3EF0CCDA /* KeystrokeMonitor.swift */,
 				129900B011818660B477E1AA /* MeetingCoordinator.swift */,
 				546E703E0F803FFACC8456F1 /* MeetingRecorder.swift */,
 				53B9C764CDEDAB4DC7902FAE /* MonitorState.swift */,
@@ -404,6 +407,7 @@
 				AF2024A02B1E811E745245BB /* DatabaseReader.swift in Sources */,
 				5878450BBB6A4FCF7D791AFC /* DejaApp.swift in Sources */,
 				BBEF67D44A7438C7C9F527AE /* HotkeyManager.swift in Sources */,
+				85D7F542B5AA0DA671A30BAB /* KeystrokeMonitor.swift in Sources */,
 				B159333D857730B8493EB6E9 /* MeetingCoordinator.swift in Sources */,
 				070169F7CFC7C96432745E16 /* MeetingPillView.swift in Sources */,
 				0C01FC2FFCC37AF1B2A160EB /* MeetingRecorder.swift in Sources */,

@@ -26,12 +26,16 @@ DEST="$APP/Contents/Resources/python-env"
 PYTHON_VERSION="3.14"
 SITE_PACKAGES="$VENV/lib/python${PYTHON_VERSION}/site-packages"
 
-# Resolve the real Python binary (follow symlinks).
-# Use the venv's Python explicitly — Xcode's build environment may
-# have a different python3 on PATH than the shell.
-REAL_PYTHON="$("$VENV/bin/python3" -c "import sys; print(sys.executable)")"
+# Resolve the real Python binary (follow the venv symlink chain to the
+# underlying Homebrew framework). NOTE: we cannot use `sys.executable`
+# inside the venv — it returns the venv's own python path, which
+# would point FRAMEWORK_LIB at the venv's lib/ instead of the framework's
+# stdlib, dragging the entire site-packages directory (including the ML
+# packages we explicitly exclude later) into the first stdlib rsync.
+REAL_PYTHON="$(readlink -f "$VENV/bin/python3")"
 if [ ! -f "$REAL_PYTHON" ]; then
-    REAL_PYTHON="$(readlink -f "$VENV/bin/python3")"
+    echo "ERROR: Cannot resolve real python3 from $VENV/bin/python3"
+    exit 1
 fi
 
 # Find the Python framework/lib directory (stdlib)
@@ -56,13 +60,27 @@ echo "Copying Python binary..."
 cp "$REAL_PYTHON" "$DEST/bin/python3"
 chmod +x "$DEST/bin/python3"
 
-# 2. Copy the Python standard library
+# 2. Copy the Python standard library.
+# IMPORTANT: exclude site-packages here. The Homebrew framework ships
+# its site-packages as a SYMLINK pointing outside the framework, which
+# would (a) come across as a broken symlink in the bundle and (b) block
+# the later site-packages rsync. We populate site-packages from the
+# venv in step 4 instead.
 echo "Copying Python stdlib..."
+# Exclude config-*-darwin (Python C extension build headers — only used
+# for compiling native modules against the framework at runtime, which
+# we never do). These dirs contain broken symlinks like libpython3.14.a
+# → ../../../Python that point into the framework's parent dirs and
+# resolve cleanly in the Homebrew layout but become dangling in our
+# bundled layout. codesign --deep walks into them, fails, and LaunchServices
+# then rejects the bundle with error -600 ("bundle cannot be launched").
 rsync -a --exclude='__pycache__' --exclude='*.pyc' \
     --exclude='test' --exclude='tests' --exclude='idle_test' \
     --exclude='tkinter' --exclude='turtledemo' --exclude='turtle.py' \
     --exclude='ensurepip' --exclude='distutils' \
     --exclude='lib2to3' \
+    --exclude='site-packages' \
+    --exclude='config-*-darwin' \
     "$FRAMEWORK_LIB/" "$DEST/lib/python${PYTHON_VERSION}/"
 
 # 3. Copy the Python dylib/framework so the binary can find it
@@ -84,6 +102,16 @@ if [ -f "$FRAMEWORK_DYLIB" ]; then
     # Copy the framework dylib next to where the binary expects it
     mkdir -p "$DEST/Frameworks/Python.framework/Versions/${PYTHON_VERSION}"
     cp "$FRAMEWORK_DYLIB" "$DEST/Frameworks/Python.framework/Versions/${PYTHON_VERSION}/Python"
+
+    # Copy Python.app helper — Python on macOS uses this stub when
+    # spawning the actual interpreter process. Without it, python3 in
+    # the bundle dies with "posix_spawn: Python.app/.../Python: Undefined error: 0".
+    if [ -d "$FRAMEWORK_DIR/Resources/Python.app" ]; then
+        echo "Copying Python.app helper..."
+        mkdir -p "$DEST/Frameworks/Python.framework/Versions/${PYTHON_VERSION}/Resources"
+        rsync -a "$FRAMEWORK_DIR/Resources/Python.app" \
+            "$DEST/Frameworks/Python.framework/Versions/${PYTHON_VERSION}/Resources/"
+    fi
 fi
 
 # 4. Copy site-packages (excluding large unnecessary dirs)
@@ -100,15 +128,15 @@ rsync -a --exclude='__pycache__' --exclude='*.pyc' \
     --exclude='pkg_resources' \
     --exclude='wheel' --exclude='wheel-*' \
     --exclude='*.dist-info/RECORD' \
-    --exclude='torch' --exclude='torch-*' \
-    --exclude='torchvision' --exclude='torchvision-*' \
-    --exclude='timm' --exclude='timm-*' \
-    --exclude='sympy' --exclude='sympy-*' \
-    --exclude='networkx' --exclude='networkx-*' \
     "$SITE_PACKAGES/" "$DEST/lib/python${PYTHON_VERSION}/site-packages/"
 
 # Remove editable install .pth files (they point to the dev machine)
 rm -f "$DEST/lib/python${PYTHON_VERSION}/site-packages/__editable__."*.pth
+
+# Remove distutils-precedence.pth — it tries to import _distutils_hack
+# which we exclude with setuptools, producing a harmless but noisy
+# ModuleNotFoundError on every Python startup.
+rm -f "$DEST/lib/python${PYTHON_VERSION}/site-packages/distutils-precedence.pth"
 
 # 5. Copy the deja source package
 echo "Copying deja source package..."
@@ -138,6 +166,20 @@ fi
 echo "Stripping .so files..."
 find "$DEST" -name '*.so' -exec strip -x {} \; 2>/dev/null || true
 
+# 8b. Pre-compile every .py to .pyc so the bundle's seal includes
+# the bytecode caches. Without this, Python would write __pycache__/
+# files at runtime AFTER the app is signed, invalidating the seal
+# and causing macOS Gatekeeper to reject launches via LaunchServices
+# with "sealed resource is missing or invalid" → error -600.
+#
+# We use the FREESHLY-COPIED bundled Python to compile, which writes
+# the .pyc files in-place inside the bundle. After this step, every
+# .py file has a matching .pyc and the seal will cover both.
+echo "Pre-compiling .pyc bytecode (so Python doesn't write into the seal at runtime)..."
+"$DEST/bin/python3" -m compileall -q -j 0 \
+    "$DEST/lib/python${PYTHON_VERSION}" \
+    "$DEST/src" 2>&1 | tail -5 || echo "  WARN: compileall had errors (some .pyc may be missing)"
+
 # 9. Sign all native extensions — macOS code signing monitor kills
 # unsigned .so files loaded from inside a signed .app bundle.
 echo "Signing native extensions..."
@@ -145,6 +187,37 @@ find "$DEST" -name '*.so' -exec codesign --force --sign "Deja Dev" {} \; 2>/dev/
 find "$DEST" -name '*.dylib' -exec codesign --force --sign "Deja Dev" {} \; 2>/dev/null || true
 # Also sign the Python binary itself
 codesign --force --sign "Deja Dev" "$DEST/bin/python3" 2>/dev/null || true
+
+# 10. Re-seal the outer .app bundle (Release only).
+#
+# Xcode runs this script AFTER it has already signed the .app, so all
+# the nested binaries we just modified (Python interpreter, .so files,
+# .dylibs) have invalidated the outer seal. Without this step macOS's
+# Gatekeeper / LaunchServices rejects the launch with "a sealed resource
+# is missing or invalid" and `open` fails with -600.
+#
+# Skip in Debug config: Xcode generates a Deja.debug.dylib alongside
+# the main binary that isn't signed by us, and codesign refuses to
+# re-seal a bundle with unsigned nested code. Debug builds aren't
+# packaged into a DMG anyway, so they don't need to pass Gatekeeper.
+if [ "${CONFIGURATION:-Release}" = "Release" ]; then
+    echo "Re-sealing outer .app bundle..."
+    ENTITLEMENTS="$PROJECT/Deja.entitlements"
+    if [ -f "$ENTITLEMENTS" ]; then
+        codesign --force --sign "Deja Dev" \
+            --entitlements "$ENTITLEMENTS" \
+            "$APP" 2>&1 | tail -3 || echo "  WARN: re-seal failed"
+    else
+        codesign --force --sign "Deja Dev" "$APP" 2>&1 | tail -3 || echo "  WARN: re-seal failed"
+    fi
+
+    # Verify (informational only — never fail the build on this)
+    codesign --verify --deep --strict "$APP" >/dev/null 2>&1 \
+        && echo "  codesign verify: OK" \
+        || echo "  WARNING: codesign verify failed — bundle may not launch via open/Finder"
+else
+    echo "Skipping outer re-seal (Debug build — only Release needs Gatekeeper compatibility)"
+fi
 
 # Report size
 BUNDLE_SIZE="$(du -sh "$DEST" | cut -f1)"
