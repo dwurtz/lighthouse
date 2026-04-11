@@ -168,9 +168,25 @@ async def run_collect_cycle(loop_ref) -> None:
                 if image_path:
                     try:
                         # Look for recent voice dictation — if the user spoke
-                        # within ~30s of this screenshot, treat their words as
-                        # primary context for the vision model.
-                        voice_context = _recent_voice_context(window_seconds=30)
+                        # within ~15s of this screenshot AND we haven't
+                        # already injected that entry into a previous vision
+                        # call, treat their words as primary context.
+                        voice_context = _recent_voice_context()
+
+                        # Accessibility context — frontmost app, window title,
+                        # focused element — snapshotted at capture time.
+                        # Empty dict when AX is unavailable or the frontmost
+                        # app has broken AX support; the formatter handles
+                        # that as a no-op in the prompt.
+                        from deja.ax_context import capture as capture_ax
+                        ax_context = capture_ax()
+                        if ax_context:
+                            log.debug(
+                                "ax_context: app=%r win=%r focus=%r",
+                                ax_context.get("app"),
+                                (ax_context.get("window_title") or "")[:60],
+                                ax_context.get("focused_role"),
+                            )
 
                         # Try local FastVLM first (private, free, ~3.5s)
                         # Falls back to Gemini via proxy if mlx-vlm not installed
@@ -179,7 +195,11 @@ async def run_collect_cycle(loop_ref) -> None:
                         avail = is_available()
                         log.info("Local vision available: %s", avail)
                         if avail:
-                            local_desc = describe_screen_local(image_path, voice_context=voice_context)
+                            local_desc = describe_screen_local(
+                                image_path,
+                                voice_context=voice_context,
+                                ax_context=ax_context,
+                            )
                             log.info("Local vision result: %s", "OK" if local_desc else "EMPTY")
 
                         if local_desc:

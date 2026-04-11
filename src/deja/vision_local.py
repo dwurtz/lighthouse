@@ -36,8 +36,15 @@ log = logging.getLogger(__name__)
 # drifting toward stale entities in the tail.
 
 
+# The grounded template uses ``{ax_block}`` as a placeholder for the
+# Current UI context section. That block is either empty string (no AX
+# data, no access, broken AX support) or a fully-formatted two-section
+# chunk ending in two newlines. Using a single interpolation slot means
+# we never leave a dangling header when AX data is missing — the skip-
+# if-empty discipline is enforced at the formatter, not here.
 _PROMPT_GROUNDED = (
     "This is {user_name}'s Mac.\n\n"
+    "{ax_block}"
     "# People and projects {first_name} cares about\n\n"
     "{index_block}\n\n"
     "# Your task\n\n"
@@ -58,16 +65,29 @@ _processor = None
 _load_attempted = False
 
 
-def _build_prompt(voice_context: str = "") -> str:
-    """Compose the vision prompt with optional identity grounding and voice context.
+def _build_prompt(
+    voice_context: str = "",
+    ax_context: dict | None = None,
+) -> str:
+    """Compose the vision prompt with optional grounding blocks.
 
-    Grounding comes from the shared ``wiki_catalog.render_index_for_prompt``
-    helper so vision and triage both read the same catalog — when reflect
-    reorders index.md by recency, both consumers automatically see the
-    hot entries first. We truncate to the first ``_VISION_INDEX_LINES``
-    lines so FastVLM 0.5B's attention isn't diluted by a long tail of
-    stale entries.
+    The prompt can include (in reverse order of priority):
+
+      - Voice context — what the user just dictated, if within the
+        lookback window. Forceful "the user just said this" framing.
+      - Current UI context — frontmost app, focused window, focused
+        widget, from the macOS Accessibility API. Skipped entirely
+        (no header, no empty lines) when the AX dict is empty.
+      - Wiki catalog — the full recency-sorted index.md so the model
+        has names/descriptions for known people and projects.
+
+    All three sections follow the same skip-if-empty discipline:
+    missing data produces no prompt bytes, not empty variable slots.
     """
+    from deja import ax_context as ax_mod
+
+    ax_block = ax_mod.format_for_prompt(ax_context or {})
+
     base = _PROMPT_FALLBACK
     try:
         from deja.identity import load_user
@@ -81,8 +101,13 @@ def _build_prompt(voice_context: str = "") -> str:
             base = _PROMPT_GROUNDED.format(
                 user_name=user.name,
                 first_name=user.first_name,
+                ax_block=ax_block,
                 index_block=index_block,
             )
+        elif ax_block:
+            # Generic identity path: no wiki grounding, but still
+            # prepend the AX block if we have one — it's additive.
+            base = ax_block + _PROMPT_FALLBACK
     except Exception:
         pass
 
@@ -152,7 +177,11 @@ def _ensure_model() -> bool:
         return False
 
 
-def describe_screen_local(image_path: str, voice_context: str = "") -> str | None:
+def describe_screen_local(
+    image_path: str,
+    voice_context: str = "",
+    ax_context: dict | None = None,
+) -> str | None:
     """Describe a screenshot using on-device FastVLM via mlx-vlm.
 
     Args:
@@ -160,6 +189,12 @@ def describe_screen_local(image_path: str, voice_context: str = "") -> str | Non
         voice_context: Optional recent voice dictation. If provided, the
             model treats it as the user's own commentary on the screen
             and grounds the description in their stated intent.
+        ax_context: Optional macOS Accessibility context dict, typically
+            from ``deja.ax_context.capture()``. Populated fields (app,
+            window_title, focused_role, focused_label, focused_value)
+            are rendered as a "Current UI context" block prepended to
+            the task description. Empty or missing fields are silently
+            skipped — no empty-slot injection.
 
     Returns:
         Text description, or None if local vision is unavailable,
@@ -173,7 +208,10 @@ def describe_screen_local(image_path: str, voice_context: str = "") -> str | Non
     if not _ensure_model():
         return None
 
-    prompt_text = _build_prompt(voice_context=voice_context)
+    prompt_text = _build_prompt(
+        voice_context=voice_context,
+        ax_context=ax_context,
+    )
 
     request_id = None
     try:
