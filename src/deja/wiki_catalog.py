@@ -192,8 +192,21 @@ def rebuild_index() -> int:
             for category, slug, title, summary, mtime in kept:
                 per_category[category].append((slug, title, summary, mtime))
             for cat in CATEGORIES:
-                per_category[cat].sort(key=lambda t: t[0].lower())
+                # Sort by recency (mtime descending) so downstream consumers
+                # (vision prompt, triage prefilter) see the hot entries first.
+                # Tiebreak alphabetically for stable ordering when mtimes are
+                # identical (rare, but happens on fresh bulk-created wikis).
+                per_category[cat].sort(key=lambda t: (-t[3], t[0].lower()))
             total = len(kept)
+
+        # Final ordering: recency-descending within each category so
+        # downstream consumers (vision prompt, triage prefilter) see David's
+        # currently-hot entities first. Tiebreak alphabetically for stable
+        # ordering when mtimes are identical (rare, but happens on fresh
+        # bulk-created wikis). This overrides the alphabetical sort that
+        # _collect_category applies as it scans.
+        for cat in CATEGORIES:
+            per_category[cat].sort(key=lambda t: (-t[3], t[0].lower()))
 
         if total == 0:
             placeholder = _HEADER + "\n*No pages yet.*\n"
