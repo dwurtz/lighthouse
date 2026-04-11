@@ -290,10 +290,14 @@ async def _call_flash_lite(prompt: str) -> tuple[dict, int, int]:
 
     Returns (parsed_json, input_tokens, output_tokens_including_thoughts).
     """
+    # 2.5 Flash-Lite supports up to 65K output tokens. We need headroom
+    # because each confirmed merge includes a full rewritten page body
+    # (aliases frontmatter + merged prose). 124 candidates with a handful
+    # of merges can easily push past 16K.
     client = GeminiClient()
     config = {
         "response_mime_type": "application/json",
-        "max_output_tokens": 16384,
+        "max_output_tokens": 65536,
         "temperature": 0.1,
     }
     last_exc: Exception | None = None
@@ -380,14 +384,24 @@ def _collect_merges(decisions: list[dict]) -> list[ConfirmedMerge]:
     return list(by_canonical.values())
 
 
+CONFIRM_BATCH_SIZE = 20  # pairs per Flash-Lite call. Smaller batches get
+                          # full coverage reliably because the response
+                          # stays short enough for the model to enumerate
+                          # every pair instead of silently dropping obvious
+                          # rejects. Empirically: 40 pairs/batch failed
+                          # coverage on ~5/35 pairs; 20 pairs is the
+                          # stable sweet spot.
+
+
 async def confirm_candidates(
     candidates: list[CandidatePair],
 ) -> tuple[list[ConfirmedMerge], DedupSummary]:
     """Ask Flash-Lite to judge each candidate pair.
 
-    Returns (confirmed_merges, summary). The summary carries the token
-    counts and decision count so run_dedup can log them. Raises on any
-    failure — callers get a loud error, not a silent miss.
+    Batches the candidates into chunks of CONFIRM_BATCH_SIZE to keep each
+    response small enough that Flash-Lite reliably returns a decision for
+    every pair (large batches trigger a silent-skip failure mode). Raises
+    on any failure — callers get a loud error, not a silent miss.
     """
     summary = DedupSummary()
     summary.candidates_found = len(candidates)
@@ -407,40 +421,80 @@ async def confirm_candidates(
             "Dedup confirm prompt is missing the {pairs} placeholder. "
             "Check ~/Deja/prompts/dedup_confirm.md."
         )
-    # .format() unescapes the {{...}} JSON-schema braces in the prompt
-    # template. Using .replace() would leave them doubled in the final
-    # prompt, which confuses the model.
-    try:
-        prompt = prompt_template.format(pairs=_build_pairs_block(candidates))
-    except (KeyError, IndexError) as e:
-        raise RuntimeError(
-            f"Dedup confirm prompt template has an unexpected format "
-            f"placeholder: {e}. Check ~/Deja/prompts/dedup_confirm.md — "
-            f"only {{pairs}} should be an unescaped placeholder; all "
-            f"literal braces must be doubled as {{{{ }}}}."
-        ) from e
 
+    # Split into batches of CONFIRM_BATCH_SIZE
+    batches: list[list[CandidatePair]] = [
+        candidates[i : i + CONFIRM_BATCH_SIZE]
+        for i in range(0, len(candidates), CONFIRM_BATCH_SIZE)
+    ]
     log.info(
-        "Dedup: confirming %d pair(s) via %s (%d prompt chars)",
-        len(candidates), CONFIRM_MODEL, len(prompt),
+        "Dedup: confirming %d pair(s) via %s across %d batch(es) of ≤%d",
+        len(candidates), CONFIRM_MODEL, len(batches), CONFIRM_BATCH_SIZE,
     )
 
-    parsed, in_tok, out_tok = await _call_flash_lite(prompt)
-    decisions = parsed.get("decisions") if isinstance(parsed, dict) else None
-    if not isinstance(decisions, list):
-        raise RuntimeError(
-            f"Dedup confirm: response JSON has no 'decisions' list. Got: {parsed!r}"
+    all_decisions: list[dict] = []
+    total_in_tok = 0
+    total_out_tok = 0
+    for batch_idx, batch in enumerate(batches, start=1):
+        try:
+            prompt = prompt_template.format(pairs=_build_pairs_block(batch))
+        except (KeyError, IndexError) as e:
+            raise RuntimeError(
+                f"Dedup confirm prompt template has an unexpected format "
+                f"placeholder: {e}. Check ~/Deja/prompts/dedup_confirm.md — "
+                f"only {{pairs}} should be an unescaped placeholder; all "
+                f"literal braces must be doubled as {{{{ }}}}."
+            ) from e
+
+        log.info(
+            "Dedup batch %d/%d: %d pair(s), %d prompt chars",
+            batch_idx, len(batches), len(batch), len(prompt),
         )
 
-    summary.decisions_returned = len(decisions)
-    summary.input_tokens = in_tok
-    summary.output_tokens = out_tok
+        parsed, in_tok, out_tok = await _call_flash_lite(prompt)
+        total_in_tok += in_tok
+        total_out_tok += out_tok
+
+        decisions = parsed.get("decisions") if isinstance(parsed, dict) else None
+        if not isinstance(decisions, list):
+            raise RuntimeError(
+                f"Dedup confirm batch {batch_idx}: response JSON has no "
+                f"'decisions' list. Got: {parsed!r}"
+            )
+
+        # Per-batch coverage check. If this batch misses pairs, we can't
+        # meaningfully recover — raise with the batch index so the user
+        # can investigate.
+        covered: set[tuple[str, str]] = set()
+        for d in decisions:
+            if not isinstance(d, dict):
+                continue
+            a, b = d.get("page_a"), d.get("page_b")
+            if isinstance(a, str) and isinstance(b, str):
+                covered.add(tuple(sorted([a, b])))
+        expected = {tuple(sorted([c.page_a, c.page_b])) for c in batch}
+        missing = expected - covered
+        if missing:
+            sample = sorted(missing)[:10]
+            raise RuntimeError(
+                f"Dedup confirm batch {batch_idx}/{len(batches)}: "
+                f"Flash-Lite omitted {len(missing)} of {len(expected)} "
+                f"pairs. First missing: {sample}. Reduce CONFIRM_BATCH_SIZE "
+                f"or switch to 2.5 Flash."
+            )
+
+        all_decisions.extend(decisions)
+
+    summary.decisions_returned = len(all_decisions)
+    summary.input_tokens = total_in_tok
+    summary.output_tokens = total_out_tok
     summary.cost_usd = (
-        (in_tok / 1_000_000) * _FLASH_LITE_INPUT_PER_MTOK
-        + (out_tok / 1_000_000) * _FLASH_LITE_OUTPUT_PER_MTOK
+        (total_in_tok / 1_000_000) * _FLASH_LITE_INPUT_PER_MTOK
+        + (total_out_tok / 1_000_000) * _FLASH_LITE_OUTPUT_PER_MTOK
     )
 
-    merges = _collect_merges(decisions)
+    merges = _collect_merges(all_decisions)
+    decisions = all_decisions  # rebind for the log line below
     summary.merges_confirmed = len(merges)
     log.info(
         "Dedup: %d decision(s), %d confirmed merge(s), cost $%.4f",

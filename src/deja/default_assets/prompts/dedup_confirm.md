@@ -24,7 +24,7 @@ Pick the slug that most resembles the human-readable primary name:
 
 ## Output
 
-Return JSON with a `decisions` list. For each candidate pair, include:
+Return JSON with a `decisions` list containing **exactly one decision for every candidate pair listed below**. Coverage must be 100%. If you're confident a pair is NOT a duplicate, you must still emit a decision with `same_entity: false` — you cannot silently skip pairs. Any pair missing from your response will cause the cycle to error out.
 
 {{
   "decisions": [
@@ -40,10 +40,10 @@ Return JSON with a `decisions` list. For each candidate pair, include:
 }}
 
 When `same_entity` is true: both `canonical` and `merged_content` are required. `merged_content` is the full new body of the canonical page with frontmatter at the top, prose merged from both source pages, no invented facts, entity cross-links via [[slug]] preserved.
-When `same_entity` is false: both `canonical` and `merged_content` are null.
+When `same_entity` is false: both `canonical` and `merged_content` are null. The `reason` field is still required and should briefly say why they're different entities.
 
 ## Pairs to judge
 
 {pairs}
 
-Output nothing outside the JSON.
+Output nothing outside the JSON. Verify before responding that every pair above appears in your `decisions` list.

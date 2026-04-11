@@ -73,7 +73,12 @@ class GeminiClient:
             self._http = None
         else:
             self._direct_client = None
-            self._http = httpx.AsyncClient(base_url=DEJA_API_URL, timeout=120)
+            # 300s timeout covers Gemini Pro on large prompts (reflection,
+            # dedup confirm with all candidate decisions expanded) and
+            # absorbs occasional Gemini API slowness without cascading
+            # failures. Background paths are fine waiting longer; there
+            # are no interactive callers left.
+            self._http = httpx.AsyncClient(base_url=DEJA_API_URL, timeout=300)
 
     @property
     def client(self):
