@@ -14,12 +14,39 @@ from datetime import datetime, timezone
 log = logging.getLogger(__name__)
 
 
-def _recent_voice_context(window_seconds: int = 30) -> str:
-    """Find any voice dictation that happened within the last N seconds.
+# Timestamp of the most recent voice entry we already injected into a
+# vision prompt. Subsequent calls refuse to re-return the same entry,
+# so only the FIRST screenshot after a dictation gets grounded on the
+# user's words — the next background screenshot is treated as unrelated
+# even if it lands inside the lookback window.
+_last_consumed_voice_ts: float = 0.0
 
-    Returns the most recent voice transcript, or empty string if none.
-    Used to ground vision descriptions in the user's spoken intent.
+
+def _recent_voice_context(window_seconds: int = 15) -> str:
+    """Find a voice dictation that happened within the last N seconds and
+    hasn't already been injected into a previous vision prompt.
+
+    Used to ground vision descriptions in the user's spoken intent when
+    they just dictated something. Critical that this returns empty when
+    no fresh dictation exists — the vision prompt has an ``if voice_context:``
+    gate and we never want to inject a stale "# IMPORTANT: the user just
+    said this" block into unrelated background screenshots.
+
+    Returns empty string when:
+      - No observations.jsonl file yet
+      - No ``[spoken]`` entries in the recent tail at all
+      - The most recent ``[spoken]`` entry is older than window_seconds
+      - The most recent ``[spoken]`` entry has already been consumed by
+        a prior call (mark-as-consumed via ``_last_consumed_voice_ts``)
+
+    The mark-as-consumed guard is what distinguishes "the user just spoke"
+    from "the user spoke 10 seconds ago and this is a different screenshot."
+    Without it, every screenshot inside the 15-second window would re-inject
+    the same voice prompt, bleeding the user's dictation into captures
+    taken while they've moved on to something else.
     """
+    global _last_consumed_voice_ts
+
     import json
     from pathlib import Path
     from deja.config import DEJA_HOME
@@ -31,7 +58,7 @@ def _recent_voice_context(window_seconds: int = 30) -> str:
     cutoff = datetime.now(timezone.utc).timestamp() - window_seconds
 
     try:
-        # Read the last ~50 lines (recent observations)
+        # Read the last ~16 KB of observations (plenty for the window)
         with open(obs_log, "rb") as f:
             f.seek(0, 2)
             size = f.tell()
@@ -52,11 +79,15 @@ def _recent_voice_context(window_seconds: int = 30) -> str:
                 ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00")).timestamp()
             except (ValueError, AttributeError):
                 continue
-            if ts >= cutoff:
-                return text[len("[spoken] "):]
-            else:
-                # Older than the window — older entries are even older
-                break
+            if ts < cutoff:
+                # Older than the window — older entries are even older.
+                return ""
+            if ts <= _last_consumed_voice_ts:
+                # Already injected into a previous vision prompt; don't
+                # bleed the user's old words into an unrelated capture.
+                return ""
+            _last_consumed_voice_ts = ts
+            return text[len("[spoken] "):]
     except Exception as e:
         log.debug("recent voice context lookup failed: %s", e)
 
