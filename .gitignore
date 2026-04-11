@@ -47,6 +47,10 @@ logs/
 *.log
 .claude/scheduled_tasks.lock
 
+# Vector dedup experiment raw dumps (regenerate via tools/vector_dedup_candidates.py)
+docs/vector-dedup-candidates-*.json
+docs/vector-dedup-confirm-*.json
+
 menubar/icon/app_icon.svg
 Deja.dmg
 !site/Deja.dmg
