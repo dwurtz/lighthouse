@@ -3,6 +3,7 @@ import CoreGraphics
 import ScreenCaptureKit
 import IOKit.hid
 import ApplicationServices
+import AVFoundation
 
 struct SetupPanelView: View {
     @ObservedObject var monitor: MonitorState
@@ -13,6 +14,7 @@ struct SetupPanelView: View {
     @State private var screenRecordingGranted: Bool = false
     @State private var accessibilityGranted: Bool = false
     @State private var fullDiskGranted: Bool = false
+    @State private var micGranted: Bool = false
     @State private var modelStatus: String = "idle"  // idle, downloading, ready, error
     @State private var modelProgress: Double = 0.0
     @State private var modelMessage: String = ""
@@ -132,6 +134,18 @@ struct SetupPanelView: View {
 
                 // On-device AI model
                 modelRow
+
+                // Microphone (voice dictation)
+                setupRow(
+                    icon: "mic",
+                    title: "Microphone",
+                    description: "Voice dictation with the Listen pill",
+                    done: micGranted,
+                    required: false,
+                    loading: false,
+                    error: "",
+                    action: grantMicrophone
+                )
 
                 // iMessage & WhatsApp
                 setupRow(
@@ -487,6 +501,34 @@ struct SetupPanelView: View {
         }
     }
 
+    func grantMicrophone() {
+        // Trigger macOS's standard mic TCC prompt under the main Deja
+        // bundle identity. Because DejaRecorder (the helper that actually
+        // opens the audio engine) is signed with the same --identifier
+        // com.deja.app, the grant here carries over to the helper without
+        // a second prompt when the user first clicks Listen.
+        switch AVCaptureDevice.authorizationStatus(for: .audio) {
+        case .authorized:
+            micGranted = true
+        case .notDetermined:
+            // Async — the system shows the prompt and calls back on an
+            // arbitrary queue. Bounce to main before mutating @State.
+            AVCaptureDevice.requestAccess(for: .audio) { granted in
+                DispatchQueue.main.async {
+                    self.micGranted = granted
+                }
+            }
+        case .denied, .restricted:
+            // User previously denied. We can't re-prompt — send them to
+            // System Settings so they can flip the toggle.
+            if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone") {
+                NSWorkspace.shared.open(url)
+            }
+        @unknown default:
+            break
+        }
+    }
+
     func downloadModel() {
         modelStatus = "downloading"
         modelMessage = "Starting download..."
@@ -511,6 +553,11 @@ struct SetupPanelView: View {
         let axOk = AXIsProcessTrusted()
         let imOk = (IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) == kIOHIDAccessTypeGranted)
         accessibilityGranted = axOk && imOk
+
+        // Microphone — pure read-only status probe; never triggers the
+        // TCC prompt. The prompt only fires from grantMicrophone() when
+        // the user explicitly clicks the Microphone row.
+        micGranted = (AVCaptureDevice.authorizationStatus(for: .audio) == .authorized)
 
         // Full Disk Access check: FileManager.isReadableFile is a POSIX
         // check that returns true for any file the user owns — useless
