@@ -513,11 +513,29 @@ def build_analysis_context(signal_items: list[dict]) -> str:
     query = _build_query(signal_items)
     vector_hits = _retrieve_vector(query)
 
-    # Merge: BM25 order first (precision), then vector results not
-    # already covered (recall). Caps at `_MAX_PAGES`.
+    # Stage 3: Due reminders pull their topic slugs directly. When a
+    # reminder's due date is ≤ today, its [[slug]] hints become retrieval
+    # targets so the integrate cycle has the relevant pages in context
+    # even if no new signal in this batch happens to touch that topic.
+    reminder_hits: list[tuple[str, str]] = []
+    try:
+        from deja.goals import due_reminder_topics
+        all_pages_set = set(_all_slugs())
+        for slug in due_reminder_topics():
+            for category in ("people", "projects", "events"):
+                key = (category, slug)
+                if key in all_pages_set:
+                    reminder_hits.append(key)
+                    break
+    except Exception:
+        log.debug("wiki_retrieval: due_reminder_topics failed", exc_info=True)
+
+    # Merge: reminders first (deterministic, pinned — these are questions
+    # the agent explicitly asked its future self), BM25 next (precision),
+    # then vector (recall). Caps at `_MAX_PAGES`.
     seen: set[tuple[str, str]] = set()
     retrieved: list[tuple[str, str]] = []
-    for key in bm25_hits + vector_hits:
+    for key in reminder_hits + bm25_hits + vector_hits:
         if key in seen:
             continue
         seen.add(key)
@@ -572,7 +590,8 @@ def build_analysis_context(signal_items: list[dict]) -> str:
         )
 
     log.info(
-        "wiki_retrieval: %d bm25 + %d vector → %d merged, %d remaining",
+        "wiki_retrieval: %d reminders + %d bm25 + %d vector → %d merged, %d remaining",
+        len(reminder_hits),
         len(bm25_hits),
         len(vector_hits),
         len(pages),

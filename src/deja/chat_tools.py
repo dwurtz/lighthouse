@@ -15,7 +15,7 @@ Tool surface:
   - ``rename_page(category, old_slug, new_slug, reason)`` — atomic rename
 
 Every mutating tool requires a ``reason`` argument that gets logged to
-``log.md`` and becomes part of the git commit message. Every path is
+``~/.deja/audit.jsonl`` and becomes part of the git commit message. Every path is
 validated to stay inside ``WIKI_DIR``. After each successful mutation the
 wiki auto-commits, so per-tool-call reversibility is one ``git revert``.
 
@@ -35,7 +35,7 @@ from google.genai import types
 
 from deja.config import WIKI_DIR
 from deja import wiki as wiki_store
-from deja.activity_log import append_log_entry
+from deja import audit
 
 log = logging.getLogger(__name__)
 
@@ -172,7 +172,12 @@ def write_page(category: str, slug: str, content: str, reason: str) -> ToolResul
         return ToolResult(ok=False, message=f"write failed: {e}")
 
     action = "created" if was_new else "updated"
-    append_log_entry("chat", f"{action} {category}/{slug} — {reason[:120]}")
+    audit.record(
+        "wiki_write",
+        target=f"{category}/{slug}",
+        reason=reason,
+        trigger={"kind": "user_cmd", "detail": f"chat tool: {action}"},
+    )
     log.info("chat tool write_page: %s %s/%s — %s", action, category, slug, reason[:100])
     return ToolResult(
         ok=True,
@@ -197,7 +202,12 @@ def delete_page(category: str, slug: str, reason: str) -> ToolResult:
     if not ok:
         return ToolResult(ok=True, message=f"{category}/{slug} did not exist (no-op)")
 
-    append_log_entry("chat", f"deleted {category}/{slug} — {reason[:120]}")
+    audit.record(
+        "wiki_delete",
+        target=f"{category}/{slug}",
+        reason=reason,
+        trigger={"kind": "user_cmd", "detail": "chat tool"},
+    )
     log.info("chat tool delete_page: %s/%s — %s", category, slug, reason[:100])
     return ToolResult(ok=True, message=f"deleted {category}/{slug}")
 
@@ -241,9 +251,17 @@ def rename_page(category: str, old_slug: str, new_slug: str, reason: str) -> Too
         log.exception("rename_page tool failed for %s/%s → %s", category, old_slug, new_slug)
         return ToolResult(ok=False, message=f"rename failed: {e}")
 
-    append_log_entry(
-        "chat",
-        f"renamed {category}/{old_slug} → {category}/{new_slug} — {reason[:120]}",
+    audit.record(
+        "wiki_write",
+        target=f"{category}/{new_slug}",
+        reason=f"renamed from {category}/{old_slug} — {reason}",
+        trigger={"kind": "user_cmd", "detail": "chat tool: rename"},
+    )
+    audit.record(
+        "wiki_delete",
+        target=f"{category}/{old_slug}",
+        reason=f"renamed to {category}/{new_slug} — {reason}",
+        trigger={"kind": "user_cmd", "detail": "chat tool: rename"},
     )
     log.info("chat tool rename_page: %s/%s → %s/%s — %s",
              category, old_slug, category, new_slug, reason[:100])
@@ -344,7 +362,7 @@ def delete_calendar_event(event_id: str) -> ToolResult:
                 headers={"Authorization": f"Bearer {token}"},
             )
         if 200 <= resp.status_code < 300 or resp.status_code == 204:
-            append_log_entry("chat", f"deleted calendar event: {event_id}")
+            audit.record("goal_action", target="action/calendar_delete", reason=f"deleted event {event_id}", trigger={"kind": "user_cmd", "detail": "chat tool"})
             return ToolResult(ok=True, message=f"Deleted event {event_id}")
         return ToolResult(ok=False, message=f"Calendar API error {resp.status_code}: {resp.text[:200]}")
     except Exception as e:
@@ -378,7 +396,7 @@ def update_calendar_event(event_id: str, summary: str = "", start: str = "", end
         body,
     )
     if 200 <= status < 300:
-        append_log_entry("chat", f"updated calendar event: {event_id}")
+        audit.record("goal_action", target="action/calendar_update", reason=f"updated event {event_id}", trigger={"kind": "user_cmd", "detail": "chat tool"})
         return ToolResult(ok=True, message=f"Updated event {event_id}")
     return ToolResult(ok=False, message=f"Calendar API error {status}: {data.get('error', {}).get('message', str(data))}")
 
@@ -406,7 +424,7 @@ def create_calendar_event(summary: str, start: str, end: str,
     )
     if 200 <= status < 300:
         link = data.get("htmlLink", "")
-        append_log_entry("chat", f"created calendar event: {summary} at {start}")
+        audit.record("goal_action", target="action/calendar_create", reason=f"{summary} at {start}", trigger={"kind": "user_cmd", "detail": "chat tool"})
         return ToolResult(ok=True, message=f"Created '{summary}' — {link}", data={"link": link})
     return ToolResult(ok=False, message=f"Calendar API error {status}: {data.get('error', {}).get('message', str(data))}")
 
@@ -431,7 +449,7 @@ def draft_email(to: str, subject: str, body: str) -> ToolResult:
         {"message": {"raw": encoded}},
     )
     if 200 <= status < 300:
-        append_log_entry("chat", f"drafted email to {to}: {subject}")
+        audit.record("goal_action", target="action/draft_email", reason=f"to {to}: {subject}", trigger={"kind": "user_cmd", "detail": "chat tool"})
         return ToolResult(ok=True, message=f"Draft created — to: {to}, subject: {subject}")
     return ToolResult(ok=False, message=f"Gmail API error {status}: {data.get('error', {}).get('message', str(data))}")
 
@@ -453,7 +471,7 @@ def create_task(title: str, notes: str = "", due: str = "") -> ToolResult:
         task_body,
     )
     if 200 <= status < 300:
-        append_log_entry("chat", f"created task: {title}")
+        audit.record("goal_action", target="action/create_task", reason=title, trigger={"kind": "user_cmd", "detail": "chat tool"})
         return ToolResult(ok=True, message=f"Task created: {title}")
     return ToolResult(ok=False, message=f"Tasks API error {status}: {data.get('error', {}).get('message', str(data))}")
 

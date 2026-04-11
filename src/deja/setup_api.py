@@ -180,7 +180,8 @@ def set_identity(body: dict) -> dict:
             "## Automations\n\n\n"
             "## Tasks\n\n\n"
             "## Waiting for\n\n\n"
-            "## Recurring\n\n"
+            "## Reminders\n\n\n"
+            "## Archive\n\n"
         )
 
     # Initialize git repo

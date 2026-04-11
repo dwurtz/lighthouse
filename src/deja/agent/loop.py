@@ -183,19 +183,22 @@ class AgentLoop:
                         ", ".join(n for n, _ in pending_steps),
                     )
                     try:
-                        from deja.activity_log import append_log_entry
+                        from deja import audit
                         pending_desc = "; ".join(
                             f"{name} ({desc})" for name, desc in pending_steps
                         )
-                        append_log_entry(
-                            "onboard",
-                            f"starting first-run onboarding in background — "
-                            f"{pending_desc}. Wiki will populate over the "
-                            f"next few minutes.",
+                        audit.record(
+                            "onboarding_step",
+                            target="onboarding/start",
+                            reason=(
+                                f"first-run onboarding starting in background: "
+                                f"{pending_desc}"
+                            ),
+                            trigger={"kind": "onboarding", "detail": "first run"},
                         )
                     except Exception:
                         log.debug(
-                            "onboarding startup log append failed",
+                            "onboarding startup audit failed",
                             exc_info=True,
                         )
                     asyncio.create_task(self._run_onboarding_backfill())

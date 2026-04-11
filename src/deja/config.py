@@ -111,16 +111,6 @@ if _LEGACY_SIGNAL_LOG.exists() and not OBSERVATIONS_LOG.exists():
     except OSError:
         pass
 
-# Integration audit log — structured record of each integration pass
-# (which pages updated, why). Renamed from the legacy analysis_log.jsonl.
-INTEGRATIONS_LOG = DEJA_HOME / "integrations.jsonl"
-_LEGACY_ANALYSIS_LOG = DEJA_HOME / "analysis_log.jsonl"
-if _LEGACY_ANALYSIS_LOG.exists() and not INTEGRATIONS_LOG.exists():
-    try:
-        _LEGACY_ANALYSIS_LOG.rename(INTEGRATIONS_LOG)
-    except OSError:
-        pass
-
 CONVERSATION_PATH = DEJA_HOME / "conversation.json"
 
 # Source databases (macOS)

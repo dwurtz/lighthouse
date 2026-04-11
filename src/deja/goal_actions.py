@@ -15,7 +15,8 @@ Safety model:
   - Calendar and task operations are self-addressed (the user's own
     account). No external effects without explicit send.
   - ``notify`` is read-only (macOS notification banner).
-  - Every action is logged to log.md for Obsidian visibility.
+  - Every action is recorded via ``audit.record()`` so it's grep-able
+    in ``~/.deja/audit.jsonl``.
 
 Supported action types:
   - calendar_create   — create a Google Calendar event
@@ -85,11 +86,15 @@ def _gws_run(service_args: list[str], timeout: int = 15) -> subprocess.Completed
     )
 
 
-def _log_action(action_type: str, summary: str) -> None:
-    """Write a human-readable entry to log.md."""
+def _log_action(action_type: str, summary: str, reason: str = "") -> None:
+    """Record one goal_action execution in the audit log."""
     try:
-        from deja.activity_log import append_log_entry
-        append_log_entry("action", f"{action_type}: {summary}")
+        from deja import audit
+        audit.record(
+            "goal_action",
+            target=f"action/{action_type}",
+            reason=f"{summary}" + (f" — {reason}" if reason else ""),
+        )
     except Exception:
         pass
 

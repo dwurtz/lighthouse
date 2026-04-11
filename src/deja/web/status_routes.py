@@ -4,12 +4,12 @@ GET /api/activity — recent activity feed for the notch popover."""
 from __future__ import annotations
 
 import json
-import re
 from datetime import datetime, timezone
 
 from fastapi import APIRouter
 
-from deja.web.helpers import OBSERVATIONS_LOG, INTEGRATIONS_LOG
+from deja import audit
+from deja.web.helpers import OBSERVATIONS_LOG
 
 router = APIRouter()
 
@@ -37,8 +37,8 @@ def get_status() -> dict:
                 continue
 
     last_analysis_time = None
-    if INTEGRATIONS_LOG.exists():
-        with open(INTEGRATIONS_LOG, "rb") as f:
+    if audit.AUDIT_LOG.exists():
+        with open(audit.AUDIT_LOG, "rb") as f:
             try:
                 f.seek(-4096, 2)
             except OSError:
@@ -49,7 +49,7 @@ def get_status() -> dict:
             if not line:
                 continue
             try:
-                last_analysis_time = json.loads(line).get("timestamp")
+                last_analysis_time = json.loads(line).get("ts")
                 break
             except json.JSONDecodeError:
                 continue
@@ -79,44 +79,31 @@ def get_status() -> dict:
     }
 
 
-_ACTIVITY_LINE_RE = re.compile(
-    r"^- \*\*\[(?P<ts>\d{4}-\d{2}-\d{2} \d{2}:\d{2})\]\*\*\s+"
-    r"(?P<kind>[^\s—-]+)\s+[—-]\s*(?P<summary>.*)$"
-)
-
-
 @router.get("/api/activity")
 def get_activity(limit: int = 50) -> dict:
-    """Return the most recent activity entries from the wiki log.md.
+    """Return the most recent audit entries for the notch Activity tab.
 
-    The activity feed is the notch popover's primary surface: it
-    shows what the agent has been doing (dedup merges, integrate
-    writes, commands, meetings). Each row parses one bullet from
-    ``~/Deja/log.md`` via the stable `- **[ts]** kind — summary`
-    format emitted by ``activity_log.append_log_entry``.
+    Reads ``~/.deja/audit.jsonl`` — one line per discrete agent action
+    — and projects it into the ``{timestamp, kind, summary}`` shape the
+    Swift notch UI expects. ``kind`` is the audit ``action`` field
+    (wiki_write, reminder_resolve, etc.) and ``summary`` is derived
+    from ``target`` + ``reason``.
     """
-    from deja.activity_log import LOG_PATH
-
+    raw = audit.read_recent(limit=limit)
     entries: list[dict] = []
-    if LOG_PATH.exists():
-        try:
-            text = LOG_PATH.read_text(encoding="utf-8")
-        except Exception:
-            text = ""
-        for line in text.splitlines():
-            m = _ACTIVITY_LINE_RE.match(line.rstrip())
-            if not m:
-                continue
-            entries.append(
-                {
-                    "timestamp": m.group("ts"),
-                    "kind": m.group("kind"),
-                    "summary": m.group("summary").strip(),
-                }
-            )
-
-    # Newest first, capped at `limit`
-    entries.reverse()
-    if limit and limit > 0:
-        entries = entries[:limit]
+    for e in raw:
+        ts_iso = e.get("ts", "")
+        # Convert ISO8601 to "YYYY-MM-DD HH:MM" local for UI rendering.
+        ts_short = ts_iso[:16].replace("T", " ") if ts_iso else ""
+        action = e.get("action", "")
+        target = e.get("target", "")
+        reason = e.get("reason", "")
+        summary = f"{target} — {reason}" if target else reason
+        entries.append(
+            {
+                "timestamp": ts_short,
+                "kind": action,
+                "summary": summary,
+            }
+        )
     return {"entries": entries}

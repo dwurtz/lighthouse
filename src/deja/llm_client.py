@@ -27,6 +27,16 @@ from deja.config import INTEGRATE_MODEL, REFLECT_MODEL, VISION_MODEL
 DEJA_API_URL = os.environ.get("DEJA_API_URL", "https://deja-api.onrender.com")
 _USE_DIRECT = bool(os.environ.get("GEMINI_API_KEY"))
 
+# Hard ceiling on the goals.md text injected into integrate's prompt.
+# goals.py enforces section caps and auto-expiry as the primary bounds;
+# this is the format-time safety net — if a wiki file drifted past the
+# caps (e.g. user manually added hundreds of tasks), we still cap what
+# lands in the prompt so the per-cycle token bill can't explode.
+# 6000 chars ≈ 1500 tokens. Trimming drops oldest Reminders first,
+# then oldest Waiting for, then oldest Tasks. The preamble and Archive
+# are never dropped (Archive is already capped at 100 by goals.py).
+_GOALS_MAX_CHARS = 6000
+
 # Onboarding is a one-time, high-stakes run against potentially the
 # user's entire digital history. Cost is amortized across the one run,
 # so we use the strongest available model for maximum quality rather
@@ -35,6 +45,54 @@ _ONBOARD_MODEL = REFLECT_MODEL
 from deja.prompts import load as load_prompt
 
 log = logging.getLogger(__name__)
+
+
+def _truncate_goals_text(text: str) -> str:
+    """Drop oldest items from Reminders → Waiting for → Tasks until under cap.
+
+    Only fires when ``text`` exceeds ``_GOALS_MAX_CHARS``. goals.py
+    enforces the real caps; this is the format-time safety net.
+    """
+    if not text or len(text) <= _GOALS_MAX_CHARS:
+        return text
+    try:
+        from deja.goals import _parse_sections, _render_sections
+    except Exception:
+        return text[:_GOALS_MAX_CHARS]
+
+    preamble, sections = _parse_sections(text)
+
+    def _drop_oldest_bullet(section_name: str) -> bool:
+        lines = sections.get(section_name, [])
+        for i, ln in enumerate(lines):
+            if ln.lstrip().startswith("- "):
+                lines.pop(i)
+                return True
+        return False
+
+    drop_order = ["Reminders", "Waiting for", "Tasks"]
+    dropped = 0
+    while True:
+        rendered = _render_sections(preamble, sections)
+        if len(rendered) <= _GOALS_MAX_CHARS:
+            break
+        made_progress = False
+        for name in drop_order:
+            if _drop_oldest_bullet(name):
+                dropped += 1
+                made_progress = True
+                break
+        if not made_progress:
+            rendered = rendered[:_GOALS_MAX_CHARS]
+            break
+
+    if dropped:
+        log.warning(
+            "goals truncation: dropped %d oldest bullet(s) to fit %d-char cap",
+            dropped,
+            _GOALS_MAX_CHARS,
+        )
+    return rendered
 
 
 def _parse_json(raw: str) -> Any:
@@ -216,6 +274,10 @@ class GeminiClient:
         user_fields = load_user().as_prompt_fields()
 
         # Goals — standing instructions that shape what the agent prioritizes.
+        # Safety-net truncated to _GOALS_MAX_CHARS so a runaway Reminders /
+        # Waiting for section can't silently blow up the per-cycle token
+        # bill. goals.py auto-expiry + caps are the primary bounds; this
+        # is the last line of defense.
         from deja.config import WIKI_DIR
         goals_path = WIKI_DIR / "goals.md"
         goals_text = ""
@@ -224,6 +286,7 @@ class GeminiClient:
                 goals_text = goals_path.read_text()
         except Exception:
             pass
+        goals_text = _truncate_goals_text(goals_text)
 
         prompt = load_prompt("integrate").format(
             current_time=current_time,

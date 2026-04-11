@@ -678,15 +678,19 @@ async def run_dedup() -> dict:
         except Exception:
             log.debug("Dedup: llm.search.refresh_index failed", exc_info=True)
         try:
-            from deja.activity_log import append_log_entry
-            append_log_entry(
-                "dedup",
-                f"merged {summary.duplicates_deleted} duplicate page(s) into "
-                f"{summary.merges_applied} canonical page(s) "
-                f"(${summary.cost_usd:.4f})",
+            from deja import audit
+            audit.record(
+                "dedup_merge",
+                target="wiki/*",
+                reason=(
+                    f"merged {summary.duplicates_deleted} duplicate page(s) into "
+                    f"{summary.merges_applied} canonical page(s) "
+                    f"(${summary.cost_usd:.4f})"
+                ),
+                trigger={"kind": "dedup", "detail": "scheduled pass"},
             )
         except Exception:
-            log.debug("Dedup: activity_log append failed", exc_info=True)
+            log.debug("Dedup: audit.record failed", exc_info=True)
 
     log.info("Dedup complete: %s", summary.as_dict())
     return summary.as_dict()

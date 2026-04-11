@@ -11,8 +11,8 @@ import json
 import logging
 from datetime import datetime, timezone
 
+from deja import audit
 from deja import wiki as wiki_store
-from deja.agent.integration import log_analysis
 from deja.config import DEJA_HOME
 
 log = logging.getLogger(__name__)
@@ -72,7 +72,7 @@ def consume_trigger() -> dict | None:
         return None
 
 
-async def trigger_integrate_now(reason: str) -> None:
+async def trigger_integrate_now(reason: str, trigger_kind: str = "user_cmd") -> None:
     """Fire run_analysis_cycle immediately against the active agent loop.
 
     Called from mic_routes (after voice transcript finalization) and
@@ -121,12 +121,18 @@ async def trigger_integrate_now(reason: str) -> None:
             reason,
         )
         try:
-            await run_analysis_cycle(loop_ref)
+            await run_analysis_cycle(
+                loop_ref, trigger_kind=trigger_kind, trigger_detail=reason
+            )
         except Exception:
             log.exception("trigger_integrate_now: cycle failed")
 
 
-async def run_analysis_cycle(loop_ref) -> None:
+async def run_analysis_cycle(
+    loop_ref,
+    trigger_kind: str = "signal",
+    trigger_detail: str = "scheduled tick",
+) -> None:
     """One cycle: read signals -> triage -> LLM call -> apply wiki updates.
 
     ``loop_ref`` is the AgentLoop instance (used for gemini client,
@@ -158,6 +164,13 @@ async def run_analysis_cycle(loop_ref) -> None:
         return
 
     loop_ref.phase = "THINKING"
+
+    # Register cycle context so every downstream audit.record() call
+    # (wiki writes, goal ops, action execution) carries cycle + trigger
+    # provenance automatically, without threading the ids through every
+    # function signature.
+    cycle_id = audit.new_cycle_id()
+    audit.set_context(cycle_id, trigger_kind, trigger_detail)
 
     # 1. Read unanalyzed signals as structured dicts (so we can triage
     #    per-signal before formatting the prompt).
@@ -334,37 +347,14 @@ async def run_analysis_cycle(loop_ref) -> None:
         except Exception:
             log.exception("goals tasks_update failed")
 
-    # Human-readable log in the wiki (browse in Obsidian).
-    try:
-        from deja.activity_log import append_log_entry
-        if wiki_updates:
-            changed = ", ".join(f"{u.get('category', '?')}/{u.get('slug', '?')}" for u in wiki_updates[:5])
-            append_log_entry("cycle", f"Updated {len(wiki_updates)} page(s): {changed}")
-        else:
-            summary = (reasoning[:140] + "...") if len(reasoning) > 140 else (reasoning or "no updates")
-            append_log_entry("cycle", f"No updates — {summary}")
-    except Exception:
-        log.warning("Failed to append cycle entry to log.md", exc_info=True)
-
-    # 5. Audit log — diagnostic only; rendered by the notch Activity tab
-    log_analysis(
-        matches=[
-            {
-                "goal": f"{u.get('category', '')}/{u.get('slug', '')}",
-                "signal_summary": u.get("reason", ""),
-                "confidence": u.get("action", "update"),
-                "reasoning": "",
-            }
-            for u in wiki_updates
-        ],
-        skips=[],
-        new_facts=[],
-        commitments=[],
-        events=[],
-        proposed_goals=[],
-        conversations=[{"with": "wiki", "summary": reasoning}] if reasoning else [],
-        questions=[],
-    )
+    # Cycle-level summary — one audit entry even when nothing changed,
+    # so "why did nothing happen on cycle c_X?" is answerable.
+    if not wiki_updates and not all_tasks_updates and not all_goal_actions:
+        audit.record(
+            "cycle_no_op",
+            target=f"cycle/{cycle_id}",
+            reason=(reasoning[:200] if reasoning else "no updates"),
+        )
 
     if analysis_marker:
         loop_ref.collector.save_analysis_marker(analysis_marker)
@@ -372,6 +362,7 @@ async def run_analysis_cycle(loop_ref) -> None:
     loop_ref.last_analysis_time = datetime.now(timezone.utc)
     loop_ref._fire_stats_update()
     loop_ref.phase = "IDLE"
+    audit.clear_context()
 
 
 # ---------------------------------------------------------------------------

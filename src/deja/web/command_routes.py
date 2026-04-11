@@ -259,11 +259,16 @@ def _dispatch_context(payload: dict) -> dict:
         f.write(json.dumps(entry) + "\n")
 
     try:
-        from deja.activity_log import append_log_entry
+        from deja import audit
 
-        append_log_entry("context", text[:120])
+        audit.record(
+            "user_command",
+            target="command/context",
+            reason=text[:200],
+            trigger={"kind": "user_cmd", "detail": "context dispatch"},
+        )
     except Exception:
-        log.debug("activity_log append failed for context", exc_info=True)
+        log.debug("audit.record failed for context", exc_info=True)
 
     return {"observation_id": entry["id_key"], "priority": priority}
 
@@ -306,16 +311,18 @@ async def handle_command(body: CommandRequest) -> CommandResponse:
     else:
         raise HTTPException(400, f"Unknown command type: {cmd_type!r}")
 
-    # Log every dispatched command in the wiki's activity log so the
-    # Activity feed can render a row.
+    # Record every dispatched command in the audit log.
     try:
-        from deja.activity_log import append_log_entry
+        from deja import audit
 
-        append_log_entry(
-            "command", f"{cmd_type}: {confirmation or body.input[:120]}"
+        audit.record(
+            "user_command",
+            target=f"command/{cmd_type}",
+            reason=confirmation or body.input[:200],
+            trigger={"kind": "user_cmd", "detail": body.source or "command"},
         )
     except Exception:
-        log.debug("activity_log append failed for command", exc_info=True)
+        log.debug("audit.record failed for command", exc_info=True)
 
     # Context-type commands fire an immediate integrate trigger with
     # cross-modal batch merging so the new signal gets processed against

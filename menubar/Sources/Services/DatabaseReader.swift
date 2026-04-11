@@ -269,59 +269,76 @@ class DatabaseReader {
     }
 
     func readInsights() -> [AnalysisInsight] {
-        let path = Self.home + "/analysis_log.jsonl"
+        // Reads ``~/.deja/audit.jsonl`` — the single audit log that replaced
+        // the legacy ``analysis_log.jsonl`` / ``integrations.jsonl`` /
+        // ``log.md`` triplet. Groups entries by ``cycle`` so the notch
+        // Insights panel still renders one row per integrate cycle.
+        let path = Self.home + "/audit.jsonl"
         guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)) else { return [] }
         let lines = data.split(separator: UInt8(ascii: "\n"))
 
-        return lines.suffix(15).reversed().compactMap { line in
-            guard let json = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any] else { return nil }
-            let ts = json["timestamp"] as? String ?? ""
-            let timeStr = formatTimestamp(ts)
+        // Group by cycle id (newest cycles first). Only consider lines
+        // emitted during an integrate cycle — lines without a cycle id
+        // are one-off admin writes (startup, manual, onboarding).
+        var order: [String] = []
+        var byCycle: [String: [[String: Any]]] = [:]
+        for raw in lines {
+            guard let json = try? JSONSerialization.jsonObject(with: Data(raw)) as? [String: Any] else { continue }
+            let cycle = (json["cycle"] as? String) ?? ""
+            guard !cycle.isEmpty else { continue }
+            if byCycle[cycle] == nil {
+                order.append(cycle)
+            }
+            byCycle[cycle, default: []].append(json)
+        }
 
-            let matches = (json["matches"] as? [[String: Any]] ?? []).map { m in
-                let goal = m["goal"] as? String ?? ""
-                let summary = m["signal_summary"] as? String ?? ""
-                let conf = m["confidence"] as? String ?? ""
-                let reasoning = m["reasoning"] as? String ?? ""
-                return "[\(conf)] \(goal): \(summary)" + (reasoning.isEmpty ? "" : " — \(reasoning)")
+        let recentCycles = order.suffix(15).reversed()
+        return recentCycles.compactMap { cycleId -> AnalysisInsight? in
+            guard let entries = byCycle[cycleId], let first = entries.first else { return nil }
+            let timeStr = formatTimestamp(first["ts"] as? String ?? "")
+
+            // "Matches" in the old schema were wiki mutations. Pull them
+            // out of the audit entries whose action is a wiki op.
+            let wikiActions: Set<String> = ["wiki_write", "wiki_delete", "event_create"]
+            let matches: [String] = entries.compactMap { e in
+                let action = e["action"] as? String ?? ""
+                guard wikiActions.contains(action) else { return nil }
+                let target = e["target"] as? String ?? ""
+                let reason = e["reason"] as? String ?? ""
+                return "[\(action)] \(target): \(reason)"
             }
 
-            let facts = (json["new_facts"] as? [[String: Any]] ?? []).map { f in
-                f["fact"] as? String ?? ""
-            }.filter { !$0.isEmpty && !Self.isPlaceholder($0) }
+            // goal_action entries surface as "commitments" in the notch
+            // panel so they still get visibility.
+            let commitments: [String] = entries.compactMap { e in
+                let action = e["action"] as? String ?? ""
+                guard action == "goal_action" else { return nil }
+                let target = e["target"] as? String ?? ""
+                let reason = e["reason"] as? String ?? ""
+                return "\(target): \(reason)"
+            }
 
-            let commitments = (json["commitments"] as? [[String: Any]] ?? []).map { c in
-                let who = c["commitment"] as? String ?? ""
-                let deadline = c["deadline"] as? String
-                return deadline != nil ? "\(who) (by \(deadline!))" : who
-            }.filter { !$0.isEmpty && !Self.isPlaceholder($0) }
-
-            let proposals = (json["proposed_goals"] as? [[String: Any]] ?? []).map { p in
-                let name = p["name"] as? String ?? ""
-                let desc = p["description"] as? String ?? ""
-                return "\(name): \(desc)"
-            }.filter { !$0.isEmpty && !Self.isPlaceholder($0) }
-
-            let conversations = (json["conversations"] as? [[String: Any]] ?? []).map { c in
-                let with_ = c["with"] as? String ?? ""
-                let summary = c["summary"] as? String ?? c["topic"] as? String ?? ""
-                let underlying = c["underlying_goal"] as? String ?? ""
-                var text = "\(with_): \(summary)"
-                if !underlying.isEmpty { text += " → \(underlying)" }
-                return text
-            }.filter { !$0.isEmpty }
-
-            let skipCount = (json["skips"] as? [[String: Any]])?.count ?? 0
-            let signalCount = matches.count + skipCount
+            // Task / reminder / waiting ops surface as "facts" so the
+            // Insights panel can show the goals churn.
+            let goalOps: Set<String> = [
+                "task_add", "task_complete", "task_archive",
+                "waiting_add", "waiting_resolve", "waiting_archive",
+                "reminder_add", "reminder_resolve", "reminder_archive",
+            ]
+            let facts: [String] = entries.compactMap { e in
+                let action = e["action"] as? String ?? ""
+                guard goalOps.contains(action) else { return nil }
+                return "\(action): \(e["reason"] as? String ?? "")"
+            }
 
             return AnalysisInsight(
                 time: timeStr,
                 matches: matches,
                 facts: facts,
                 commitments: commitments,
-                proposals: proposals,
-                conversations: conversations,
-                signalCount: signalCount
+                proposals: [],
+                conversations: [],
+                signalCount: entries.count
             )
         }
     }

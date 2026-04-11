@@ -249,16 +249,12 @@ def apply_updates(updates: list[dict]) -> int:
             if removed:
                 applied += 1
                 changed_slugs.append(f"{category}/{slug} (deleted)")
-                # Loud activity-log entry so the user can see integrate
-                # deletes in log.md alongside reflect deletes.
-                try:
-                    from deja.activity_log import append_log_entry
-                    append_log_entry(
-                        "integrate",
-                        f"deleted {category}/{slug} because {reason or '(no reason given)'}",
-                    )
-                except Exception:
-                    log.debug("activity_log append failed", exc_info=True)
+                from deja import audit
+                audit.record(
+                    "wiki_delete",
+                    target=f"{category}/{slug}",
+                    reason=reason or "(no reason given)",
+                )
             else:
                 log.info(
                     "Wiki delete no-op: %s/%s does not exist", category, slug
@@ -275,6 +271,12 @@ def apply_updates(updates: list[dict]) -> int:
             changed_slugs.append(f"{category}/{slug}")
             log.info("Wiki %s: %s/%s — %s",
                      action, category, slug, reason[:80])
+            from deja import audit
+            audit.record(
+                "event_create" if category == "events" else "wiki_write",
+                target=f"{category}/{slug}",
+                reason=reason or "(no reason given)",
+            )
         except Exception:
             log.exception("Failed to write wiki page %s/%s", category, slug)
 

@@ -4,8 +4,9 @@ import CoreMedia
 
 // MARK: - Data Models
 
-/// One row in the notch Activity feed — parsed from the wiki's
-/// ``log.md`` by the backend's ``GET /api/activity`` endpoint.
+/// One row in the notch Activity feed — returned by the backend's
+/// ``GET /api/activity`` endpoint, which reads ``~/.deja/audit.jsonl``
+/// (the single source of truth for agent mutations).
 struct ActivityEntry: Identifiable, Codable {
     var id: String { "\(timestamp)-\(kind)-\(summary.prefix(32))" }
     let timestamp: String

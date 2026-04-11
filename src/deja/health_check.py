@@ -3,20 +3,15 @@
 Runs once at monitor boot. Probes every external dependency the system
 expects to have, and for each failure writes:
 
-  1. A WARNING line to deja.log
-  2. A `startup` entry to log.md (inside the wiki) with the problem and
-     the exact fix steps, so David sees it in Obsidian
+  1. A WARNING line to ``deja.log`` (Python stdlib logger).
+  2. A ``health_check`` entry in ``~/.deja/audit.jsonl`` via
+     ``audit.record()`` with the problem and the exact fix steps, so
+     the failure is grep-able after the fact.
 
 The goal is to replace the current "error spam forever" pattern with a
 single loud diagnostic shot at boot. Once a source is known-broken, the
 corresponding collector's subsequent failures stay in deja.log but
 are rate-limited to one per minute rather than one per signal cycle.
-
-The output looks like this in log.md:
-
-    - **[2026-04-04 21:30]** startup — iMessage collection disabled:
-      grant Full Disk Access to Deja.app in System Settings →
-      Privacy & Security → Full Disk Access, then restart the app.
 """
 
 from __future__ import annotations
@@ -158,7 +153,7 @@ def _check_screenshot_enabled() -> CheckResult:
 
     This isn't a failure — users can legitimately disable it if macOS
     Screen Recording permission is unstable or they want a visual-free
-    mode. Reporting it as a check makes the state visible in log.md so
+    mode. Reporting it as a check makes the state visible in audit.jsonl so
     it's not mysterious later.
     """
     from deja.config import SCREENSHOT_ENABLED
@@ -183,7 +178,7 @@ def _check_user_profile() -> CheckResult:
     Without this, prompts fall back to generic "the user" language and
     outbound email sends (diagnostic heartbeats, nightly reports) silently
     no-op. Surfacing it at boot is cheap and means a new user sees the
-    exact fix in log.md without having to dig through source.
+    exact fix in audit.jsonl without having to dig through source.
     """
     from deja.identity import load_user
 
@@ -266,7 +261,7 @@ def run_health_checks() -> list[CheckResult]:
 
 def report_health_checks() -> set[str]:
     """Run all checks, log failures to deja.log AND write one
-    ``startup`` entry per failure to log.md so they're visible in Obsidian.
+    ``health_check`` entry per failure to audit.jsonl for later grep.
 
     Returns a set of failure names. Callers can use this to suppress
     redundant per-cycle errors for already-known-broken sources.
@@ -283,21 +278,36 @@ def report_health_checks() -> set[str]:
             log.warning("startup check [%s]: FAIL — %s", r.name, r.detail)
             log.warning("    fix: %s", r.fix)
 
-    # Emit a single summary entry + one detail entry per failure to log.md.
+    # Emit a single summary entry + one detail entry per failure.
     try:
-        from deja.activity_log import append_log_entry
+        from deja import audit
         if failures:
-            append_log_entry(
-                "startup",
-                f"{ok_count}/{len(results)} checks passed — {len(failures)} issue(s) need attention (see below)",
+            audit.record(
+                "health_check",
+                target="startup/summary",
+                reason=(
+                    f"{ok_count}/{len(results)} checks passed — "
+                    f"{len(failures)} issue(s) need attention"
+                ),
+                trigger={"kind": "startup", "detail": "boot"},
             )
             for r in results:
                 if r.ok:
                     continue
-                append_log_entry("startup", f"{r.name} — {r.detail}. Fix: {r.fix}")
+                audit.record(
+                    "health_check",
+                    target=f"startup/{r.name}",
+                    reason=f"{r.detail}. Fix: {r.fix}",
+                    trigger={"kind": "startup", "detail": "boot"},
+                )
         else:
-            append_log_entry("startup", f"all {len(results)} checks passed")
+            audit.record(
+                "health_check",
+                target="startup/summary",
+                reason=f"all {len(results)} checks passed",
+                trigger={"kind": "startup", "detail": "boot"},
+            )
     except Exception:
-        log.debug("failed to write startup report to log.md", exc_info=True)
+        log.debug("failed to write startup audit", exc_info=True)
 
     return failures

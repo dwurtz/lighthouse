@@ -399,13 +399,14 @@ async def process_completed_meeting(session_dir: Path, state: dict) -> dict:
     except Exception:
         log.exception("Failed to persist meeting observation")
 
-    # 6. Log to activity log
+    # 6. Audit entry so the meeting recording is traceable
     try:
-        from deja.activity_log import append_log_entry
-        append_log_entry(
-            "meeting",
-            f"Recorded: {title} ({duration}min, {len(transcripts)} chunks)"
-            + (f" → events/{slug}" if slug else ""),
+        from deja import audit
+        audit.record(
+            "voice_transcript",
+            target=(f"events/{slug}" if slug else "meeting/untitled"),
+            reason=f"Recorded: {title} ({duration}min, {len(transcripts)} chunks)",
+            trigger={"kind": "user_cmd", "detail": "meeting recording"},
         )
     except Exception:
         pass

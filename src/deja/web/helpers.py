@@ -8,7 +8,6 @@ from pathlib import Path
 from deja.config import DEJA_HOME
 
 OBSERVATIONS_LOG = DEJA_HOME / "observations.jsonl"
-INTEGRATIONS_LOG = DEJA_HOME / "integrations.jsonl"
 CONVERSATION_PATH = DEJA_HOME / "conversation.json"
 
 

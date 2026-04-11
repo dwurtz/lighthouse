@@ -255,9 +255,14 @@ async def run_step(
 
 
 def _append_log(step_name: str, message: str) -> None:
-    """Best-effort activity-log entry so the user sees progress in log.md."""
+    """Best-effort audit entry so onboarding progress is traceable."""
     try:
-        from deja.activity_log import append_log_entry
-        append_log_entry("onboard", f"[{step_name}] {message}")
+        from deja import audit
+        audit.record(
+            "onboarding_step",
+            target=f"onboarding/{step_name}",
+            reason=message,
+            trigger={"kind": "onboarding", "detail": step_name},
+        )
     except Exception:
-        log.debug("onboarding activity_log append failed", exc_info=True)
+        log.debug("onboarding audit failed", exc_info=True)

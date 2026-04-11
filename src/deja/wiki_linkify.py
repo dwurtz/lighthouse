@@ -82,7 +82,7 @@ class Entity:
 
 @dataclass
 class LinkifyReport:
-    """Summary of one linkify pass. Dumped to log.md and deja.log."""
+    """Summary of one linkify pass. Emitted via audit.record + deja.log."""
     pages_scanned: int = 0
     pages_changed: int = 0
     links_added: int = 0
