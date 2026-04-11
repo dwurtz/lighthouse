@@ -32,15 +32,16 @@ TRIAGE_SOURCES = {"imessage", "whatsapp", "email", "browser"}
 
 
 def _load_index_md() -> str:
-    """Read the current wiki index for triage grounding. Empty on miss."""
-    from deja.config import WIKI_DIR
-    path = WIKI_DIR / "index.md"
-    if not path.exists():
-        return ""
-    try:
-        return path.read_text(encoding="utf-8", errors="replace")
-    except Exception:
-        return ""
+    """Read the current wiki index for triage grounding. Empty on miss.
+
+    Delegates to ``wiki_catalog.render_index_for_prompt`` so the vision
+    prompt and the triage prompt both pull from the same source of
+    truth — reflect's reordering (once Phase B lands) benefits both
+    consumers automatically. No rebuild here: the analysis cycle has
+    already called rebuild_index() upstream.
+    """
+    from deja.wiki_catalog import render_index_for_prompt
+    return render_index_for_prompt(rebuild=False)
 
 
 def load_index_md() -> str:

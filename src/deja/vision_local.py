@@ -24,9 +24,23 @@ from deja import local_models
 log = logging.getLogger(__name__)
 
 
-_PROMPT_TEMPLATE = (
-    "This is {user_name}'s Mac. {app_context}"
-    "\n\nRead this screenshot carefully. What app is {first_name} using? "
+# We pass the full wiki index into the vision prompt — no vision-side cap.
+# Reflect already caps index.md at _MAX_ENTRIES=200 pages (see
+# wiki_catalog.py), which works out to ~300 lines / ~7.5K tokens worst
+# case — only ~23% of FastVLM 0.5B's 32K context window. The rich
+# descriptions are what make grounding useful ("Amanda Peffer collaborates
+# with David on the blade-and-rose Shopify store") so we want the model
+# to see as many of them as possible. Once reflect sorts index.md by
+# recency (Phase B), the most relevant entries are automatically at the
+# top, which matters more as the wiki grows toward the 200-entry cap.
+
+
+_PROMPT_GROUNDED = (
+    "This is {user_name}'s Mac.\n\n"
+    "# People and projects {first_name} cares about\n\n"
+    "{index_block}\n\n"
+    "# Your task\n\n"
+    "Read this screenshot carefully. What app is {first_name} using? "
     "Read any visible messages, emails, or conversations — quote the "
     "actual text you can see. Who is talking to whom, and about what?"
 )
@@ -37,69 +51,36 @@ _PROMPT_FALLBACK = (
     "Quote any visible text."
 )
 
-# Cache the entity context so we don't re-read the wiki every 6 seconds
-_entity_context_cache: str | None = None
-_entity_context_ts: float = 0
-
 # Lazy-loaded model state — survives for the process lifetime.
 _model = None
 _processor = None
 _load_attempted = False
 
 
-def _build_entity_context() -> str:
-    """Compact list of known projects from the wiki index, cached 5min."""
-    global _entity_context_cache, _entity_context_ts
-
-    if _entity_context_cache and (time.time() - _entity_context_ts) < 300:
-        return _entity_context_cache
-
-    try:
-        from deja.config import WIKI_DIR
-        index_path = WIKI_DIR / "index.md"
-        if not index_path.exists():
-            return ""
-
-        projects: list[str] = []
-        section: str | None = None
-
-        for line in index_path.read_text().splitlines():
-            if line.startswith("## People"):
-                section = "people"
-            elif line.startswith("## Projects"):
-                section = "projects"
-            elif line.startswith("## "):
-                section = None
-            elif line.startswith("- [[") and section == "projects":
-                slug = line.split("[[")[1].split("]]")[0]
-                name = slug.replace("-", " ").title()
-                if len(projects) < 20:
-                    projects.append(name)
-
-        parts = ["He uses Superhuman for email, Slack and WhatsApp for messaging."]
-        if projects:
-            parts.append(f"He works on projects including {', '.join(projects[:8])}.")
-
-        _entity_context_cache = " ".join(parts)
-        _entity_context_ts = time.time()
-        return _entity_context_cache
-
-    except Exception:
-        return ""
-
-
 def _build_prompt(voice_context: str = "") -> str:
-    """Compose the vision prompt with optional identity grounding and voice context."""
+    """Compose the vision prompt with optional identity grounding and voice context.
+
+    Grounding comes from the shared ``wiki_catalog.render_index_for_prompt``
+    helper so vision and triage both read the same catalog — when reflect
+    reorders index.md by recency, both consumers automatically see the
+    hot entries first. We truncate to the first ``_VISION_INDEX_LINES``
+    lines so FastVLM 0.5B's attention isn't diluted by a long tail of
+    stale entries.
+    """
     base = _PROMPT_FALLBACK
     try:
         from deja.identity import load_user
+        from deja.wiki_catalog import render_index_for_prompt
+
         user = load_user()
         if not user.is_generic:
-            app_context = _build_entity_context()
-            base = _PROMPT_TEMPLATE.format(
+            index_block = render_index_for_prompt(
+                rebuild=False,
+            ).strip() or "(no wiki entries yet)"
+            base = _PROMPT_GROUNDED.format(
                 user_name=user.name,
                 first_name=user.first_name,
-                app_context=app_context,
+                index_block=index_block,
             )
     except Exception:
         pass

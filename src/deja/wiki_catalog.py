@@ -228,17 +228,47 @@ def rebuild_index() -> int:
         return 0
 
 
-def render_index_for_prompt() -> str:
+def render_index_for_prompt(
+    *,
+    max_lines: int | None = None,
+    rebuild: bool = True,
+) -> str:
     """Return the current index.md content for LLM prompt injection.
 
-    Calls rebuild_index() first to ensure it's fresh. Returns empty string
-    if there are no pages.
+    Used as the single catalog-lookup helper across Deja:
+      - ``wiki_retriever.build_analysis_context`` — full index, rebuilt
+        (the integrate cycle wants a fresh snapshot).
+      - ``deja.llm.prefilter.triage_batch`` — full index, no rebuild
+        (the analysis cycle already rebuilt upstream).
+      - ``deja.vision_local._build_prompt`` — truncated to ``max_lines``,
+        no rebuild (called every 6s; we don't want to scan all pages
+        that often).
+
+    Args:
+        max_lines: If set, keep only the first N lines of index.md.
+            Used by vision to cap FastVLM's prompt size while still
+            exposing the most-relevant entries once reflect learns
+            to sort by recency (Phase B).
+        rebuild: If True, call ``rebuild_index()`` first to guarantee
+            freshness. Defaults True for callers that didn't rebuild
+            upstream; set False when the analysis cycle has already
+            done it.
+
+    Returns empty string if there are no pages or on any error.
     """
     try:
-        count = rebuild_index()
-        if count == 0:
+        if rebuild:
+            count = rebuild_index()
+            if count == 0:
+                return ""
+        elif not INDEX_PATH.exists():
             return ""
-        return INDEX_PATH.read_text(encoding="utf-8")
+
+        text = INDEX_PATH.read_text(encoding="utf-8")
+        if max_lines is not None:
+            lines = text.splitlines()
+            text = "\n".join(lines[:max_lines])
+        return text
     except Exception as e:  # noqa: BLE001
         logger.warning("wiki_index: failed to render index: %s", e)
         return ""
