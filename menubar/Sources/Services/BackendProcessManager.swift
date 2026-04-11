@@ -32,6 +32,20 @@ class BackendProcessManager {
         env["PATH"] = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
         if env["GEMINI_API_KEY"] == nil, let key = readKeyFromEnv() { env["GEMINI_API_KEY"] = key }
         env["__CFBundleIdentifier"] = "com.deja.app"
+
+        // CRITICAL: do not let the bundled Python write .pyc files to
+        // __pycache__/ directories inside the .app bundle. Those files
+        // would invalidate the bundle's code-signing seal at runtime,
+        // causing Gatekeeper to reject every subsequent LaunchServices
+        // launch with -600 ("sealed resource is missing or invalid").
+        // We pre-compile every .py during bundle-python.sh so the .pyc
+        // files are part of the seal — but this env var ensures Python
+        // never writes new ones at runtime, even if it imports a module
+        // that compileall missed.
+        if MonitorState.isBundledPython {
+            env["PYTHONDONTWRITEBYTECODE"] = "1"
+        }
+
         return env
     }
 

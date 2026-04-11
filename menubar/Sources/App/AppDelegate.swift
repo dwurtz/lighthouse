@@ -22,6 +22,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var updaterController: SPUStandardUpdaterController!
     var setupPanelWindow: SetupPanelWindow?
     var voicePillWindow: VoicePillWindow?
+    var didSetupVoicePill: Bool = false
     let hotkeyManager = HotkeyManager()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -55,8 +56,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             object: nil
         )
 
-        // Voice pill — persistent floating capsule at bottom of screen
-        setupVoicePill()
+        // Voice pill — persistent floating capsule at bottom of screen.
+        // Only instantiate if setup is already complete; otherwise the pill
+        // would appear behind/below the setup panel on first launch. The
+        // .setupCompleted notification handler will call setupVoicePill()
+        // once the wizard finishes.
+        if !monitor.setupNeeded {
+            setupVoicePill()
+        }
 
         // Show floating pill when a meeting is about to start
         NotificationCenter.default.addObserver(
@@ -114,14 +121,29 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func showSetupPanel() {
+        // Reuse the existing panel if the user previously closed it
+        // (via the X button) — we only hid it with orderOut(nil), not
+        // .close(), so the state is intact.
+        if let existing = setupPanelWindow {
+            existing.orderFront(nil)
+            existing.makeKey()
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
         let panel = SetupPanelWindow(monitor: monitor)
         panel.orderFront(nil)
+        panel.makeKey()
+        NSApp.activate(ignoringOtherApps: true)
         setupPanelWindow = panel
     }
 
     @objc private func handleSetupCompleted() {
         setupPanelWindow?.close()
         setupPanelWindow = nil
+
+        // Now that setup is done, bring up the voice pill / floating UI
+        // that we deliberately suppressed during first-run.
+        setupVoicePill()
     }
 
     @objc private func handleMeetingDismissed() {
@@ -191,12 +213,54 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         }
 
-        // Right-click menu — just Quit. Everything else is in Settings.
+        // Tray menu — built dynamically per click so the primary item
+        // reflects current state ("Resume Setup" vs "Open Déjà").
+        contextMenu = NSMenu()
+    }
+
+    /// Build the tray icon menu fresh each time it's shown so the
+    /// primary action reflects whether setup is incomplete (Resume Setup)
+    /// or complete (Open Déjà).
+    private func buildTrayMenu() -> NSMenu {
         let menu = NSMenu()
-        let quitItem = NSMenuItem(title: "Quit Déjà", action: #selector(quitApp), keyEquivalent: "q")
+
+        if monitor.setupNeeded {
+            let resume = NSMenuItem(
+                title: "Resume Setup…",
+                action: #selector(showSetupPanelFromMenu),
+                keyEquivalent: ""
+            )
+            resume.target = self
+            menu.addItem(resume)
+        } else {
+            let open = NSMenuItem(
+                title: "Open Déjà",
+                action: #selector(openPopoverFromMenu),
+                keyEquivalent: ""
+            )
+            open.target = self
+            menu.addItem(open)
+        }
+
+        menu.addItem(NSMenuItem.separator())
+
+        let quitItem = NSMenuItem(
+            title: "Quit Déjà",
+            action: #selector(quitApp),
+            keyEquivalent: "q"
+        )
         quitItem.target = self
         menu.addItem(quitItem)
-        contextMenu = menu
+
+        return menu
+    }
+
+    @objc private func showSetupPanelFromMenu() {
+        showSetupPanel()
+    }
+
+    @objc private func openPopoverFromMenu() {
+        togglePopover()
     }
 
     // MARK: Mic control — polls the shared MonitorState so the popover
@@ -247,16 +311,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: Click handling
 
     @objc private func statusItemClicked(_ sender: Any?) {
-        guard let event = NSApp.currentEvent else { return }
-        if event.type == .rightMouseUp || event.modifierFlags.contains(.control) {
-            // Right-click or ctrl-click: show the options menu
-            statusItem.menu = contextMenu
-            statusItem.button?.performClick(nil)
-            // Unset the menu immediately so the next left-click opens the popover
-            statusItem.menu = nil
-        } else {
-            togglePopover()
-        }
+        // Both left and right click show the same dynamic menu. The
+        // first item (Resume Setup / Open Déjà) is the primary action;
+        // Quit always lives below the separator. This is the only
+        // discoverable way for users to find Quit on a borderless
+        // LSUIElement app — right-click on tray icons is invisible
+        // unless you already know the convention.
+        let menu = buildTrayMenu()
+        statusItem.menu = menu
+        statusItem.button?.performClick(nil)
+        statusItem.menu = nil
     }
 
     private func togglePopover() {
@@ -289,6 +353,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: Voice pill + hotkey
 
     private func setupVoicePill() {
+        guard !didSetupVoicePill else { return }
+        didSetupVoicePill = true
         monitor.loadVoicePillState()
 
         if monitor.voicePillEnabled {

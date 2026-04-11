@@ -9,8 +9,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from deja.config import IGNORED_APPS, DEJA_HOME
-from deja.observations.active_app import get_active_app
+from deja.config import DEJA_HOME
 from deja.observations.base import BaseObserver
 from deja.observations.browser import BrowserObserver
 from deja.observations.calendar import CalendarObserver
@@ -32,8 +31,6 @@ class Observer:
 
     def __init__(self, history_size: int = 10000) -> None:
         self._seen_ids: set[str] = set()
-        self._last_app: str = ""
-        self._last_title: str = ""
         self._screenshot_counter: int = 0
         self._screenshot_every: int = 1
         self._signal_log_path = DEJA_HOME / "observations.jsonl"
@@ -78,17 +75,6 @@ class Observer:
             except Exception:
                 log.exception("%s collector error", obs.name)
 
-        # Active app / window — NOT emitted as a signal. Captured solely to
-        # decide whether the visual state changed enough to warrant a new
-        # screenshot. The screenshot is the signal; the app/title change is
-        # just the trigger. Chrome tabs are covered the same way.
-        current_app = ""
-        current_title = ""
-        try:
-            current_app, current_title = get_active_app()
-        except Exception:
-            log.exception("Active app probe error")
-
         # Browser history — every 3rd cycle (~9s)
         self._browser_counter += 1
         if self._browser_counter >= self._browser_every:
@@ -113,18 +99,19 @@ class Observer:
         # transcripts are written to observations.jsonl directly when the
         # user ends a session.
 
-        # Screenshot — on app/window change OR every 5 seconds minimum.
+        # Screenshot — purely periodic (every 2 cycles x 3s = 6s).
         # Gated by config.SCREENSHOT_ENABLED so the user can disable the
         # collector if macOS Screen Recording permission is misbehaving
         # (the only observation source that needs TCC screen-recording).
+        # We used to also trigger on app/window change, but that required
+        # an osascript call to System Events which fired the macOS
+        # Automation prompt. The 6s periodic floor is good enough and
+        # avoids the TCC prompt entirely.
         from deja.config import SCREENSHOT_ENABLED
         if SCREENSHOT_ENABLED:
             try:
                 self._screenshot_counter += 1
-                context_changed = self.should_screenshot(current_app, current_title)
-                periodic = self._screenshot_counter >= 2  # 2 cycles x 3s = 6s
-
-                if context_changed or periodic:
+                if self._screenshot_counter >= 2:  # 2 cycles x 3s = 6s
                     self._screenshot_counter = 0
                     screen = capture_screenshot_if_changed()
                     if screen:
@@ -354,12 +341,3 @@ class Observer:
             log.exception("Failed to read signal log for recent signals")
         return "\n".join(lines)
 
-    def should_screenshot(self, app: str, title: str) -> bool:
-        """Return True if app/title changed since last check."""
-        if app in IGNORED_APPS:
-            changed = False
-        else:
-            changed = app != self._last_app or title != self._last_title
-        self._last_app = app
-        self._last_title = title
-        return changed
