@@ -6,14 +6,48 @@ modules define ``APIRouter`` objects that are included here.
 
 from __future__ import annotations
 
+import asyncio
+import logging
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 
+from deja.mcp_install import _repair_stale_paths, _run_mcp_first_install
 from deja.web.setup_routes import router as setup_router
 from deja.web.chat_routes import router as chat_router
 from deja.web.contact_routes import router as contact_router
+from deja.web.mcp_routes import router as mcp_router
 from deja.web.meeting_routes import router as meeting_router
 from deja.web.mic_routes import router as mic_router
 from deja.web.status_routes import router as status_router
+
+log = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):  # noqa: ARG001 — FastAPI requires this signature
+    """App lifespan — runs MCP auto-install + stale-path repair on startup.
+
+    Fire-and-forget: we dispatch both helpers in a background thread
+    and return immediately so health checks and the rest of startup
+    are never blocked on config-file I/O. If one client's filesystem
+    is slow (network home dir, locked file, etc.) the backend stays
+    responsive. Both helpers are exception-safe — they log and swallow
+    failures so a bad install can never crash the server.
+    """
+    def _run() -> None:
+        try:
+            _run_mcp_first_install()
+            _repair_stale_paths()
+        except Exception as e:  # noqa: BLE001 — belt-and-braces
+            log.exception("MCP auto-install: unexpected failure: %s", e)
+
+    try:
+        asyncio.create_task(asyncio.to_thread(_run))
+    except Exception as e:  # noqa: BLE001
+        log.exception("MCP auto-install: failed to schedule task: %s", e)
+
+    yield
 
 
 def create_app() -> FastAPI:
@@ -23,7 +57,7 @@ def create_app() -> FastAPI:
     permissions (``~/.deja/`` is chmod 700), so no shared-secret
     middleware is needed.
     """
-    application = FastAPI(title="deja", version="0.2.0")
+    application = FastAPI(title="deja", version="0.2.0", lifespan=_lifespan)
 
     # Include routers
     application.include_router(setup_router)
@@ -32,6 +66,7 @@ def create_app() -> FastAPI:
     application.include_router(chat_router)
     application.include_router(mic_router)
     application.include_router(meeting_router)
+    application.include_router(mcp_router)
 
     return application
 

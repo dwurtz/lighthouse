@@ -21,6 +21,18 @@ struct ContactMatch: Identifiable {
     let email: String
 }
 
+/// One MCP-compatible AI client detected on this machine. Mirrors the
+/// JSON shape returned by ``GET /api/mcp/clients`` from the Python backend.
+struct MCPClientInfo: Codable, Identifiable {
+    var id: String { name }
+    let name: String
+    let installed: Bool
+    var enabled: Bool
+    let config_path: String
+    let auto_configurable: Bool
+    let note: String
+}
+
 struct AnalysisInsight: Identifiable {
     let id = UUID()
     let time: String

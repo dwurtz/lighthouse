@@ -143,6 +143,34 @@ struct SettingsView: View {
 
                     Divider().background(Color.white.opacity(0.1))
 
+                    // Connected AI Assistants (MCP clients)
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Connected AI Assistants")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(.white.opacity(0.4))
+                            .textCase(.uppercase)
+
+                        if monitor.mcpClients.isEmpty {
+                            Text("Scanning for installed AI clients…")
+                                .font(.system(size: 11))
+                                .foregroundColor(.white.opacity(0.35))
+                        } else {
+                            let installedClients = monitor.mcpClients.filter { $0.installed }
+                            if installedClients.isEmpty {
+                                Text("No compatible AI assistants detected on this Mac")
+                                    .font(.system(size: 11))
+                                    .foregroundColor(.white.opacity(0.35))
+                            } else {
+                                ForEach(installedClients) { client in
+                                    mcpClientRow(client)
+                                }
+                            }
+                        }
+                    }
+                    .padding(16)
+
+                    Divider().background(Color.white.opacity(0.1))
+
                     // Support
                     VStack(alignment: .leading, spacing: 12) {
                         Text("Support")
@@ -199,6 +227,77 @@ struct SettingsView: View {
             }
         }
         .background(Color.black)
+        .onAppear {
+            monitor.fetchMCPClients()
+        }
+    }
+
+    // MARK: - MCP Client Row
+
+    private func mcpIcon(_ name: String) -> String {
+        switch name {
+        case "Claude Desktop": return "app.badge"
+        case "Claude Code": return "terminal"
+        case "Cursor": return "cursorarrow.rays"
+        case "Windsurf": return "wind"
+        case "VS Code": return "chevron.left.forwardslash.chevron.right"
+        case "ChatGPT": return "bubble.left.and.text.bubble.right"
+        default: return "app"
+        }
+    }
+
+    private func mcpSubtitle(_ client: MCPClientInfo) -> String {
+        if !client.auto_configurable {
+            return client.note.isEmpty
+                ? "Manual setup — not auto-configurable"
+                : client.note
+        }
+        if !client.installed { return "Not installed" }
+        return client.enabled ? "Enabled" : "Disabled"
+    }
+
+    @ViewBuilder
+    func mcpClientRow(_ client: MCPClientInfo) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 10) {
+                Image(systemName: mcpIcon(client.name))
+                    .font(.system(size: 14))
+                    .foregroundColor(
+                        client.enabled && client.installed
+                            ? .orange
+                            : .white.opacity(0.45)
+                    )
+                    .frame(width: 20)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(client.name)
+                        .font(.system(size: 13))
+                        .foregroundColor(.white)
+                    Text(mcpSubtitle(client))
+                        .font(.system(size: 11))
+                        .foregroundColor(.white.opacity(0.35))
+                }
+
+                Spacer()
+
+                Toggle("", isOn: Binding(
+                    get: { client.enabled },
+                    set: { newValue in
+                        monitor.setMCPClientEnabled(client.name, enabled: newValue)
+                    }
+                ))
+                .labelsHidden()
+                .toggleStyle(SwitchToggleStyle(tint: .orange))
+                .disabled(!client.installed || !client.auto_configurable)
+            }
+
+            if let err = monitor.mcpClientErrors[client.name] {
+                Text(err)
+                    .font(.system(size: 10))
+                    .foregroundColor(.red.opacity(0.85))
+                    .padding(.leading, 30)
+            }
+        }
     }
 
     // MARK: - Send Logs

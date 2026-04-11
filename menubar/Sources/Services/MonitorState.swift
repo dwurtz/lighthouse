@@ -64,6 +64,10 @@ class MonitorState: ObservableObject {
     @Published var notificationMessage: String = ""
     @Published var showNotification: Bool = false
 
+    // Connected AI assistants (MCP clients) — shown in Settings
+    @Published var mcpClients: [MCPClientInfo] = []
+    @Published var mcpClientErrors: [String: String] = [:]
+
     private var backfillTimer: Timer?
     private var meetingStartTime: Date?
     private var meetingTimer: Timer?
@@ -603,6 +607,75 @@ class MonitorState: ObservableObject {
         }
         contactResults = []
         showContactPicker = false
+    }
+
+    // MARK: - MCP Clients (Connected AI Assistants)
+
+    func fetchMCPClients() {
+        localAPICall("/api/mcp/clients") { [weak self] data, _ in
+            guard let self = self,
+                  let data = data,
+                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let arr = obj["clients"] as? [[String: Any]] else { return }
+            let decoded: [MCPClientInfo] = arr.compactMap { dict in
+                guard let name = dict["name"] as? String,
+                      let installed = dict["installed"] as? Bool,
+                      let enabled = dict["enabled"] as? Bool,
+                      let configPath = dict["config_path"] as? String,
+                      let autoConf = dict["auto_configurable"] as? Bool else { return nil }
+                return MCPClientInfo(
+                    name: name,
+                    installed: installed,
+                    enabled: enabled,
+                    config_path: configPath,
+                    auto_configurable: autoConf,
+                    note: (dict["note"] as? String) ?? ""
+                )
+            }
+            DispatchQueue.main.async {
+                self.mcpClients = decoded
+            }
+        }
+    }
+
+    func setMCPClientEnabled(_ clientName: String, enabled: Bool) {
+        // Optimistically update the UI so the toggle feels instant.
+        let previous = mcpClients
+        if let idx = mcpClients.firstIndex(where: { $0.name == clientName }) {
+            mcpClients[idx].enabled = enabled
+        }
+        mcpClientErrors[clientName] = nil
+
+        let payload: [String: Any] = ["client_name": clientName, "enabled": enabled]
+        let body = try? JSONSerialization.data(withJSONObject: payload)
+        localAPICall("/api/mcp/clients/toggle", method: "POST", body: body, timeoutInterval: 10) { [weak self] data, error in
+            guard let self = self else { return }
+
+            // Revert on transport error.
+            if let error = error {
+                DispatchQueue.main.async {
+                    self.mcpClients = previous
+                    self.mcpClientErrors[clientName] = error.localizedDescription
+                }
+                return
+            }
+
+            // Revert on backend error response (has "error" field).
+            if let data = data,
+               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let errMsg = obj["error"] as? String {
+                DispatchQueue.main.async {
+                    self.mcpClients = previous
+                    self.mcpClientErrors[clientName] = errMsg
+                }
+                return
+            }
+
+            // Success — refetch to pick up authoritative state.
+            DispatchQueue.main.async {
+                self.fetchMCPClients()
+            }
+        }
     }
 
     // MARK: - Voice Pill (hold-to-talk)
