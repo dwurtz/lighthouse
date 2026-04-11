@@ -26,7 +26,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from deja.config import DEJA_HOME, WIKI_DIR
+from deja.config import DEJA_HOME, QMD_COLLECTION, WIKI_DIR
 from deja.identity import load_user
 from deja.llm_client import GeminiClient
 from deja.prompts import load as load_prompt
@@ -272,7 +272,8 @@ async def _dispatch_query(payload: dict) -> dict:
     parts: list[str] = []
 
     if topic and topic != "*":
-        qmd_text = _qmd_query(topic, collection="Deja", limit=6)
+        from deja.config import QMD_COLLECTION
+        qmd_text = _qmd_query(topic, collection=QMD_COLLECTION, limit=6)
         if qmd_text:
             parts.append(f"## Wiki pages relevant to \"{topic}\"\n\n{qmd_text}")
 

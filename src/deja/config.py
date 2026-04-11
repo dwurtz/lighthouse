@@ -113,6 +113,14 @@ if _LEGACY_SIGNAL_LOG.exists() and not OBSERVATIONS_LOG.exists():
 
 CONVERSATION_PATH = DEJA_HOME / "conversation.json"
 
+# QMD collection name. Single source of truth — every QMD query/search
+# call in the codebase must pass this (or qmd will default to searching
+# everything). Historically dedup used "Deja" while wiki_retriever used
+# "wiki", causing wiki_retriever to silently return zero hits because
+# "wiki" never existed. All callers now import this constant.
+QMD_COLLECTION = "Deja"
+QMD_DB_PATH = Path.home() / ".cache" / "qmd" / "index.sqlite"
+
 # Source databases (macOS)
 IMESSAGE_DB = Path.home() / "Library" / "Messages" / "chat.db"
 WHATSAPP_DB = (

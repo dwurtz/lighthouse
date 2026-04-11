@@ -385,7 +385,8 @@ def _get_context(topic: str) -> str:
     )
 
     # --- QMD hybrid search across wiki + events ---
-    qmd_result = _qmd_query(topic, collection="Deja", limit=8)
+    from deja.config import QMD_COLLECTION
+    qmd_result = _qmd_query(topic, collection=QMD_COLLECTION, limit=8)
     if qmd_result:
         sections.append(f"## Relevant pages and events for \"{topic}\"\n\n{qmd_result}")
     else:

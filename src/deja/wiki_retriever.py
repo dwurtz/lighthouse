@@ -59,7 +59,7 @@ import re
 from pathlib import Path
 
 from deja import wiki as wiki_store
-from deja.config import WIKI_DIR
+from deja.config import QMD_COLLECTION, WIKI_DIR
 from deja.llm.search import search_files, vsearch_files
 from deja.wiki_catalog import render_index_for_prompt
 
@@ -381,7 +381,7 @@ def _retrieve_vector(query: str) -> list[tuple[str, str]]:
     try:
         results = vsearch_files(
             query,
-            collection="wiki",
+            collection=QMD_COLLECTION,
             limit=_VSEARCH_CANDIDATES,
             exclude_basenames=_META_BASENAMES,
         )
@@ -415,7 +415,7 @@ def _retrieve_bm25(entity_tokens: list[str]) -> list[tuple[str, str]]:
         try:
             results = search_files(
                 token,
-                collection="wiki",
+                collection=QMD_COLLECTION,
                 limit=_BM25_PER_TOKEN_LIMIT,
                 exclude_basenames=_META_BASENAMES,
             )

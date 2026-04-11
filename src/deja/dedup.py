@@ -27,7 +27,7 @@ from typing import Any
 import numpy as np
 
 from deja import wiki as wiki_store
-from deja.config import WIKI_DIR
+from deja.config import QMD_COLLECTION, QMD_DB_PATH, WIKI_DIR
 from deja.llm_client import GeminiClient
 from deja.prompts import load as load_prompt
 
@@ -35,8 +35,6 @@ log = logging.getLogger(__name__)
 
 SIMILARITY_THRESHOLD = 0.82
 CONFIRM_MODEL = "gemini-2.5-flash-lite"
-QMD_DB_PATH = Path.home() / ".cache" / "qmd" / "index.sqlite"
-QMD_COLLECTION = "Deja"
 BODY_SNIPPET_CHARS = 500
 MAX_CANDIDATES_PER_RUN = 300  # sanity ceiling — well above typical run
 META_FILES = {"index.md", "log.md", "reflection.md", "goals.md"}
