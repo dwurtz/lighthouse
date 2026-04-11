@@ -86,17 +86,16 @@ def _check_wiki() -> list[CheckResult]:
     results.append(CheckResult(name="wiki directory", ok=True, detail=str(WIKI_DIR), fix=""))
 
     # Required files
-    for fname in ("CLAUDE.md", "index.md"):
-        p = WIKI_DIR / fname
-        if p.exists():
-            results.append(CheckResult(name=f"wiki/{fname}", ok=True, detail="present", fix=""))
-        else:
-            results.append(CheckResult(
-                name=f"wiki/{fname}",
-                ok=False,
-                detail="missing",
-                fix=f"Create {p} — the monitor cannot run without the schema doc or index.",
-            ))
+    p = WIKI_DIR / "index.md"
+    if p.exists():
+        results.append(CheckResult(name="wiki/index.md", ok=True, detail="present", fix=""))
+    else:
+        results.append(CheckResult(
+            name="wiki/index.md",
+            ok=False,
+            detail="missing",
+            fix=f"Create {p} — the monitor cannot run without the wiki index.",
+        ))
 
     # Required prompt files
     prompts_dir = WIKI_DIR / "prompts"
@@ -105,12 +104,11 @@ def _check_wiki() -> list[CheckResult]:
             name="wiki/prompts/",
             ok=False,
             detail="missing",
-            fix=f"Create {prompts_dir} and populate with integrate.md, integrate_local.md, dedup_confirm.md, describe_screen.md, prefilter.md, command.md, onboard.md.",
+            fix=f"Create {prompts_dir} and populate with integrate.md, dedup_confirm.md, describe_screen.md, prefilter.md, command.md, onboard.md.",
         ))
     else:
         required = (
             "integrate.md",
-            "integrate_local.md",
             "dedup_confirm.md",
             "describe_screen.md",
             "prefilter.md",

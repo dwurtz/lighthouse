@@ -231,7 +231,7 @@ def _run_configure() -> None:
     (WIKI_DIR / "projects").mkdir(exist_ok=True)
     (WIKI_DIR / "prompts").mkdir(exist_ok=True)
 
-    # Copy bundled default prompts + CLAUDE.md if missing
+    # Copy bundled default prompts if missing
     from pathlib import Path
     repo_defaults = Path(__file__).parent / "default_assets"
     if repo_defaults.is_dir():
@@ -240,12 +240,6 @@ def _run_configure() -> None:
             if not dst.exists():
                 dst.write_text(src.read_text())
                 print(f"  created prompts/{src.name}")
-        for fname in ("CLAUDE.md",):
-            src = repo_defaults / fname
-            dst = WIKI_DIR / fname
-            if src.exists() and not dst.exists():
-                dst.write_text(src.read_text())
-                print(f"  created {fname}")
     else:
         print(f"  (default assets not found at {repo_defaults} — skipping defaults)")
 

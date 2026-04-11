@@ -39,7 +39,7 @@ QMD_DB_PATH = Path.home() / ".cache" / "qmd" / "index.sqlite"
 QMD_COLLECTION = "Deja"
 BODY_SNIPPET_CHARS = 500
 MAX_CANDIDATES_PER_RUN = 300  # sanity ceiling — well above typical run
-META_FILES = {"index.md", "log.md", "reflection.md", "CLAUDE.md", "claude.md", "goals.md"}
+META_FILES = {"index.md", "log.md", "reflection.md", "goals.md"}
 
 
 # ---------------------------------------------------------------------------

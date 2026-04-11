@@ -212,9 +212,6 @@ class GeminiClient:
         except Exception:
             contacts_text = "(contacts unavailable)"
 
-        from deja.wiki_schema import load_schema
-        schema = load_schema()
-
         from deja.identity import load_user
         user_fields = load_user().as_prompt_fields()
 
@@ -233,7 +230,6 @@ class GeminiClient:
             day_of_week=day_of_week,
             time_of_day=time_of_day,
             contacts_text=contacts_text,
-            schema=schema,
             goals=goals_text or "(no goals.md)",
             wiki_text=wiki_text or "(empty)",
             signals_text=signals_text or "(no new signals)",
@@ -301,9 +297,6 @@ class GeminiClient:
         except Exception:
             contacts_text = "(contacts unavailable)"
 
-        from deja.wiki_schema import load_schema
-        schema = load_schema()
-
         from deja.identity import load_user
         user_fields = load_user().as_prompt_fields()
 
@@ -312,7 +305,6 @@ class GeminiClient:
             day_of_week=day_of_week,
             time_of_day=time_of_day,
             contacts_text=contacts_text,
-            schema=schema,
             wiki_text=wiki_text or "(empty — this is the first onboarding batch)",
             signals_text=signals_text or "(no threads in this batch)",
             **user_fields,

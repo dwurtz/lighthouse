@@ -448,9 +448,9 @@ def linkify_wiki(wiki_dir: Path | None = None, *, dry_run: bool = False) -> Link
     report = LinkifyReport()
 
     # Collect ALL markdown files to process: category subdirs + root-level files
-    # (goals.md, CLAUDE.md, reflection.md, etc.). Skip index.md and log.md
-    # which are auto-generated / append-only and shouldn't be linkified.
-    _SKIP_ROOT = {"index.md", "log.md", "claude.md"}
+    # (goals.md, reflection.md, etc.). Skip index.md and log.md which are
+    # auto-generated / append-only and shouldn't be linkified.
+    _SKIP_ROOT = {"index.md", "log.md"}
     all_paths: list[Path] = []
 
     # Category subdirectories (people/, projects/, events/)
@@ -462,7 +462,7 @@ def linkify_wiki(wiki_dir: Path | None = None, *, dry_run: bool = False) -> Link
             if not path.name.startswith((".", "_")):
                 all_paths.append(path)
 
-    # Root-level markdown files (goals.md, CLAUDE.md, reflection.md, etc.)
+    # Root-level markdown files (goals.md, reflection.md, etc.)
     for path in sorted(wiki_dir.glob("*.md")):
         if path.name.startswith((".", "_")):
             continue
