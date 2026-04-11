@@ -122,11 +122,24 @@ def create_server() -> Server:
                 description=(
                     "Create, update, or delete a page in the user's personal "
                     "wiki. Use this when the user asks you to remember "
-                    "something, correct a fact, add a person, or remove a "
-                    "page. Always call get_context first to read the existing "
+                    "something, correct a fact, add a person or project, "
+                    "record an event that happened, or remove a page. "
+                    "Always call get_context first to read the existing "
                     "page before overwriting — preserve YAML frontmatter and "
                     "content you didn't mean to change. Every change is "
-                    "git-committed and reversible."
+                    "git-committed and reversible.\n\n"
+                    "Three wiki categories:\n"
+                    "  • people — one page per real person. Describes WHO "
+                    "they are (current state) in flowing prose.\n"
+                    "  • projects — one page per ongoing project, goal, "
+                    "or life thread. Describes WHAT it is (current state).\n"
+                    "  • events — timestamped record of what happened. "
+                    "Events have a date-prefixed slug of the form "
+                    "'YYYY-MM-DD/event-name' and structured YAML "
+                    "frontmatter (date, time, people, projects). They "
+                    "link back to the people and projects involved. "
+                    "Entity pages describe state; events describe what "
+                    "happened."
                 ),
                 inputSchema={
                     "type": "object",
@@ -138,15 +151,28 @@ def create_server() -> Server:
                         },
                         "category": {
                             "type": "string",
-                            "enum": ["people", "projects"],
+                            "enum": ["people", "projects", "events"],
                         },
                         "slug": {
                             "type": "string",
-                            "description": "kebab-case page identifier (e.g. 'amanda-peffer')",
+                            "description": (
+                                "kebab-case page identifier. For people and "
+                                "projects: just the name, e.g. 'amanda-peffer'. "
+                                "For events: date-prefixed, e.g. "
+                                "'2026-04-07/david-invited-to-llm-kinsol-update'."
+                            ),
                         },
                         "content": {
                             "type": "string",
-                            "description": "Full markdown body including YAML frontmatter (required for 'write', ignored for 'delete')",
+                            "description": (
+                                "Full markdown body including YAML frontmatter "
+                                "(required for 'write', ignored for 'delete'). "
+                                "For events, frontmatter must include date, "
+                                "time (quoted string), people (list of slugs), "
+                                "and projects (list of slugs). The opening "
+                                "'---' fence must be on its own line; no blank "
+                                "lines inside the frontmatter block."
+                            ),
                         },
                         "reason": {
                             "type": "string",
