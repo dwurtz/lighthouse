@@ -319,7 +319,47 @@ async def _mic_stop_inner(reason: str = "manual") -> dict:
         return {"recording": False, "reason": f"no audio captured ({reason})"}
 
     wav_size = wav_path.stat().st_size
-    log.info("mic_stop: wav=%s size=%d bytes", wav_path, wav_size)
+
+    # Probe the WAV for duration + RMS level so we can distinguish
+    # "audio was captured but too quiet" from "audio was fine but
+    # Whisper returned garbage" in the log when transcription flops.
+    wav_duration = 0.0
+    wav_rms_db = None
+    wav_sample_rate = 0
+    try:
+        import wave
+        with wave.open(str(wav_path), "rb") as wf:
+            wav_sample_rate = wf.getframerate()
+            wav_nframes = wf.getnframes()
+            if wav_sample_rate > 0:
+                wav_duration = wav_nframes / wav_sample_rate
+            # Read up to 10s of samples to compute RMS
+            sample_width = wf.getsampwidth()
+            n_read = min(wav_nframes, wav_sample_rate * 10)
+            frames = wf.readframes(n_read)
+        if sample_width == 2 and frames:
+            import array, math
+            samples = array.array("h")
+            samples.frombytes(frames)
+            if samples:
+                sq = sum(s * s for s in samples) / len(samples)
+                if sq > 0:
+                    rms = math.sqrt(sq)
+                    # dBFS: 0 = full scale (32768), -inf = silence
+                    wav_rms_db = 20 * math.log10(rms / 32768.0)
+    except Exception:
+        log.debug("mic_stop: wav probe failed", exc_info=True)
+
+    log.info(
+        "mic_stop: wav=%s size=%d bytes duration=%.1fs sr=%d rms=%.1fdBFS",
+        wav_path, wav_size, wav_duration, wav_sample_rate,
+        wav_rms_db if wav_rms_db is not None else float("nan"),
+    )
+    if wav_rms_db is not None and wav_rms_db < -50:
+        log.warning(
+            "mic_stop: audio is very quiet (%.1f dBFS) — mic level may be too low",
+            wav_rms_db,
+        )
 
     # Transcribe via Groq Whisper (fast, dedicated speech-to-text).
     transcript = ""
@@ -330,15 +370,9 @@ async def _mic_stop_inner(reason: str = "manual") -> dict:
         transcribe_error = str(e)
         log.exception("mic_stop: transcription failed")
 
-    if transcript:
-        try:
-            wav_path.unlink(missing_ok=True)
-        except Exception:
-            pass
-    else:
-        log.warning(
-            "mic_stop: empty transcript, keeping wav for debug at %s", wav_path
-        )
+    # Keep the WAV for debug whenever transcription is empty OR
+    # flagged as a Whisper hallucination (filter below). On clean
+    # transcripts we unlink at the very end of the function.
 
     transcript = (transcript or "").strip()
 
@@ -354,15 +388,26 @@ async def _mic_stop_inner(reason: str = "manual") -> dict:
     }
     if transcript.lower().strip(".!? ") in _HALLUCINATIONS:
         raw = transcript
-        log.info("mic_stop: filtered Whisper hallucination: %r", raw)
+        # Keep the WAV on disk for diagnostic inspection — DO NOT unlink.
+        # The file path is included in the response so a developer can
+        # check the audio directly.
+        log.info(
+            "mic_stop: filtered Whisper hallucination: %r (wav kept at %s)",
+            raw, wav_path,
+        )
         # Activity log entry so the dropped transcription shows in feed
         try:
             from deja.activity_log import append_log_entry
 
             kb = wav_size // 1024
+            rms_str = (
+                f" ({wav_rms_db:.1f}dBFS)"
+                if wav_rms_db is not None else ""
+            )
             append_log_entry(
                 "mic",
-                f"transcription dropped — Whisper hallucination: {raw!r} ({kb}KB audio)",
+                f"transcription dropped — Whisper hallucination: {raw!r} "
+                f"({kb}KB audio{rms_str})",
             )
         except Exception:
             log.debug("activity_log append failed for dropped transcription", exc_info=True)
@@ -373,15 +418,21 @@ async def _mic_stop_inner(reason: str = "manual") -> dict:
             "detail": "Couldn't understand audio — try speaking louder or closer to the mic.",
             "raw_transcript": raw,
             "wav_size_bytes": wav_size,
+            "wav_path": str(wav_path),
+            "wav_duration_sec": round(wav_duration, 1),
+            "wav_rms_dbfs": round(wav_rms_db, 1) if wav_rms_db is not None else None,
         }
 
     if not transcript:
+        # Empty transcript — keep the WAV for debug too.
+        log.warning("mic_stop: empty transcript, wav kept at %s", wav_path)
         return {
             "ok": False,
             "recording": False,
             "reason": reason,
             "transcript": "",
             "error": transcribe_error or "no speech detected",
+            "wav_path": str(wav_path),
         }
 
     # Polish pass — fix grammar, remove fillers, convert spoken symbols
@@ -506,6 +557,12 @@ async def _mic_stop_inner(reason: str = "manual") -> dict:
         cost_usd=round(cost, 6),
         latency_ms=latency_ms,
     )
+
+    # Successful transcription + dispatch — clean up the WAV.
+    try:
+        wav_path.unlink(missing_ok=True)
+    except Exception:
+        log.debug("mic_stop: wav cleanup failed", exc_info=True)
 
     # Return the CommandResponse fields PLUS the transcript + recording
     # metadata the existing UI code expects.
