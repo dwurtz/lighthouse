@@ -11,7 +11,6 @@ import asyncio
 import hashlib
 import json
 import logging
-import signal as _signal
 import subprocess
 import time
 from datetime import datetime, timezone
@@ -191,28 +190,46 @@ async def _auto_stop_after(delay: float) -> None:
 
 
 async def _mic_stop_inner(reason: str = "manual") -> dict:
-    """Stop recording via daemon, transcribe, emit signal. Idempotent."""
+    """Stop recording via SIGTERM, transcribe, emit signal. Idempotent."""
     wav_path: Path | None = _mic_state.get("wav_path")
     started_at: str | None = _mic_state.get("started_at")
+    proc: subprocess.Popen | None = _mic_state.get("process")
 
     task = _mic_state.get("auto_stop_task")
     if task is not None and not task.done():
         task.cancel()
     _mic_state["auto_stop_task"] = None
 
-    if not _mic_state.get("recording") or wav_path is None:
+    if not _mic_state.get("recording") or wav_path is None or proc is None:
         _mic_state["recording"] = False
+        _mic_state["process"] = None
         _mic_state["wav_path"] = None
         _mic_state["started_at"] = None
         return {"recording": False, "reason": "no active session"}
 
-    # Tell daemon to stop recording
-    (_CONTROL_DIR / ".stop").write_text("")
+    # Ask DejaRecorder to stop: SIGTERM → signal handler flips
+    # _micShouldStop → timer runs stop() → AVAudioFile flushes → exit(0).
+    try:
+        proc.terminate()
+    except ProcessLookupError:
+        pass  # already dead
+    except Exception:
+        log.exception("mic_stop: proc.terminate failed")
 
-    # Give the daemon time to flush the WAV file
-    await asyncio.sleep(0.3)
+    # Wait up to 2s for clean exit; SIGKILL as a last resort.
+    loop = asyncio.get_running_loop()
+    try:
+        await loop.run_in_executor(None, lambda: proc.wait(timeout=2.0))
+    except subprocess.TimeoutExpired:
+        log.warning("mic_stop: recorder didn't exit after SIGTERM — SIGKILLing")
+        try:
+            proc.kill()
+            await loop.run_in_executor(None, proc.wait)
+        except Exception:
+            log.exception("mic_stop: proc.kill failed")
 
     _mic_state["recording"] = False
+    _mic_state["process"] = None
     _mic_state["wav_path"] = None
     _mic_state["started_at"] = None
 
@@ -327,35 +344,6 @@ async def _mic_stop_inner(reason: str = "manual") -> dict:
     }
 
 
-_CONTROL_DIR = DEJA_HOME / "mic-control"
-
-
-def _ensure_daemon():
-    """Start the mic daemon if not already running."""
-    proc = _mic_state.get("daemon")
-    if proc is not None and proc.poll() is None:
-        return  # already running
-
-    _CONTROL_DIR.mkdir(parents=True, exist_ok=True)
-    # Clean stale sentinels
-    for f in [".start", ".stop", ".quit"]:
-        (_CONTROL_DIR / f).unlink(missing_ok=True)
-
-    recorder_path = _find_recorder()
-    try:
-        daemon = subprocess.Popen(
-            [recorder_path, "--daemon", str(_CONTROL_DIR)],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        _mic_state["daemon"] = daemon
-        log.info("mic daemon started (pid=%d)", daemon.pid)
-        # Give the engine a moment to start and warm the mic
-        time.sleep(0.3)
-    except Exception as e:
-        log.error("mic daemon failed to start: %s", e)
-
-
 @router.post("/api/mic/start")
 async def mic_start() -> dict:
     if _mic_state.get("recording"):
@@ -365,16 +353,33 @@ async def mic_start() -> dict:
             "started_at": _mic_state["started_at"],
         }
 
-    _ensure_daemon()
-
     AUDIO_DIR.mkdir(parents=True, exist_ok=True)
     wav_path = AUDIO_DIR / f"session-{int(time.time())}.wav"
 
-    # Tell the daemon to start recording by writing the wav path to .start
-    (_CONTROL_DIR / ".start").write_text(str(wav_path))
+    # Spawn DejaRecorder fresh per recording. It runs until SIGTERM,
+    # which mic_stop sends. No persistent daemon, no warm-mic trick —
+    # the macOS mic indicator goes dark the instant this process exits.
+    try:
+        recorder_path = _find_recorder()
+    except FileNotFoundError as e:
+        log.error("mic_start: %s", e)
+        return {"recording": False, "error": "DejaRecorder binary not found"}
+
+    try:
+        proc = subprocess.Popen(
+            [recorder_path, "--mic", str(wav_path)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception as e:
+        log.exception("mic_start: failed to spawn recorder")
+        return {"recording": False, "error": str(e)[:200]}
+
+    log.info("mic recorder started (pid=%d) → %s", proc.pid, wav_path.name)
 
     started_at = datetime.now(timezone.utc).isoformat()
     _mic_state["recording"] = True
+    _mic_state["process"] = proc
     _mic_state["wav_path"] = wav_path
     _mic_state["started_at"] = started_at
 
