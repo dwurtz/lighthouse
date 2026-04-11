@@ -47,8 +47,16 @@ def _keychain_write(value: str) -> bool:
             check=True, capture_output=True, text=True, timeout=5,
         )
         return True
-    except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired) as e:
-        log.warning("Keychain write failed: %s", e)
+    except subprocess.CalledProcessError as e:
+        # CAUTION: do not log `e` directly — its str() repr includes the
+        # full argv, which contains the token JSON passed via -w.
+        log.warning("Keychain write failed with exit code %s", e.returncode)
+        return False
+    except FileNotFoundError:
+        log.warning("Keychain write failed: `security` command not found")
+        return False
+    except subprocess.TimeoutExpired:
+        log.warning("Keychain write timed out after 5s")
         return False
 
 
@@ -352,7 +360,11 @@ def _refresh_token_native(token_data: dict) -> bool:
         _save_token(token_data)
         return True
     except Exception as e:
-        log.warning("Native token refresh failed: %s", e)
+        # CAUTION: do not log `e` in full — google-auth RefreshError can
+        # include the raw HTTP response body from oauth2.googleapis.com,
+        # which in some failure modes echoes the refresh_token / client_secret
+        # back in the error payload. Log the exception type only.
+        log.warning("Native token refresh failed: %s", type(e).__name__)
         return False
 
 
