@@ -6,12 +6,13 @@ If you're the agent reading this: treat this document as the source of truth for
 
 ## What lives here
 
-Two folders, nothing else:
+Three folders:
 
 - `people/` — one page per real person I actually interact with. Family, friends, coworkers, collaborators. Not celebrities, not strangers cc'd on a thread, not mailing lists.
 - `projects/` — everything ongoing I care about. This is a deliberately broad category: real projects (a codebase, a launch, a trip, a move), goals I'm working toward, life threads I'm navigating (a kid's sports season, a house renovation), situations I'm managing (a health protocol, a hiring decision). If it has momentum and I care about where it goes, it's a project. Don't overthink the classification — the point of a single category is that I don't have to.
+- `events/YYYY-MM-DD/` — timestamped log of things that happened. Events capture the who/what/when of a specific moment (a meeting, a decision, a message exchange carrying a commitment) and link back to the people and projects involved. Entity pages describe current state; events describe what happened.
 
-People link to the projects they're part of. Projects link to the people involved and to related projects. Use `[[wiki links]]` freely — the graph is half the point.
+People link to the projects they're part of. Projects link to the people involved and to related projects. Events link to both. Use `[[wiki links]]` freely — the graph is half the point.
 
 ## How pages should read
 
@@ -25,6 +26,16 @@ Short prose. 100 to 400 words. A page should read like a smart friend briefing m
 - No tables of metadata unless the page genuinely needs one.
 
 If a page is getting long, that's a signal something should split off into its own page, or that old material should be cut.
+
+## Event pages are different
+
+Events follow different rules than entity pages (people + projects):
+
+- They live at `events/YYYY-MM-DD/<slug>.md` with the date as the subdirectory and a short kebab-case description as the slug.
+- They have structured YAML frontmatter — `date`, `time` (quoted), `people` (list of slugs), `projects` (list of slugs). The opening `---` must be on its own line, every key on its own line, no blank lines inside the block. Obsidian's YAML parser is strict and a single malformed fence renders the whole file as garbled prose.
+- They are append-only in practice — written when the event happens, rarely edited after. No "merge in place" on events.
+- They capture the ACTUAL details of what happened, including verbatim quotes of short, specific commitments ("I'll drive Tuesday and Thursday"). 4-8 sentences for a logistics thread is fine.
+- The "state only, not a log" rule applies to entity pages. **Events ARE the log.** Entities stay state-focused and link to events via a short `## Recent` section at the bottom.
 
 ## The prime directive
 
