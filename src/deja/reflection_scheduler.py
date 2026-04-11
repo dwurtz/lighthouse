@@ -146,11 +146,25 @@ async def run_reflection() -> dict:
 
     async with _run_lock:
         from deja.dedup import run_dedup
+        from deja.contradictions import run_contradiction_sweep
         # No silent fallback — dedup.run_dedup is expected to raise on
         # any failure so the user sees the real problem. We deliberately
         # do NOT catch-and-log here: if dedup raises, the exception
         # propagates up to the caller (the agent loop) and the last-run
         # marker is NOT updated, so the next heartbeat retries.
         result = await run_dedup()
+
+        # Contradiction sweep piggybacks on the same 3x/day cadence.
+        # It reuses dedup's sqlite-vec embeddings at a lower similarity
+        # window to find pages that reference the same subject but
+        # disagree on a fact. Runs AFTER dedup so it works on the
+        # already-deduped corpus. Per-cluster failures are logged by
+        # the sweep itself; infra failures propagate and block the
+        # last-run marker just like dedup failures do.
+        contra_result = await run_contradiction_sweep()
+        if isinstance(result, dict) and isinstance(contra_result, dict):
+            result = dict(result)
+            result["contradictions"] = contra_result
+
         _write_last_run()
         return result

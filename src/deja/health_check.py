@@ -105,6 +105,7 @@ def _check_wiki() -> list[CheckResult]:
         required = (
             "integrate.md",
             "dedup_confirm.md",
+            "contradict.md",
             "describe_screen.md",
             "prefilter.md",
             "command.md",
