@@ -26,11 +26,14 @@ _H1_RE = re.compile(r"^#\s+(.+?)\s*$")
 _WIKILINK_RE = re.compile(r"\[\[([^\]]+)\]\]")
 _SUMMARY_MAX = 140
 
-# Hard cap on entries written to index.md. Beyond this, the prompt cost of
-# shipping the full catalog to every cycle + every vision call outweighs the
-# grounding benefit. Pages dropped from the index still exist on disk and are
-# still retrievable via QMD — they're just not in the at-a-glance catalog.
-_MAX_ENTRIES = 200
+# The index file is comprehensive — every wiki page ends up in it. We used
+# to cap at 200 entries, but that quietly hid pages from the catalog once
+# the wiki crossed the threshold, giving consumers a lie-by-omission. The
+# right architecture is: the FILE is authoritative and complete, and each
+# CONSUMER decides how many head lines it wants via
+# ``render_index_for_prompt(max_lines=N, ...)``. Different consumers have
+# different attention budgets — FastVLM 0.5B wants fewer lines than
+# Gemini 2.5 Flash-Lite — so one global file-level cap was always wrong.
 
 # Substrings that indicate a summary is a placeholder, not real content. We
 # skip these from the index entirely — they waste tokens and give the vision
@@ -140,10 +143,10 @@ _HEADER = (
     "\n"
     "*Auto-generated catalog of every page, ordered by most-recently-"
     "touched first. LLM consumers (vision prompt, triage prefilter, "
-    "integrate retrieval) read this top-down and get attention-weighted "
-    "relevance for free. Do not edit by hand — rebuilt on every wiki "
-    "change. Browse by category in the ``people/`` and ``projects/`` "
-    "folders if you want structure.*\n"
+    "integrate retrieval) read this top-down — each takes as many head "
+    "lines as its attention budget allows. Do not edit by hand — "
+    "rebuilt on every wiki change. Browse by category in the "
+    "``people/`` and ``projects/`` folders if you want structure.*\n"
 )
 
 
@@ -154,6 +157,12 @@ def rebuild_index() -> int:
     H1 line) and a one-line summary (first non-heading sentence), and
     writes a single flat list to ``index.md`` sorted by mtime descending
     with slug as an alphabetical tiebreak.
+
+    No cap — every page gets indexed. This file is the comprehensive,
+    authoritative catalog. Consumers that can't afford the full list
+    (e.g. vision prompt on a small model) should use
+    ``render_index_for_prompt(max_lines=N, ...)`` to take just the top
+    N lines. The file itself never omits anything.
 
     There are no ``## People`` / ``## Projects`` sections. The power
     users of this file are LLMs (vision prompt, triage prefilter,
@@ -182,24 +191,10 @@ def rebuild_index() -> int:
         ]
         total = len(entries)
 
-        # Apply the hard cap across categories. When over budget, keep
-        # the most-recently-touched pages — those are the ones David is
-        # actively thinking about. Everything else still exists on disk
-        # and is retrievable via QMD, it's just not in the at-a-glance
-        # catalog.
-        if total > _MAX_ENTRIES:
-            entries.sort(key=lambda t: t[3], reverse=True)
-            dropped = total - _MAX_ENTRIES
-            entries = entries[:_MAX_ENTRIES]
-            logger.info(
-                "wiki_index: %d pages exceeds cap %d — keeping %d most-recent, dropping %d from index",
-                total, _MAX_ENTRIES, len(entries), dropped,
-            )
-            total = len(entries)
-
-        # Final ordering: recency-descending globally, alphabetical
-        # tiebreak for stable ordering when mtimes are identical (rare,
-        # but happens on fresh bulk-created wikis).
+        # Recency-descending globally, alphabetical tiebreak for stable
+        # ordering when mtimes are identical (rare, but happens on fresh
+        # bulk-created wikis). No truncation — consumers with tighter
+        # attention budgets use render_index_for_prompt(max_lines=N).
         entries.sort(key=lambda t: (-t[3], t[0].lower()))
 
         if total == 0:

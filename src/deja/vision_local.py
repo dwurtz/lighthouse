@@ -24,15 +24,16 @@ from deja import local_models
 log = logging.getLogger(__name__)
 
 
-# We pass the full wiki index into the vision prompt — no vision-side cap.
-# Reflect already caps index.md at _MAX_ENTRIES=200 pages (see
-# wiki_catalog.py), which works out to ~300 lines / ~7.5K tokens worst
-# case — only ~23% of FastVLM 0.5B's 32K context window. The rich
-# descriptions are what make grounding useful ("Amanda Peffer collaborates
-# with David on the blade-and-rose Shopify store") so we want the model
-# to see as many of them as possible. Once reflect sorts index.md by
-# recency (Phase B), the most relevant entries are automatically at the
-# top, which matters more as the wiki grows toward the 200-entry cap.
+# Vision takes the full wiki index today — no max_lines cap. index.md is
+# recency-sorted and flat, so position 1 is always whatever David just
+# touched, which is the best possible grounding for a small model. The
+# file is comprehensive (no reflect-side cap either), so as the wiki
+# grows this may become costly — at which point add ``max_lines=N`` to
+# the render_index_for_prompt call below. FastVLM 0.5B's 32K context
+# window leaves plenty of headroom: ~150 chars per entry × 200 entries
+# = ~7.5K tokens, still only ~23% of context. Revisit when the wiki
+# crosses a few hundred entries or when FastVLM descriptions start
+# drifting toward stale entities in the tail.
 
 
 _PROMPT_GROUNDED = (
