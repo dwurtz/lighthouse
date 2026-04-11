@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from auth import validate_token
-from proxy import generate, transcribe
+from proxy import generate, transcribe, groq_chat
 from telemetry import log_event
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
@@ -44,6 +44,15 @@ class GenerateRequest(BaseModel):
     config: dict = {}
     system_instruction: str | None = None
     tools: list | None = None
+
+
+class ChatRequest(BaseModel):
+    """OpenAI-compatible chat completion request, routed to Groq."""
+    model: str
+    messages: list[dict]
+    temperature: float = 0.1
+    max_tokens: int = 2048
+    response_format: dict | None = None
 
 
 class TelemetryRequest(BaseModel):
@@ -108,6 +117,14 @@ ALLOWED_MODELS = {
     "gemini-3.1-pro-preview", "gemini-3.1-flash-lite-preview",
     "gemini-3-flash-preview",
 }
+
+# Groq chat models we allow through /v1/chat. Start narrow — add as needed.
+# llama-3.1-8b-instant is the Flash-Lite equivalent: ~800 tok/s, $0.05/$0.08
+# per 1M input/output, used for the voice-pill polish pass.
+ALLOWED_GROQ_MODELS = {
+    "llama-3.1-8b-instant",
+}
+
 MAX_AUDIO_SIZE = 25 * 1024 * 1024  # 25MB
 
 
@@ -146,6 +163,48 @@ async def generate_endpoint(
     )
 
     return result
+
+
+@app.post("/v1/chat")
+@limiter.limit("120/minute")
+async def chat_endpoint(
+    request: Request,
+    body: ChatRequest,
+    authorization: str = Header(...),
+    x_request_id: str | None = Header(None),
+):
+    """OpenAI-compatible chat completion, routed to Groq.
+
+    Used by low-latency LLM paths (voice-pill polish, etc.) where
+    Groq's LPU throughput matters more than Gemini's structured-output
+    quality. Whitelisted to the models in ALLOWED_GROQ_MODELS.
+    """
+    request_id = x_request_id or "no-id"
+    token = authorization.removeprefix("Bearer ").strip()
+    user = await validate_token(token)
+
+    if body.model not in ALLOWED_GROQ_MODELS:
+        return JSONResponse(
+            status_code=400,
+            content={"error": f"Model not allowed: {body.model}"},
+        )
+
+    start = time.time()
+    text = await groq_chat(
+        model=body.model,
+        messages=body.messages,
+        temperature=body.temperature,
+        max_tokens=body.max_tokens,
+        response_format=body.response_format,
+    )
+    latency_ms = round((time.time() - start) * 1000)
+
+    logger.info(
+        "chat rid=%s user=%s model=%s chars=%d ms=%d",
+        request_id, user["email"], body.model, len(text), latency_ms,
+    )
+
+    return {"text": text}
 
 
 @app.post("/v1/transcribe")

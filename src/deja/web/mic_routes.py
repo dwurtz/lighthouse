@@ -75,34 +75,55 @@ Transcript:
 """
 
 
+_POLISH_MODEL = "llama-3.1-8b-instant"
+
+
 async def _polish_transcript(raw: str) -> str:
-    """Clean up a raw voice transcript via Gemini Flash-Lite.
+    """Clean up a raw voice transcript via Groq llama-3.1-8b-instant.
 
     Fixes grammar, punctuation, fillers, self-corrections, and spoken
-    symbols without changing word choice. Falls back to the raw
-    transcript on any error so we never lose content.
+    symbols without changing word choice. Hits Deja's /v1/chat proxy
+    endpoint which routes to Groq's OpenAI-compatible chat completions
+    API. Falls back to the raw transcript on any error so we never
+    lose content.
+
+    Why Groq 8B vs Gemini Flash-Lite: ~5× faster (800+ tok/s vs ~150
+    tok/s) and ~3× cheaper per call. Polish is a trivial task — filler
+    removal and grammar fixes don't need a frontier model. Quality
+    ceiling saturates well below 8B params.
     """
     if not raw or len(raw.strip()) < 5:
         return raw
 
     try:
-        from deja.llm_client import GeminiClient
-        from deja.config import INTEGRATE_MODEL
+        import httpx
+        from deja.llm_client import DEJA_API_URL
+        from deja.auth import get_auth_token
 
-        client = GeminiClient()
-        response = await client._generate(
-            model=INTEGRATE_MODEL,
-            contents=_POLISH_PROMPT % raw,
-            config_dict={
-                "response_mime_type": "application/json",
-                "max_output_tokens": 2048,
-                "temperature": 0.1,
-            },
-        )
-        data = json.loads(response)
+        token = get_auth_token()
+        headers = {"Authorization": f"Bearer {token}"} if token else {}
+
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.post(
+                f"{DEJA_API_URL}/v1/chat",
+                headers=headers,
+                json={
+                    "model": _POLISH_MODEL,
+                    "messages": [
+                        {"role": "user", "content": _POLISH_PROMPT % raw},
+                    ],
+                    "temperature": 0.1,
+                    "max_tokens": 2048,
+                    "response_format": {"type": "json_object"},
+                },
+            )
+            resp.raise_for_status()
+            text = (resp.json().get("text") or "").strip()
+
+        data = json.loads(text)
         cleaned = (data.get("result") or "").strip()
         if cleaned:
-            log.info("polish: %d → %d chars", len(raw), len(cleaned))
+            log.info("polish: %d → %d chars (groq 8b)", len(raw), len(cleaned))
             return cleaned
         log.warning("polish: empty result — keeping raw")
     except Exception:

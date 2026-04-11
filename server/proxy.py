@@ -231,3 +231,52 @@ async def transcribe(audio_bytes: bytes, filename: str = "audio.wav") -> str:
         )
         resp.raise_for_status()
         return (resp.json().get("text") or "").strip()
+
+
+async def groq_chat(
+    model: str,
+    messages: list[dict],
+    *,
+    temperature: float = 0.1,
+    max_tokens: int = 2048,
+    response_format: dict | None = None,
+) -> str:
+    """Proxy an OpenAI-compatible chat completion to Groq. Returns assistant text.
+
+    Used for low-latency LLM tasks — the voice-pill polish pass
+    currently, potentially more paths later. Reuses the GROQ_API_KEY
+    that's already configured for the Whisper transcription path.
+    """
+    groq_key = os.environ.get("GROQ_API_KEY")
+    if not groq_key:
+        raise HTTPException(status_code=500, detail="GROQ_API_KEY not configured")
+
+    payload: dict = {
+        "model": model,
+        "messages": messages,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+    }
+    if response_format is not None:
+        payload["response_format"] = response_format
+
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {groq_key}",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+        )
+        if resp.status_code >= 400:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Groq chat failed: {resp.status_code}",
+            )
+        data = resp.json()
+
+    try:
+        return (data["choices"][0]["message"]["content"] or "").strip()
+    except (KeyError, IndexError, TypeError) as exc:
+        raise HTTPException(status_code=502, detail="Groq returned unexpected shape")
