@@ -52,8 +52,11 @@ class MonitorState: ObservableObject {
     @Published var voicePillStatus: String = ""  // "Listening..." or "Transcribing..."
     @Published var voicePillTranscript: String = ""
     @Published var voicePillHovered: Bool = false
-    @Published var waveformPhase: Double = 0
-    private var waveformTimer: Timer?
+    // 16 rolling audio-level samples, 0.0–1.0 each. Newest sample gets
+    // appended at the end and the oldest is dropped off the front, so
+    // the bars animate right-to-left as you speak.
+    @Published var levelHistory: [CGFloat] = Array(repeating: 0, count: 16)
+    private let audioLevelMonitor = AudioLevelMonitor()
 
     // Permission state — checked on launch and periodically
     @Published var hasScreenRecording: Bool = false
@@ -694,18 +697,24 @@ class MonitorState: ObservableObject {
         // Start ffmpeg recording immediately
         localAPICall("/api/mic/start", method: "POST", timeoutInterval: 5) { _, _ in }
 
-        // Animate waveform
-        waveformTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
-            self?.waveformPhase += 0.15
+        // Start the level monitor — drives the reactive bar animation in
+        // VoicePillView by shifting new RMS samples into levelHistory from
+        // the right. Runs alongside VoiceRecorder on a separate engine.
+        levelHistory = Array(repeating: 0, count: 16)
+        audioLevelMonitor.start { [weak self] level in
+            guard let self = self else { return }
+            var next = self.levelHistory
+            next.removeFirst()
+            next.append(level)
+            self.levelHistory = next
         }
     }
 
     func stopVoiceCapture() {
         guard voicePillActive else { return }
         voicePillActive = false
-        waveformPhase = 0
-        waveformTimer?.invalidate()
-        waveformTimer = nil
+        audioLevelMonitor.stop()
+        levelHistory = Array(repeating: 0, count: 16)
 
         // Show processing state
         voicePillProcessing = true
