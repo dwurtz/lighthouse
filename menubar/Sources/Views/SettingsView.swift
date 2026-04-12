@@ -31,10 +31,7 @@ struct SettingsView: View {
                             .foregroundColor(.white.opacity(0.4))
                             .textCase(.uppercase)
 
-                        Toggle(isOn: Binding(
-                            get: { monitor.launchAtLogin },
-                            set: { monitor.setLaunchAtLogin($0) }
-                        )) {
+                        HStack(spacing: 10) {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text("Launch Déjà at login")
                                     .font(.system(size: 13))
@@ -43,13 +40,17 @@ struct SettingsView: View {
                                     .font(.system(size: 11))
                                     .foregroundColor(.white.opacity(0.35))
                             }
+                            Spacer()
+                            Toggle("", isOn: Binding(
+                                get: { monitor.launchAtLogin },
+                                set: { monitor.setLaunchAtLogin($0) }
+                            ))
+                            .labelsHidden()
+                            .toggleStyle(SwitchToggleStyle(tint: .orange))
+                            .frame(width: 78, alignment: .trailing)
                         }
-                        .toggleStyle(SwitchToggleStyle(tint: .orange))
 
-                        Toggle(isOn: Binding(
-                            get: { monitor.voicePillEnabled },
-                            set: { monitor.setVoicePillEnabled($0) }
-                        )) {
+                        HStack(spacing: 10) {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text("Voice pill")
                                     .font(.system(size: 13))
@@ -58,8 +59,15 @@ struct SettingsView: View {
                                     .font(.system(size: 11))
                                     .foregroundColor(.white.opacity(0.35))
                             }
+                            Spacer()
+                            Toggle("", isOn: Binding(
+                                get: { monitor.voicePillEnabled },
+                                set: { monitor.setVoicePillEnabled($0) }
+                            ))
+                            .labelsHidden()
+                            .toggleStyle(SwitchToggleStyle(tint: .orange))
+                            .frame(width: 78, alignment: .trailing)
                         }
-                        .toggleStyle(SwitchToggleStyle(tint: .orange))
 
                         Button(action: {
                             (NSApp.delegate as? AppDelegate)?.updaterController.checkForUpdates(nil)
@@ -292,6 +300,7 @@ struct SettingsView: View {
                 .labelsHidden()
                 .toggleStyle(SwitchToggleStyle(tint: .orange))
                 .disabled(!client.installed || !client.auto_configurable)
+                .frame(width: 78, alignment: .trailing)
             }
 
             if let err = monitor.mcpClientErrors[client.name] {
@@ -354,11 +363,11 @@ struct SettingsView: View {
             Spacer()
 
             // Every row has the same right-side affordance: a button
-            // that opens System Settings for this permission. Label
-            // varies by state so "Grant" is the call-to-action when
-            // not yet granted, and "Manage" lets the user revoke
-            // when it is granted. Consistent width/shape across both
-            // states keeps the column aligned.
+            // that opens System Settings for this permission. Wrapped
+            // in a fixed-width right-aligned frame that matches the
+            // macOS toggle switch footprint used in the General and
+            // Connected AI Assistants sections, so all three columns
+            // of trailing controls align to the same right edge.
             Button(action: {
                 if let url = URL(string: settingsURL) {
                     NSWorkspace.shared.open(url)
@@ -384,6 +393,7 @@ struct SettingsView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 6))
             }
             .buttonStyle(.plain)
+            .frame(width: 78, alignment: .trailing)
         }
     }
 }
