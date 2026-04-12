@@ -71,6 +71,16 @@ class MonitorState: ObservableObject {
     @Published var setupNeeded: Bool = false
     @Published var setupStep: Int = 0
 
+    /// True whenever Deja is missing something it structurally needs to
+    /// run — any revoked permission, missing Google auth, or first-launch
+    /// setup still pending. When blocked, the app surfaces the setup
+    /// panel and gates the pill (no voice, no command center expansion)
+    /// so the user can't mistake Deja for "working" when it's not.
+    /// Transient operational errors (proxy 502, one failed LLM call)
+    /// are NOT structural and surface via the error toast + request id
+    /// path instead.
+    @Published var isBlocked: Bool = true
+
     // Meeting recording state
     @Published var meetingAvailable: Bool = false
     @Published var meetingTitle: String = ""
@@ -93,6 +103,13 @@ class MonitorState: ObservableObject {
     @Published var notificationTitle: String = ""
     @Published var notificationMessage: String = ""
     @Published var showNotification: Bool = false
+
+    // User-facing error toast. Populated by ``errorPoller`` watching
+    // ~/.deja/latest_error.json. Persists until the user dismisses so
+    // the request ID stays copyable; dismissal removes the file so it
+    // doesn't replay.
+    @Published var currentError: DejaError?
+    private let errorPoller = ErrorPollingService()
 
     // Connected AI assistants (MCP clients) — shown in Settings
     @Published var mcpClients: [MCPClientInfo] = []
@@ -201,7 +218,10 @@ class MonitorState: ObservableObject {
 
     func start() {
         setupNeeded = !setupManager.isSetupDone
+        recomputeBlockedState()
         loadLaunchAtLoginState()
+
+        startErrorPolling()
 
         startWeb()
 
@@ -249,8 +269,27 @@ class MonitorState: ObservableObject {
         screenshotTimer?.invalidate(); screenshotTimer = nil
         keystrokeMonitor.stop()
         dbReaderTimer?.invalidate(); dbReaderTimer = nil
+        errorPoller.stop()
         processManager.stopAll()
         running = false
+    }
+
+    // MARK: - Error toast
+
+    private func startErrorPolling() {
+        errorPoller.onError = { [weak self] err in
+            self?.currentError = err
+        }
+        errorPoller.start()
+    }
+
+    /// Called by the toast × button or on shutdown. Removes the
+    /// underlying latest_error.json so the same error doesn't re-
+    /// surface on next poll.
+    func dismissCurrentError() {
+        guard let err = currentError else { return }
+        currentError = nil
+        errorPoller.dismissAndClear(err)
     }
 
     func restart() {
@@ -274,6 +313,7 @@ class MonitorState: ObservableObject {
 
     func completeSetup() {
         setupNeeded = false
+        recomputeBlockedState()
 
         // Tell the backend to write the setup_done marker so the
         // wizard doesn't reappear on next launch.
@@ -303,9 +343,11 @@ class MonitorState: ObservableObject {
 
     func checkRuntimePermissions() {
         setupManager.checkRuntimePermissions { [weak self] screenOK, fdaOK, missing in
-            self?.hasScreenRecording = screenOK
-            self?.hasFullDiskAccess = fdaOK
-            self?.missingPermissions = missing
+            guard let self = self else { return }
+            self.hasScreenRecording = screenOK
+            self.hasFullDiskAccess = fdaOK
+            self.missingPermissions = missing
+            self.recomputeBlockedState()
         }
         // Accessibility can be probed directly via AXIsProcessTrusted.
         // Microphone has no non-prompting probe on macOS — AVCaptureDevice
@@ -313,6 +355,21 @@ class MonitorState: ObservableObject {
         self.hasAccessibility = AXIsProcessTrusted()
         let micStatus = AVCaptureDevice.authorizationStatus(for: .audio)
         self.hasMicrophone = (micStatus == .authorized)
+        self.recomputeBlockedState()
+    }
+
+    /// Derive ``isBlocked`` from the structural checks. Called after
+    /// every permission / setup state change so the UI reacts within
+    /// one poll cycle of anything the user revokes or grants.
+    func recomputeBlockedState() {
+        let blocked = setupNeeded
+            || !hasScreenRecording
+            || !hasFullDiskAccess
+            || !hasAccessibility
+            || !hasMicrophone
+        if blocked != isBlocked {
+            isBlocked = blocked
+        }
     }
 
     // MARK: - Backfill Delegation
@@ -406,6 +463,17 @@ class MonitorState: ObservableObject {
     /// not a transient deferral counter — brief idle pauses during a long
     /// typing session must not reset the safety valve.
     func captureScreenshot(force: Bool = false) {
+        // Never attempt a capture while Deja is structurally blocked.
+        // Screen Recording permission is the most common block
+        // reason — if we call `screencapture` without a valid grant
+        // macOS shows a modal permission prompt. After a rebuild the
+        // cdhash changes, so TCC re-prompts on every attempt until
+        // the user re-grants (every 6 seconds from the capture
+        // timer). Skipping the call avoids that loop entirely.
+        if isBlocked {
+            return
+        }
+
         let now = Date().timeIntervalSince1970
 
         if !force {
@@ -980,6 +1048,14 @@ class MonitorState: ObservableObject {
         // Cancel any pending auto-collapse whenever the state is
         // explicitly driven from outside the timer path.
         cancelAutoCollapse()
+        // Defense in depth: refuse to expand while structurally
+        // blocked. The pill click handler and voice response handler
+        // are the primary gates; this catches anything that tries to
+        // expand programmatically (e.g. meeting-detected auto-expand)
+        // while setup is incomplete.
+        if expanded && isBlocked {
+            return
+        }
         if pillExpanded == expanded { return }
         pillExpanded = expanded
         if expanded {

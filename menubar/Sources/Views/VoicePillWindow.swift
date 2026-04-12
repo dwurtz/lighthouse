@@ -93,6 +93,18 @@ class VoicePillWindow: NSPanel {
             }
             .store(in: &cancellables)
 
+        // Error toast needs vertical headroom above the pill. When an
+        // error is present we resize the window to the error-toast
+        // height (if not already expanded); when it clears we collapse
+        // back to whatever state pillExpanded dictates.
+        monitor.$currentError
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self = self else { return }
+                self.applyFrame(for: self.monitor.pillExpanded, animate: true)
+            }
+            .store(in: &cancellables)
+
         NotificationCenter.default.addObserver(
             self, selector: #selector(screenChanged),
             name: NSApplication.didChangeScreenParametersNotification, object: nil
@@ -102,10 +114,31 @@ class VoicePillWindow: NSPanel {
     override var canBecomeKey: Bool { monitor.pillExpanded }
     override var canBecomeMain: Bool { false }
 
+    override func resignKey() {
+        super.resignKey()
+        // Click-outside collapses the expanded panel. We only take key
+        // status while expanded (see canBecomeKey), so losing it is a
+        // reliable signal that the user clicked elsewhere.
+        if monitor.pillExpanded {
+            DispatchQueue.main.async { [weak self] in
+                self?.monitor.setPillExpanded(false)
+            }
+        }
+    }
+
     @objc private func screenChanged() { positionAtBottomCenter() }
 
+    /// Extra height reserved for the error toast above the pill when
+    /// the panel itself isn't expanded. Matches ErrorToast's rendered
+    /// footprint (≈80pt) plus its 6pt bottom padding and some slack.
+    private static let errorToastHeight: CGFloat = 110
+
     private func applyFrame(for expanded: Bool, animate: Bool) {
-        let size = expanded ? Self.expandedSize : Self.collapsedSize
+        var size = expanded ? Self.expandedSize : Self.collapsedSize
+        if !expanded && monitor.currentError != nil {
+            size = NSSize(width: Self.collapsedSize.width,
+                          height: Self.collapsedSize.height + Self.errorToastHeight)
+        }
         let mouseLocation = NSEvent.mouseLocation
         guard let screen = NSScreen.screens.first(where: { $0.frame.contains(mouseLocation) }) ?? NSScreen.main else { return }
         let screenFrame = screen.frame
@@ -188,6 +221,17 @@ class PillTrackingOverlay: NSView {
             // accidentally dropping an active recording with a stray
             // click while the expanded panel is being discovered.
             if self.monitor.voicePillActive || self.monitor.voicePillProcessing {
+                return
+            }
+            // When Deja is missing something structural (revoked
+            // permission, expired auth, first-launch setup pending)
+            // the pill click re-opens the setup panel instead of
+            // trying to expand the command center. The expanded
+            // surface isn't meaningful until the setup checks pass.
+            if self.monitor.isBlocked {
+                if let delegate = NSApp.delegate as? AppDelegate {
+                    delegate.reopenSetupPanel()
+                }
                 return
             }
             self.monitor.togglePillExpanded()

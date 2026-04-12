@@ -172,6 +172,89 @@ class BackendProcessManager {
 
         let ts = String(format: "%.3f", Date().timeIntervalSince1970)
         try? ts.write(toFile: timestampPath, atomically: true, encoding: .utf8)
+
+        // Write per-display AX sidecars AT CAPTURE TIME (not later in
+        // Python). The window list is a point-in-time truth about what
+        // was on screen at the moment screencapture fired. Reading it
+        // seconds later in Python means focus may have changed — which
+        // is exactly how the Rob/HealthSpanMD conversation kept getting
+        // mislabeled as "cmux" when screen_1 was actually Messages.
+        writePerDisplayAXSidecars(screens: screens, home: home)
+    }
+
+    /// For each NSScreen, identify the frontmost app/window whose
+    /// bounds fall mostly inside that screen's frame, and write a
+    /// ``screen_<N>_ax.json`` sidecar with ``{app, window_title}``.
+    ///
+    /// Uses CGWindowListCopyWindowInfo (requires Screen Recording
+    /// permission — we already have it; the screencapture above would
+    /// fail without it). Filters to layer=0 (normal app windows) and
+    /// skips windows owned by the screenshot process itself.
+    private func writePerDisplayAXSidecars(screens: [NSScreen], home: String) {
+        let opts: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
+        guard let cfList = CGWindowListCopyWindowInfo(opts, kCGNullWindowID) else { return }
+        let windows = cfList as NSArray
+
+        // Convert NSScreen frames (bottom-left origin, all-screens coord
+        // space) to the CG window coordinate system (top-left origin,
+        // same all-screens space). CG uses an inverted Y relative to
+        // the primary screen's top.
+        guard let mainScreen = NSScreen.screens.first else { return }
+        let mainHeight = mainScreen.frame.height
+
+        for (i, screen) in screens.enumerated() {
+            let displayNum = i + 1
+            let frame = screen.frame
+            // Convert to CG coords: top = mainHeight - (frame.minY + frame.height)
+            let cgTop = mainHeight - (frame.origin.y + frame.height)
+            let cgFrame = CGRect(
+                x: frame.origin.x,
+                y: cgTop,
+                width: frame.width,
+                height: frame.height
+            )
+
+            // Walk windows front-to-back (CGWindowList is ordered that
+            // way). Pick the first non-trivial window that overlaps
+            // this display meaningfully (>50% of its area on-screen).
+            var chosenApp: String? = nil
+            var chosenTitle: String? = nil
+            for case let info as NSDictionary in windows {
+                guard let layer = info[kCGWindowLayer as String] as? Int,
+                      layer == 0 else { continue }
+                guard let boundsDict = info[kCGWindowBounds as String] as? NSDictionary,
+                      let winBounds = CGRect(dictionaryRepresentation: boundsDict as CFDictionary)
+                else { continue }
+                // Skip minuscule windows (menubar extras, widgets)
+                if winBounds.width < 200 || winBounds.height < 100 { continue }
+                // Skip our own app's windows
+                if let owner = info[kCGWindowOwnerName as String] as? String,
+                   owner == "Deja" { continue }
+                // Require most of the window to be on this display
+                let intersection = winBounds.intersection(cgFrame)
+                let winArea = winBounds.width * winBounds.height
+                let overlapArea = intersection.width * intersection.height
+                if winArea <= 0 || overlapArea / winArea < 0.5 { continue }
+
+                chosenApp = info[kCGWindowOwnerName as String] as? String
+                chosenTitle = info[kCGWindowName as String] as? String
+                break
+            }
+
+            var payload: [String: Any] = [:]
+            if let app = chosenApp, !app.isEmpty { payload["app"] = app }
+            if let title = chosenTitle, !title.isEmpty { payload["window_title"] = title }
+
+            let sidecarPath = home + "/screen_\(displayNum)_ax.json"
+            if payload.isEmpty {
+                // No identifiable window — remove stale sidecar if any
+                try? FileManager.default.removeItem(atPath: sidecarPath)
+                continue
+            }
+            if let data = try? JSONSerialization.data(withJSONObject: payload, options: []) {
+                try? data.write(to: URL(fileURLWithPath: sidecarPath), options: .atomic)
+            }
+        }
     }
 
     // MARK: - Lifecycle

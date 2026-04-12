@@ -44,7 +44,26 @@ struct VoicePillView: View {
 
     private var collapsedPill: some View {
         VStack(spacing: 4) {
-            if monitor.voicePillHovered {
+            if monitor.isBlocked {
+                // Blocked state — amber capsule signals that Deja is
+                // missing something it needs to run. Click reopens the
+                // setup panel; the hovered label says so explicitly.
+                HStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 10))
+                        .foregroundColor(.orange)
+                    if monitor.voicePillHovered {
+                        Text("Click to fix Deja setup")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(.orange.opacity(0.85))
+                    }
+                }
+                .padding(.horizontal, monitor.voicePillHovered ? 14 : 10)
+                .padding(.vertical, monitor.voicePillHovered ? 8 : 5)
+                .background(Capsule().fill(Color.black))
+                .overlay(Capsule().stroke(Color.orange.opacity(0.55), lineWidth: 1.5))
+                .transition(.opacity)
+            } else if monitor.voicePillHovered {
                 HStack(spacing: 6) {
                     Image(systemName: monitor.pillExpanded ? "chevron.down" : "chevron.up")
                         .font(.system(size: 10))

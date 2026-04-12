@@ -38,11 +38,15 @@ class DatabaseReader {
         let cutoffUnix = Date().timeIntervalSince1970 - 300
         let cutoffAppleNs = Int64((cutoffUnix - Self.appleEpochOffset) * 1_000_000_000)
 
+        // Read BOTH `text` and `attributedBody`. Modern macOS stores many
+        // rows (including ~every outbound message on this machine) with
+        // text = NULL and the content packed into the attributedBody
+        // typedstream blob. See AttributedBodyDecoder for format details.
         let sql = """
-            SELECT m.text, m.date, m.is_from_me, h.id as handle_id
+            SELECT m.text, m.date, m.is_from_me, h.id as handle_id, m.attributedBody
             FROM message m
             LEFT JOIN handle h ON m.handle_id = h.ROWID
-            WHERE m.text IS NOT NULL AND m.text != '' AND m.date > ?1
+            WHERE m.date > ?1 AND (m.text IS NOT NULL OR m.attributedBody IS NOT NULL)
             ORDER BY m.date DESC LIMIT 50
             """
 
@@ -53,10 +57,25 @@ class DatabaseReader {
 
         var messages: [[String: Any]] = []
         while sqlite3_step(stmt) == SQLITE_ROW {
-            let text: String
+            var text: String = ""
             if let cStr = sqlite3_column_text(stmt, 0) {
                 text = String(cString: cStr)
-            } else { continue }
+            }
+
+            if text.isEmpty {
+                // Fall back to decoding attributedBody. The blob is a
+                // typedstream-archived NSAttributedString and needs a
+                // custom extractor.
+                let blobLen = sqlite3_column_bytes(stmt, 4)
+                if blobLen > 0, let blobPtr = sqlite3_column_blob(stmt, 4) {
+                    let blob = Data(bytes: blobPtr, count: Int(blobLen))
+                    if let decoded = AttributedBodyDecoder.extractString(from: blob) {
+                        text = decoded
+                    }
+                }
+            }
+
+            if text.isEmpty { continue }
 
             let appleNs = sqlite3_column_int64(stmt, 1)
             let unixTs = Double(appleNs) / 1_000_000_000.0 + Self.appleEpochOffset

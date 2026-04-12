@@ -1,5 +1,7 @@
 import SwiftUI
 import AppKit
+import AVFoundation
+import Combine
 import ScreenCaptureKit
 import Sparkle
 
@@ -31,12 +33,34 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var didSetupVoicePill: Bool = false
     let hotkeyManager = HotkeyManager()
     private var voiceDispatcher: VoiceCommandDispatcher?
+    private var healthCancellables = Set<AnyCancellable>()
+
+    // Loud-startup / health observation. We want to open the panel
+    // once, on the first .broken report of a launch — not every tick.
+    // `lastLoudStatus` lets us fire again on a regression (.ok → .broken)
+    // without spamming during steady-state.
+    private var didShowStartupHealthToast: Bool = false
+    private var lastLoudStatus: HealthStatus = .ok
+    private var healthObserver: NSObjectProtocol?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
         setupCrashReporting()
         setupStatusItem()       // First — before any work that could trigger menu bar layout
         monitor.start()         // After UI is set up
+
+        // Health service — polls ~/.deja/health.json + native TCC
+        // probes and publishes the merged state for the notch chip
+        // and the HealthPanel. We observe `overall` to drive the
+        // loud-startup behavior: auto-open on .broken, amber on
+        // .degraded, silent on .ok. Fires once per regression.
+        HealthState.shared.start()
+        HealthState.shared.$overall
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] status in
+                self?.handleHealthChange(status)
+            }
+            .store(in: &healthCancellables)
 
         // Voice recording runs in-process now (was a DejaRecorder
         // subprocess, which didn't hold mic TCC because it has no
@@ -51,6 +75,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         dispatcher.start()
         voiceDispatcher = dispatcher
+
+        // Force the mic TCC prompt at launch when status is .notDetermined.
+        // AVAudioEngine does NOT trigger the prompt on its own — it just
+        // returns zero-filled buffers silently when the grant is missing,
+        // which is indistinguishable from a working mic until the WAV is
+        // inspected. This happens after `tccutil reset Microphone
+        // com.deja.app` or on first launch of a re-signed build where
+        // the prior grant no longer matches the code signature.
+        if AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined {
+            AVCaptureDevice.requestAccess(for: .audio) { granted in
+                NSLog("deja: mic TCC prompt result: granted=\(granted)")
+            }
+        }
 
         startMicStatusPolling()
 
@@ -69,6 +106,27 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.showSetupPanel()
             }
         }
+
+        // Structural-blocked state — auto-show the setup panel whenever
+        // Deja loses something it needs to run (permission revoked,
+        // Google auth expired, etc.) so the user can't mistake a
+        // partial-functionality state for "working." The panel closes
+        // itself when every check goes green. Transient operational
+        // errors (proxy 502, one failed LLM call) don't flip isBlocked
+        // — they surface via the error toast + request id path and
+        // never reach here.
+        monitor.$isBlocked
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] blocked in
+                guard let self = self else { return }
+                if blocked {
+                    self.showSetupPanel()
+                } else {
+                    self.setupPanelWindow?.orderOut(nil)
+                }
+            }
+            .store(in: &healthCancellables)
 
         NotificationCenter.default.addObserver(
             self,
@@ -133,6 +191,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Re-open the setup panel from an external caller (pill click
+    /// while blocked, hotkey while blocked). Delegates to the internal
+    /// ``showSetupPanel`` so window-reuse and activation stay in one
+    /// place.
+    func reopenSetupPanel() {
+        showSetupPanel()
+    }
+
     private func showSetupPanel() {
         // Reuse the existing panel if the user previously closed it
         // (via the X button) — we only hid it with orderOut(nil), not
@@ -161,6 +227,73 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func handleMeetingDismissed() {
         dismissMeetingPill()
+    }
+
+    // MARK: - Health observation
+
+    /// Drive the "loud" startup behavior. `.broken` auto-opens the
+    /// notch panel on HealthPanel and surfaces a persistent toast;
+    /// `.degraded` is non-modal; `.ok` is silent. We only fire the
+    /// startup toast ONCE per launch unless the status regresses from
+    /// a healthier state back down — otherwise the user would see the
+    /// same toast every 15s forever.
+    private func handleHealthChange(_ status: HealthStatus) {
+        defer { lastLoudStatus = status }
+
+        guard status != lastLoudStatus else { return }
+
+        switch status {
+        case .broken:
+            // Structural issues are now handled by ``monitor.isBlocked``
+            // which auto-opens the setup panel. Keep the toast for
+            // operational-broken states (e.g. Render proxy 502) that
+            // aren't permission-related — the setup panel won't surface
+            // those, but the user still deserves to know.
+            if !didShowStartupHealthToast || lastLoudStatus != .broken {
+                didShowStartupHealthToast = true
+                surfaceHealthToast(
+                    message: "Déjà is having trouble — tap for details",
+                    code: "health_broken",
+                    persistent: true
+                )
+            }
+        case .degraded:
+            // Non-modal. Amber toast, no auto-open. Only when
+            // regressing into degraded (not every re-report).
+            if lastLoudStatus == .ok {
+                surfaceHealthToast(
+                    message: "Déjà is running in degraded mode — tap for details",
+                    code: "health_degraded",
+                    persistent: false
+                )
+            }
+        case .ok:
+            break
+        }
+    }
+
+    /// Route a health-driven toast through the existing ``currentError``
+    /// channel so it pins above the pill like any other error. We
+    /// synthesize a DejaError with a stable request_id so it dedupes
+    /// correctly inside ErrorPollingService's lastSeen check.
+    private func surfaceHealthToast(message: String, code: String, persistent: Bool) {
+        // Prefer the real request_id from the most recent underlying
+        // error so support lookup works. Fall back to a synthetic ID
+        // only if the agent hasn't logged anything yet.
+        let rid = HealthState.shared.lastErrorRequestId
+            ?? "req_health_\(Int(Date().timeIntervalSince1970))"
+        let err = DejaError(
+            requestId: rid,
+            code: code,
+            message: message,
+            timestamp: ISO8601DateFormatter().string(from: Date()),
+            details: nil
+        )
+        monitor.currentError = err
+        // Toast now persists until user dismisses, so we don't need to
+        // re-assert. If user explicitly dismisses while still broken,
+        // respect that — they know.
+        _ = persistent
     }
 
 
@@ -402,7 +535,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         hotkeyManager.onKeyDown = { [weak self] in
-            self?.monitor.startVoiceCapture()
+            guard let self = self else { return }
+            // Voice capture is gated while Deja is structurally
+            // blocked — no point recording when the agent can't
+            // process the transcript. Reopen the setup panel so the
+            // user can see why their voice command didn't fire.
+            if self.monitor.isBlocked {
+                self.reopenSetupPanel()
+                return
+            }
+            self.monitor.startVoiceCapture()
         }
         hotkeyManager.onKeyUp = { [weak self] in
             self?.monitor.stopVoiceCapture()

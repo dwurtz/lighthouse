@@ -11,9 +11,11 @@
 		0C01FC2FFCC37AF1B2A160EB /* MeetingRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 546E703E0F803FFACC8456F1 /* MeetingRecorder.swift */; };
 		102162F0747EB5287C007B9C /* CommandCenterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFC477EE190FBC248A2EDB69 /* CommandCenterView.swift */; };
 		12142699C3AB7EDE92148355 /* DejaRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4EB157B404F53D33F9512646 /* DejaRecorder.swift */; };
+		131A4D2CC8EAB60047719E02 /* DejaError.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2E2F7ED5BD9AD0C309AE8AC /* DejaError.swift */; };
 		1F24387ECE2ABE55E8446C0A /* VoiceCommandDispatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 76FFD515F2B4CE855C9FB52D /* VoiceCommandDispatcher.swift */; };
 		222D3A7333DB15AC31B0D93D /* ScreenCaptureKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = EFF72E223E893D4D84DE66CD /* ScreenCaptureKit.framework */; };
 		25F5D3FB4B46BDDDF0B85911 /* SetupPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E156BFF7025A36E0009125B6 /* SetupPanelView.swift */; };
+		2B04A918BD4CEBC454FF8FA6 /* HealthPollingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 494CBCC7DBA38031B73C2883 /* HealthPollingService.swift */; };
 		2BB909BD53EAFA57BE316649 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78A8FC28E10F34A2E91C7923 /* AppDelegate.swift */; };
 		30EBCF81C0F2B19A20A82E7C /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 6EE364908535709A817F0EBF /* Sparkle */; };
 		32DEBC6FCAE27D0A5887E829 /* CoreMedia.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 511117673C0D6E68362ACC2F /* CoreMedia.framework */; };
@@ -21,18 +23,25 @@
 		42DCBCFE4FF56376DD425BA3 /* SettingsPanelWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFCF4C5C14F22AA2EA07F25D /* SettingsPanelWindow.swift */; };
 		435160729688A388C539CF57 /* VoiceRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A5EB680B89515A07DFEB50D /* VoiceRecorder.swift */; };
 		479BBE1791DB6EBFC865AEE8 /* VoicePillView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63E38726CE176A2832663B80 /* VoicePillView.swift */; };
+		479F0B36F8D85B0E5F4EFAE1 /* ErrorPollingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89B3878E43A775210760356A /* ErrorPollingService.swift */; };
 		4932CD8F57C136EC18EBD81A /* ImageIO.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5FBB5CB7483B90FD0ADB9A4A /* ImageIO.framework */; };
 		4A3956D1DCC05A9AC3623D12 /* ScreenCaptureKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = EFF72E223E893D4D84DE66CD /* ScreenCaptureKit.framework */; };
+		4F9025FC399B193F856E066E /* AttributedBodyDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DB486F5A3799C4B2E16A0DF /* AttributedBodyDecoder.swift */; };
 		5878450BBB6A4FCF7D791AFC /* DejaApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC62B6B690ED57D0403A32A3 /* DejaApp.swift */; };
+		5F4CD01B06A5CF8AC48FEA92 /* ErrorToast.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3568BE4B2629FE6BB40A3E5 /* ErrorToast.swift */; };
 		62A958FF0371CBDBFFD3919C /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = BCC51732D86F475138598563 /* Foundation.framework */; };
 		6A45A1CEF7C8496C3088E347 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = BCC51732D86F475138598563 /* Foundation.framework */; };
+		701DC4235C291CC41672D585 /* HealthState.swift in Sources */ = {isa = PBXBuildFile; fileRef = EDCCDA2D49AEA0FD6BED1D25 /* HealthState.swift */; };
 		721E485344FC645BA7C04B43 /* AppIcon.icns in Resources */ = {isa = PBXBuildFile; fileRef = F16A3FDFD508206B3D67DFE3 /* AppIcon.icns */; };
 		7530B2F920F0FFCF1E2D3AA1 /* PopoverContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18CDCF2320DFBB2102143A62 /* PopoverContentView.swift */; };
 		76CA58AB4C54B430399ACD7F /* BriefingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7752DD5823378D5E1029E779 /* BriefingView.swift */; };
 		7C47A76DB22E37B757401576 /* CoreGraphics.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = FF7DDEFB774D920864C65017 /* CoreGraphics.framework */; };
 		85D7F542B5AA0DA671A30BAB /* KeystrokeMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 932FEC9780873CEA3EF0CCDA /* KeystrokeMonitor.swift */; };
+		91DBD580C69D60A3E305367E /* AppKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 876F7AA11CEC762975464D2F /* AppKit.framework */; };
 		94559C662FE0F6196D5528E7 /* Utilities.swift in Sources */ = {isa = PBXBuildFile; fileRef = 577197DA62750145A9E65676 /* Utilities.swift */; };
+		99D57788C0B6CACC492EC8D5 /* deja-ocr.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4035B4872C24683B9BD4A35B /* deja-ocr.swift */; };
 		A3419BAB5DF619CFC302DDB9 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEBD0855AD78D7C16A60FE1D /* SettingsView.swift */; };
+		A97BE08E35E5721EF375F80C /* Vision.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9CE4F3CFE527958F5187F603 /* Vision.framework */; };
 		AF2024A02B1E811E745245BB /* DatabaseReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 30A978138C56BCDD8744D302 /* DatabaseReader.swift */; };
 		B02D0905F40A7C82E4B6DD6E /* ExpandedNotchPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90144AB8D3E968559A8A162C /* ExpandedNotchPanel.swift */; };
 		B159333D857730B8493EB6E9 /* MeetingCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 129900B011818660B477E1AA /* MeetingCoordinator.swift */; };
@@ -41,6 +50,7 @@
 		BC654C23332F7A07702D26E6 /* AppKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 876F7AA11CEC762975464D2F /* AppKit.framework */; };
 		BD60699959C55904B448FFD0 /* SetupPanelWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 271A14CAA2FA0EB2E1587002 /* SetupPanelWindow.swift */; };
 		C21BEA9674BCB5B70046B6C6 /* NotificationBubbleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80E5DE1FB0E45B028FF313F4 /* NotificationBubbleView.swift */; };
+		C73C3BA310B3D77AB49C7F41 /* DejaOCR in Embed Dependencies */ = {isa = PBXBuildFile; fileRef = 2663EF416924833A904749F6 /* DejaOCR */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		D029A72970BEE1DA98ECF8B3 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 226E8F65EA938B8663F5957F /* SwiftUI.framework */; };
 		D04A2CA44B55BAF02C462405 /* VoicePillWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 288F28AA7634EFC49D2A4FBB /* VoicePillWindow.swift */; };
 		D7010FC9AB7B7615FF6A22DD /* libsqlite3.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = 0F1C502F9FCA44E27F8C29E8 /* libsqlite3.tbd */; };
@@ -49,6 +59,7 @@
 		DF4C925C08946DBA9AB33171 /* tray-icon.png in Resources */ = {isa = PBXBuildFile; fileRef = C28EE339AA283B98EF4D7949 /* tray-icon.png */; };
 		E30B302F8BC897491D9B78F0 /* ServiceManagement.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A2EB423F071542766FE3CFF1 /* ServiceManagement.framework */; };
 		ECD9847C91199C7871F64AFF /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4706308135587855A7DE9E3 /* Models.swift */; };
+		F33107BC1D1F875E26C12CD6 /* HealthReport.swift in Sources */ = {isa = PBXBuildFile; fileRef = AAC16F6D765A7DA5D67B53CC /* HealthReport.swift */; };
 		F5D1F9EDFD861854AD0E9D85 /* MonitorState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53B9C764CDEDAB4DC7902FAE /* MonitorState.swift */; };
 		FB5C037D3F22DBFC04E86FD2 /* DejaRecorder in Embed Dependencies */ = {isa = PBXBuildFile; fileRef = 41C7170F3A82EC0FDD65B613 /* DejaRecorder */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		FF70DF7C8F24D722987CF40A /* AVFoundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 0FDFEE7E2F0C96284BD047D2 /* AVFoundation.framework */; };
@@ -62,6 +73,13 @@
 			remoteGlobalIDString = 5BDBEE461C59973503B6306C;
 			remoteInfo = DejaRecorder;
 		};
+		F99A3E1190100B20452F170A /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 86140A3D25A756123167315D /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = F6766FCAE77AF37C034DB834;
+			remoteInfo = DejaOCR;
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -72,6 +90,7 @@
 			dstSubfolderSpec = 6;
 			files = (
 				FB5C037D3F22DBFC04E86FD2 /* DejaRecorder in Embed Dependencies */,
+				C73C3BA310B3D77AB49C7F41 /* DejaOCR in Embed Dependencies */,
 			);
 			name = "Embed Dependencies";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -84,10 +103,13 @@
 		129900B011818660B477E1AA /* MeetingCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingCoordinator.swift; sourceTree = "<group>"; };
 		18CDCF2320DFBB2102143A62 /* PopoverContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PopoverContentView.swift; sourceTree = "<group>"; };
 		226E8F65EA938B8663F5957F /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
+		2663EF416924833A904749F6 /* DejaOCR */ = {isa = PBXFileReference; includeInIndex = 0; path = DejaOCR; sourceTree = BUILT_PRODUCTS_DIR; };
 		271A14CAA2FA0EB2E1587002 /* SetupPanelWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetupPanelWindow.swift; sourceTree = "<group>"; };
 		288F28AA7634EFC49D2A4FBB /* VoicePillWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoicePillWindow.swift; sourceTree = "<group>"; };
 		30A978138C56BCDD8744D302 /* DatabaseReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DatabaseReader.swift; sourceTree = "<group>"; };
+		4035B4872C24683B9BD4A35B /* deja-ocr.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "deja-ocr.swift"; sourceTree = "<group>"; };
 		41C7170F3A82EC0FDD65B613 /* DejaRecorder */ = {isa = PBXFileReference; includeInIndex = 0; path = DejaRecorder; sourceTree = BUILT_PRODUCTS_DIR; };
+		494CBCC7DBA38031B73C2883 /* HealthPollingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthPollingService.swift; sourceTree = "<group>"; };
 		4EB157B404F53D33F9512646 /* DejaRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DejaRecorder.swift; sourceTree = "<group>"; };
 		511117673C0D6E68362ACC2F /* CoreMedia.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreMedia.framework; path = System/Library/Frameworks/CoreMedia.framework; sourceTree = SDKROOT; };
 		53B9C764CDEDAB4DC7902FAE /* MonitorState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MonitorState.swift; sourceTree = "<group>"; };
@@ -102,22 +124,29 @@
 		78A8FC28E10F34A2E91C7923 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		80E5DE1FB0E45B028FF313F4 /* NotificationBubbleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationBubbleView.swift; sourceTree = "<group>"; };
 		876F7AA11CEC762975464D2F /* AppKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AppKit.framework; path = System/Library/Frameworks/AppKit.framework; sourceTree = SDKROOT; };
+		89B3878E43A775210760356A /* ErrorPollingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ErrorPollingService.swift; sourceTree = "<group>"; };
 		8ACEA8F312916A3DB10B6583 /* BackendProcessManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackendProcessManager.swift; sourceTree = "<group>"; };
 		90144AB8D3E968559A8A162C /* ExpandedNotchPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExpandedNotchPanel.swift; sourceTree = "<group>"; };
 		92314037C78AB4CCDD214FC1 /* client_secret.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = client_secret.json; sourceTree = "<group>"; };
 		932FEC9780873CEA3EF0CCDA /* KeystrokeMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeystrokeMonitor.swift; sourceTree = "<group>"; };
 		944177DAA03864CD41A829C7 /* HotkeyManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HotkeyManager.swift; sourceTree = "<group>"; };
 		9A5EB680B89515A07DFEB50D /* VoiceRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceRecorder.swift; sourceTree = "<group>"; };
+		9CE4F3CFE527958F5187F603 /* Vision.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Vision.framework; path = System/Library/Frameworks/Vision.framework; sourceTree = SDKROOT; };
+		9DB486F5A3799C4B2E16A0DF /* AttributedBodyDecoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttributedBodyDecoder.swift; sourceTree = "<group>"; };
 		A2EB423F071542766FE3CFF1 /* ServiceManagement.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = ServiceManagement.framework; path = System/Library/Frameworks/ServiceManagement.framework; sourceTree = SDKROOT; };
 		A4706308135587855A7DE9E3 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
+		AAC16F6D765A7DA5D67B53CC /* HealthReport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthReport.swift; sourceTree = "<group>"; };
 		BC62B6B690ED57D0403A32A3 /* DejaApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DejaApp.swift; sourceTree = "<group>"; };
 		BCC51732D86F475138598563 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = System/Library/Frameworks/Foundation.framework; sourceTree = SDKROOT; };
 		C28EE339AA283B98EF4D7949 /* tray-icon.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "tray-icon.png"; sourceTree = "<group>"; };
 		CFC477EE190FBC248A2EDB69 /* CommandCenterView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandCenterView.swift; sourceTree = "<group>"; };
 		CFCF4C5C14F22AA2EA07F25D /* SettingsPanelWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsPanelWindow.swift; sourceTree = "<group>"; };
+		D2E2F7ED5BD9AD0C309AE8AC /* DejaError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DejaError.swift; sourceTree = "<group>"; };
+		D3568BE4B2629FE6BB40A3E5 /* ErrorToast.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ErrorToast.swift; sourceTree = "<group>"; };
 		DEBD0855AD78D7C16A60FE1D /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		E156BFF7025A36E0009125B6 /* SetupPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetupPanelView.swift; sourceTree = "<group>"; };
 		E78982A7A76CA05C3EB71ABE /* MeetingPillView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingPillView.swift; sourceTree = "<group>"; };
+		EDCCDA2D49AEA0FD6BED1D25 /* HealthState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthState.swift; sourceTree = "<group>"; };
 		EFF72E223E893D4D84DE66CD /* ScreenCaptureKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = ScreenCaptureKit.framework; path = System/Library/Frameworks/ScreenCaptureKit.framework; sourceTree = SDKROOT; };
 		F16A3FDFD508206B3D67DFE3 /* AppIcon.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = AppIcon.icns; sourceTree = "<group>"; };
 		FF7DDEFB774D920864C65017 /* CoreGraphics.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreGraphics.framework; path = System/Library/Frameworks/CoreGraphics.framework; sourceTree = SDKROOT; };
@@ -152,6 +181,15 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		FE04A0EA5ACEB00C5B61D989 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				91DBD580C69D60A3E305367E /* AppKit.framework in Frameworks */,
+				A97BE08E35E5721EF375F80C /* Vision.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -159,6 +197,7 @@
 			isa = PBXGroup;
 			children = (
 				6657279FEB277AA5D969A150 /* Deja.app */,
+				2663EF416924833A904749F6 /* DejaOCR */,
 				41C7170F3A82EC0FDD65B613 /* DejaRecorder */,
 			);
 			name = Products;
@@ -203,8 +242,18 @@
 				EFF72E223E893D4D84DE66CD /* ScreenCaptureKit.framework */,
 				A2EB423F071542766FE3CFF1 /* ServiceManagement.framework */,
 				226E8F65EA938B8663F5957F /* SwiftUI.framework */,
+				9CE4F3CFE527958F5187F603 /* Vision.framework */,
 			);
 			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		5803EC41B59F8E3AF4BB8BD1 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				D2E2F7ED5BD9AD0C309AE8AC /* DejaError.swift */,
+				AAC16F6D765A7DA5D67B53CC /* HealthReport.swift */,
+			);
+			path = Models;
 			sourceTree = "<group>";
 		};
 		6A7CCF842A68557F1E4AF19D /* Sources */ = {
@@ -212,6 +261,7 @@
 			children = (
 				37EB9CF707E72997179E84E8 /* App */,
 				3207EBDF08E9149560CD22FC /* Helpers */,
+				5803EC41B59F8E3AF4BB8BD1 /* Models */,
 				8CBDAE53684B385B522E7DE1 /* Services */,
 				D5A78A5E20FF14E681A48B28 /* Views */,
 			);
@@ -222,8 +272,12 @@
 		8CBDAE53684B385B522E7DE1 /* Services */ = {
 			isa = PBXGroup;
 			children = (
+				9DB486F5A3799C4B2E16A0DF /* AttributedBodyDecoder.swift */,
 				8ACEA8F312916A3DB10B6583 /* BackendProcessManager.swift */,
 				30A978138C56BCDD8744D302 /* DatabaseReader.swift */,
+				89B3878E43A775210760356A /* ErrorPollingService.swift */,
+				494CBCC7DBA38031B73C2883 /* HealthPollingService.swift */,
+				EDCCDA2D49AEA0FD6BED1D25 /* HealthState.swift */,
 				944177DAA03864CD41A829C7 /* HotkeyManager.swift */,
 				932FEC9780873CEA3EF0CCDA /* KeystrokeMonitor.swift */,
 				129900B011818660B477E1AA /* MeetingCoordinator.swift */,
@@ -241,6 +295,7 @@
 			children = (
 				7752DD5823378D5E1029E779 /* BriefingView.swift */,
 				CFC477EE190FBC248A2EDB69 /* CommandCenterView.swift */,
+				D3568BE4B2629FE6BB40A3E5 /* ErrorToast.swift */,
 				90144AB8D3E968559A8A162C /* ExpandedNotchPanel.swift */,
 				E78982A7A76CA05C3EB71ABE /* MeetingPillView.swift */,
 				80E5DE1FB0E45B028FF313F4 /* NotificationBubbleView.swift */,
@@ -261,6 +316,7 @@
 				38F8F853E2E63E9952B60C27 /* menubar */,
 				FB7FD580443B54B07973C568 /* Resources */,
 				6A7CCF842A68557F1E4AF19D /* Sources */,
+				FD5C3E4437A1E1BA79393525 /* Tools */,
 				4D5B49957BA5A738950B4802 /* Frameworks */,
 				25B1CC28E3DE5EE3BB432AF7 /* Products */,
 			);
@@ -274,6 +330,15 @@
 				C28EE339AA283B98EF4D7949 /* tray-icon.png */,
 			);
 			path = Resources;
+			sourceTree = "<group>";
+		};
+		FD5C3E4437A1E1BA79393525 /* Tools */ = {
+			isa = PBXGroup;
+			children = (
+				4035B4872C24683B9BD4A35B /* deja-ocr.swift */,
+			);
+			name = Tools;
+			path = menubar/Tools;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -311,6 +376,7 @@
 			);
 			dependencies = (
 				D068078457DB232B55E2AB55 /* PBXTargetDependency */,
+				4F92CC35119E758D2F09E00C /* PBXTargetDependency */,
 			);
 			name = Deja;
 			packageProductDependencies = (
@@ -319,6 +385,24 @@
 			productName = Deja;
 			productReference = 6657279FEB277AA5D969A150 /* Deja.app */;
 			productType = "com.apple.product-type.application";
+		};
+		F6766FCAE77AF37C034DB834 /* DejaOCR */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 7802BFB2191C23C187FB92B1 /* Build configuration list for PBXNativeTarget "DejaOCR" */;
+			buildPhases = (
+				AD05EAE728BD2BE4B774B8B5 /* Sources */,
+				FE04A0EA5ACEB00C5B61D989 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = DejaOCR;
+			packageProductDependencies = (
+			);
+			productName = DejaOCR;
+			productReference = 2663EF416924833A904749F6 /* DejaOCR */;
+			productType = "com.apple.product-type.tool";
 		};
 /* End PBXNativeTarget section */
 
@@ -333,6 +417,9 @@
 						ProvisioningStyle = Manual;
 					};
 					A6465F802D016E5C358DEC84 = {
+						ProvisioningStyle = Manual;
+					};
+					F6766FCAE77AF37C034DB834 = {
 						ProvisioningStyle = Manual;
 					};
 				};
@@ -355,6 +442,7 @@
 			projectRoot = "";
 			targets = (
 				A6465F802D016E5C358DEC84 /* Deja */,
+				F6766FCAE77AF37C034DB834 /* DejaOCR */,
 				5BDBEE461C59973503B6306C /* DejaRecorder */,
 			);
 		};
@@ -396,6 +484,14 @@
 /* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		AD05EAE728BD2BE4B774B8B5 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				99D57788C0B6CACC492EC8D5 /* deja-ocr.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		B94FBD26603A83CC8B8EA58C /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -409,12 +505,19 @@
 			buildActionMask = 2147483647;
 			files = (
 				2BB909BD53EAFA57BE316649 /* AppDelegate.swift in Sources */,
+				4F9025FC399B193F856E066E /* AttributedBodyDecoder.swift in Sources */,
 				41A94BA85426F5525FBCDC9E /* BackendProcessManager.swift in Sources */,
 				76CA58AB4C54B430399ACD7F /* BriefingView.swift in Sources */,
 				102162F0747EB5287C007B9C /* CommandCenterView.swift in Sources */,
 				AF2024A02B1E811E745245BB /* DatabaseReader.swift in Sources */,
 				5878450BBB6A4FCF7D791AFC /* DejaApp.swift in Sources */,
+				131A4D2CC8EAB60047719E02 /* DejaError.swift in Sources */,
+				479F0B36F8D85B0E5F4EFAE1 /* ErrorPollingService.swift in Sources */,
+				5F4CD01B06A5CF8AC48FEA92 /* ErrorToast.swift in Sources */,
 				B02D0905F40A7C82E4B6DD6E /* ExpandedNotchPanel.swift in Sources */,
+				2B04A918BD4CEBC454FF8FA6 /* HealthPollingService.swift in Sources */,
+				F33107BC1D1F875E26C12CD6 /* HealthReport.swift in Sources */,
+				701DC4235C291CC41672D585 /* HealthState.swift in Sources */,
 				BBEF67D44A7438C7C9F527AE /* HotkeyManager.swift in Sources */,
 				85D7F542B5AA0DA671A30BAB /* KeystrokeMonitor.swift in Sources */,
 				B159333D857730B8493EB6E9 /* MeetingCoordinator.swift in Sources */,
@@ -440,6 +543,11 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		4F92CC35119E758D2F09E00C /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = F6766FCAE77AF37C034DB834 /* DejaOCR */;
+			targetProxy = F99A3E1190100B20452F170A /* PBXContainerItemProxy */;
+		};
 		D068078457DB232B55E2AB55 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = 5BDBEE461C59973503B6306C /* DejaRecorder */;
@@ -448,6 +556,25 @@
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
+		25959F1EF09A06D5698AD5CA /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "Deja Dev";
+				CODE_SIGN_STYLE = Manual;
+				COMBINE_HIDPI_IMAGES = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.deja.DejaOCR;
+				PRODUCT_NAME = "deja-ocr";
+				SDKROOT = macosx;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
 		332481EC90D28B95B104226F /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -510,6 +637,25 @@
 				SWIFT_VERSION = 5.0;
 			};
 			name = Debug;
+		};
+		959E6623E4CEAC7DADD50306 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "Deja Dev";
+				CODE_SIGN_STYLE = Manual;
+				COMBINE_HIDPI_IMAGES = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.deja.DejaOCR;
+				PRODUCT_NAME = "deja-ocr";
+				SDKROOT = macosx;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
 		};
 		B279D94A0841C0BCD13D5CD0 /* Debug */ = {
 			isa = XCBuildConfiguration;
@@ -664,6 +810,15 @@
 			buildConfigurations = (
 				332481EC90D28B95B104226F /* Debug */,
 				C51CE1B7B7B0022DD64F6807 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		7802BFB2191C23C187FB92B1 /* Build configuration list for PBXNativeTarget "DejaOCR" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				25959F1EF09A06D5698AD5CA /* Debug */,
+				959E6623E4CEAC7DADD50306 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;

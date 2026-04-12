@@ -23,6 +23,21 @@ struct VoicePillContainer: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            // Error toast pins above everything else so it can't be
+            // hidden by an expanded panel. It auto-dismisses after
+            // 8s via the timer in MonitorState; the × button calls
+            // dismissCurrentError() which also removes the file.
+            if let err = monitor.currentError {
+                ErrorToast(error: err) {
+                    monitor.dismissCurrentError()
+                }
+                .padding(.bottom, 6)
+                .transition(.asymmetric(
+                    insertion: .opacity.combined(with: .move(edge: .top)),
+                    removal: .opacity
+                ))
+            }
+
             if monitor.pillExpanded {
                 ExpandedNotchPanel(monitor: monitor)
                     .transition(.asymmetric(
@@ -34,6 +49,7 @@ struct VoicePillContainer: View {
                 .frame(width: 400, height: 56)
         }
         .animation(.spring(response: 0.32, dampingFraction: 0.85), value: monitor.pillExpanded)
+        .animation(.easeInOut(duration: 0.25), value: monitor.currentError)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
     }
 }
