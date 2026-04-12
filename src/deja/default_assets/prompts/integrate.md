@@ -56,12 +56,14 @@ goals.md has three lists you can reason over, with **three different ownership r
 
 **1. Close open commitments that the signals have satisfied.**
 
-Read the current Tasks and Waiting for lists in goals. For each open item, ask: did something in this batch finish it?
+Read the current Tasks and Waiting for lists in goals. For each open item, ask: did something **in this batch of new observations** finish it?
 
 - User sent the email they'd promised → `complete_tasks: ["send amanda the deck"]`
 - User made the call they said they'd make → `complete_tasks: ["call memere"]`
 - Person the user was waiting on replied with the promised thing → `resolve_waiting: ["amanda - feedback on theme preview"]`
 - A meeting happened whose outcome satisfies a waiting-for → `resolve_waiting: [...]`
+
+**A standing commitment or task in goals.md is evidence that something SHOULD happen, not that it DID happen.** Do NOT `complete_tasks` or create events based solely on the existence of a goal or commitment — only when a signal in the current batch directly describes the thing occurring. "David is driving carpool all week" in Standing context does NOT mean David drove carpool this morning unless today's signals contain a message, calendar event, or other direct evidence of the drive.
 
 Use a substring that matches the existing item text verbatim — don't invent new wording, match what's already in goals.md so `apply_tasks_update` can find the line.
 
