@@ -14,6 +14,18 @@ from datetime import datetime, timezone
 from deja import audit
 from deja import wiki as wiki_store
 from deja.config import DEJA_HOME
+from deja.observability import (
+    DejaError,
+    LLMError,
+    report_error,
+    request_scope,
+)
+
+# Track consecutive integrate failures so we can escalate from silent
+# "internal warning" to a user-visible toast once things have been
+# failing for a while. Reset to 0 on the first success.
+_consecutive_integrate_failures: int = 0
+_CONSECUTIVE_FAIL_THRESHOLD = 3
 
 log = logging.getLogger(__name__)
 
@@ -21,7 +33,8 @@ log = logging.getLogger(__name__)
 # screenshot signal older than this when integrate reads unanalyzed
 # signals. Prevents reasoning about "current screen activity" based on
 # a 10-minute-old frame even if the Swift defer logic misbehaves.
-MAX_SCREENSHOT_AGE_SECONDS = 600  # 10 minutes
+MAX_SCREENSHOT_AGE_SECONDS = 1800  # 30 minutes — OCR text is verbatim
+# and doesn't degrade with age like FastVLM descriptions did
 
 # Module-level mutex + active-loop reference so user-initiated triggers
 # can fire run_analysis_cycle immediately without stomping the scheduler.
@@ -133,6 +146,21 @@ async def run_analysis_cycle(
     trigger_kind: str = "signal",
     trigger_detail: str = "scheduled tick",
 ) -> None:
+    """Wrap the cycle body in a request_scope so every downstream log,
+    audit entry, and LLM call shares one correlation id.
+    """
+    with request_scope() as req_id:
+        log.debug("analysis cycle starting (req=%s)", req_id)
+        return await _run_analysis_cycle_body(
+            loop_ref, trigger_kind=trigger_kind, trigger_detail=trigger_detail
+        )
+
+
+async def _run_analysis_cycle_body(
+    loop_ref,
+    trigger_kind: str = "signal",
+    trigger_detail: str = "scheduled tick",
+) -> None:
     """One cycle: read signals -> triage -> LLM call -> apply wiki updates.
 
     ``loop_ref`` is the AgentLoop instance (used for gemini client,
@@ -236,6 +264,20 @@ async def run_analysis_cycle(
             len(signal_items),
         )
 
+    # 1b. Capture the window list ONCE for the whole cycle — this goes
+    #     into the integrate prompt as context, not into each signal.
+    open_windows_text = ""
+    try:
+        from deja.ax_context import capture_all_windows
+
+        all_windows = capture_all_windows()
+        if all_windows:
+            open_windows_text = "\n".join(
+                f"- {w['app']}: {w['title']}" for w in all_windows[:20]
+            )
+    except Exception:
+        log.debug("capture_all_windows failed", exc_info=True)
+
     # 2. Rebuild the wiki index so any out-of-band changes (manual
     #    deletes, Obsidian edits, git ops) are reflected before we
     #    retrieve.
@@ -293,6 +335,7 @@ async def run_analysis_cycle(
             result = await loop_ref.gemini.integrate_observations(
                 signals_text=batch_text,
                 wiki_text=wiki_text,
+                open_windows=open_windows_text,
             )
 
             # Save the response alongside the fixture
@@ -311,8 +354,37 @@ async def run_analysis_cycle(
             if reasoning:
                 all_reasoning.append(reasoning)
                 log.info("Reasoning (%s): %s", batch_name, reasoning[:200])
-        except Exception:
+            # First successful batch resets the consecutive-failure counter
+            # so a long run of transients is followed by a clean slate.
+            global _consecutive_integrate_failures
+            _consecutive_integrate_failures = 0
+        except DejaError as err:
+            # Typed failure from llm_client — classify and report with
+            # escalation: silent for the first few transients, toast
+            # after the threshold.
+            _consecutive_integrate_failures += 1
+            visible = _consecutive_integrate_failures >= _CONSECUTIVE_FAIL_THRESHOLD
+            err.details.setdefault("batch", batch_name)
+            err.details.setdefault(
+                "consecutive_failures", _consecutive_integrate_failures
+            )
+            report_error(err, visible_to_user=visible)
+        except Exception as e:
+            # Untyped failure — wrap so it still flows through the
+            # two-sink reporter. Integrate is internal; keep invisible
+            # unless it's been failing repeatedly.
+            _consecutive_integrate_failures += 1
+            visible = _consecutive_integrate_failures >= _CONSECUTIVE_FAIL_THRESHOLD
+            wrapped = LLMError(
+                f"integrate {batch_name} batch failed: {type(e).__name__}: {e}",
+                details={
+                    "batch": batch_name,
+                    "exception_type": type(e).__name__,
+                    "consecutive_failures": _consecutive_integrate_failures,
+                },
+            )
             log.exception("integrate %s batch failed", batch_name)
+            report_error(wrapped, visible_to_user=visible)
 
     wiki_updates = all_wiki_updates
     reasoning = " | ".join(all_reasoning)
@@ -359,6 +431,25 @@ async def run_analysis_cycle(
     if analysis_marker:
         loop_ref.collector.save_analysis_marker(analysis_marker)
 
+    # Business-intelligence telemetry — one event per completed cycle
+    # with the counts the admin dashboard needs to measure engagement
+    # (cycles/day/user) + cost (via tasks_updates + wiki_updates as
+    # proxy for integrate load). No content, just counts.
+    try:
+        from deja.telemetry import track
+
+        track("cycle_completed", {
+            "cycle_id": cycle_id,
+            "trigger_kind": trigger_kind,
+            "signal_count": len(signal_items),
+            "kept_signal_count": len(kept_items),
+            "wiki_updates": len(wiki_updates),
+            "goal_actions": len(all_goal_actions),
+            "tasks_updates": sum(1 for u in all_tasks_updates),
+        })
+    except Exception:
+        log.debug("cycle telemetry failed", exc_info=True)
+
     loop_ref.last_analysis_time = datetime.now(timezone.utc)
     loop_ref._fire_stats_update()
     loop_ref.phase = "IDLE"
@@ -370,21 +461,18 @@ async def run_analysis_cycle(
 # ---------------------------------------------------------------------------
 
 def format_signals(items: list[dict]) -> str:
-    """Format structured signal dicts the same way the old text reader did.
+    """Format structured signal dicts for the integrate prompt.
 
-    Matches Observer.get_unanalyzed_signals_from_log so the Flash
-    prompt looks identical to before.
+    No per-signal truncation — Flash-Lite has a 1M token context
+    window. The signal text is whatever the collector captured.
     """
     lines: list[str] = []
     for d in items:
         ts = d.get("timestamp", "")
         source = d.get("source", "?")
         sender = d.get("sender", "?")
-        text = (d.get("text", "") or "")[:400]
+        text = d.get("text", "") or ""
         lines.append(f"[{ts}] [{source}] {sender}: {text}")
-    if len(lines) > 200:
-        older_count = len(lines) - 200
-        lines = [f"({older_count} older signals omitted)"] + lines[-200:]
     return "\n".join(lines)
 
 

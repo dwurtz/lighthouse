@@ -24,11 +24,13 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from deja.config import DEJA_HOME, QMD_COLLECTION, WIKI_DIR
 from deja.identity import load_user
 from deja.llm_client import GeminiClient
+from deja.observability import DejaError, report_error, request_scope
 from deja.prompts import load as load_prompt
 
 # Retrieval budget for the command classifier. Keep this tight: the
@@ -37,7 +39,12 @@ from deja.prompts import load as load_prompt
 # disambiguate entities ("amanda" -> Amanda Peffer) and ground parameter
 # extraction — not a full briefing.
 _CLASSIFIER_RETRIEVAL_LIMIT = 5
-_CLASSIFIER_RETRIEVAL_TIMEOUT_S = 5.0
+# BM25 search is ~0.3s; we deliberately avoid ``qmd query`` here
+# because its HyDE rerank issues an LLM call per search (~10s), which
+# dwarfs the whole command latency budget. BM25 disambiguates named
+# entities ("Amanda" → amanda-peffer.md) just fine — HyDE only helps
+# with conceptual/fuzzy queries we don't need for command dispatch.
+_CLASSIFIER_RETRIEVAL_TIMEOUT_S = 3.0
 
 log = logging.getLogger(__name__)
 
@@ -76,48 +83,43 @@ def _load_goals_text() -> str:
 
 
 async def _retrieve_relevant_pages(input_text: str) -> str:
-    """Run a best-effort hybrid QMD query against the raw user input.
+    """Run a BM25 search against the raw user input.
 
-    Returns a compact text block listing the top wiki hits, ready to
-    paste into the classifier prompt. Any failure (qmd missing, timeout,
-    empty index, etc.) yields ``"(none)"`` so the classifier still runs
-    — we never block command latency on retrieval. A 5-second hard
-    timeout protects against a hung qmd subprocess pinning the hot
-    path.
+    Returns the formatted text output from ``qmd search``. This is
+    explicitly BM25, not the hybrid ``qmd query`` path — see the
+    ``_CLASSIFIER_RETRIEVAL_TIMEOUT_S`` comment for rationale.
+    Raises ``RuntimeError`` on any failure so the classifier never
+    runs blind (silent fallback was how "draft email to Amanda"
+    previously failed — the model had no wiki context to resolve
+    her email address).
     """
     topic = (input_text or "").strip()
     if not topic:
         return "(none)"
 
     def _run() -> str:
-        # Import lazily so a busted mcp_server module can't break command
-        # classification at import time.
-        from deja.mcp_server import _qmd_query
+        import subprocess
 
-        return _qmd_query(
-            topic,
-            collection=QMD_COLLECTION,
-            limit=_CLASSIFIER_RETRIEVAL_LIMIT,
-        )
-
-    try:
-        result = await asyncio.wait_for(
-            asyncio.to_thread(_run),
+        cmd = [
+            "qmd", "search", topic,
+            "-n", str(_CLASSIFIER_RETRIEVAL_LIMIT),
+            "-c", QMD_COLLECTION,
+        ]
+        r = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
             timeout=_CLASSIFIER_RETRIEVAL_TIMEOUT_S,
         )
-    except asyncio.TimeoutError:
-        log.warning(
-            "command classifier retrieval timed out after %.1fs; "
-            "classifying without wiki context",
-            _CLASSIFIER_RETRIEVAL_TIMEOUT_S,
-        )
-        return "(none)"
-    except Exception:
-        log.debug("command classifier retrieval failed", exc_info=True)
-        return "(none)"
+        if r.returncode != 0:
+            raise RuntimeError(
+                f"qmd search failed (rc={r.returncode}): "
+                f"{r.stderr[:400] or '(no stderr)'}"
+            )
+        return (r.stdout or "").strip()
 
-    text = (result or "").strip()
-    return text or "(none)"
+    result = await asyncio.to_thread(_run)
+    return result or "(none)"
 
 
 async def _classify(input_text: str) -> tuple[dict, float, int]:
@@ -238,6 +240,22 @@ def _translate_action_params(action_type: str, params: dict) -> dict:
         to = p.get("to")
         if isinstance(to, list):
             p["to"] = ", ".join(str(x) for x in to)
+        # Validate here rather than silently falling through to
+        # goal_actions._draft_email, which logs a warning and returns.
+        # When classifier retrieval fails and the model can't resolve
+        # the recipient, the user deserves an explicit error so they
+        # know to re-try or disambiguate.
+        if not p.get("to"):
+            raise HTTPException(
+                400,
+                "draft_email: recipient unresolved — classifier had no "
+                "wiki context for entity lookup. Retry the command or "
+                "name the recipient explicitly.",
+            )
+        if not p.get("subject"):
+            raise HTTPException(
+                400, "draft_email: missing subject"
+            )
 
     return p
 
@@ -429,8 +447,34 @@ def _dispatch_context(payload: dict) -> dict:
 
 
 @router.post("/api/command")
-async def handle_command(body: CommandRequest) -> CommandResponse:
-    """Classify and dispatch a user command. Single turn, no history."""
+async def handle_command(body: CommandRequest):
+    """Classify and dispatch a user command. Single turn, no history.
+
+    Wrapped in a ``request_scope`` so every log line, audit entry, and
+    LLM call made while handling this request shares one correlation
+    id. Any :class:`DejaError` bubbling up is reported to both error
+    sinks (visible to the user) and returned as a JSON 500 so the UI
+    can surface the typed code instead of a raw stack trace.
+    """
+    with request_scope() as req_id:
+        try:
+            return await _handle_command_inner(body, req_id)
+        except DejaError as err:
+            report_error(err, visible_to_user=True)
+            return JSONResponse(
+                status_code=500,
+                content={
+                    "ok": False,
+                    "request_id": req_id,
+                    "code": err.code,
+                    "error": err.user_message,
+                },
+            )
+
+
+async def _handle_command_inner(
+    body: "CommandRequest", req_id: str
+) -> CommandResponse:
     log.info(
         "command received (source=%s, chars=%d)", body.source, len(body.input)
     )
@@ -478,6 +522,21 @@ async def handle_command(body: CommandRequest) -> CommandResponse:
         )
     except Exception:
         log.debug("audit.record failed for command", exc_info=True)
+
+    # Business-intelligence telemetry — proxy sees cmd type + source
+    # (voice vs typed) + input length. No input content.
+    try:
+        from deja.telemetry import track
+
+        track("command_dispatched", {
+            "cmd_type": cmd_type or "unknown",
+            "source": body.source or "command",
+            "input_chars": len(body.input or ""),
+            "latency_ms": latency_ms,
+            "cost_usd": round(cost, 6),
+        })
+    except Exception:
+        log.debug("command telemetry failed", exc_info=True)
 
     # Context-type commands fire an immediate integrate trigger with
     # cross-modal batch merging so the new signal gets processed against

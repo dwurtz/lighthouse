@@ -65,7 +65,88 @@ class TelemetryRequest(BaseModel):
 
 @app.get("/v1/health")
 async def health():
-    return {"status": "ok", "version": "0.2.0"}
+    """Check proxy reachability + every dependency that could break LLM calls.
+
+    Returns ``{"status": "ok"|"degraded"|"broken", "checks": {...}, "version": ...}``.
+    Individual checks are fast (<500ms total typical) and never raise —
+    the point is to surface dependency failure as a structured response
+    the client can act on, not to fail the health probe itself.
+
+    Status aggregation:
+      - ``broken``   — any check failed in a way that blocks LLM calls
+                       (no Gemini key, no Groq key, DB unreachable).
+      - ``degraded`` — something slow or a non-critical check failed
+                       (Gemini reachable but taking >2s).
+      - ``ok``       — everything passes.
+    """
+    import os
+    import time
+    import httpx
+
+    checks: dict = {}
+    t0 = time.monotonic()
+
+    # 1. Gemini key configured — without this every /v1/generate fails
+    gemini_key = os.environ.get("GEMINI_API_KEY", "")
+    checks["gemini_key"] = {
+        "ok": bool(gemini_key),
+        "detail": "configured" if gemini_key else "missing GEMINI_API_KEY env var",
+    }
+
+    # 2. Groq key configured — used by voice polish + triage
+    groq_key = os.environ.get("GROQ_API_KEY", "")
+    checks["groq_key"] = {
+        "ok": bool(groq_key),
+        "detail": "configured" if groq_key else "missing GROQ_API_KEY env var",
+    }
+
+    # 3. Telemetry DB reachable + writable
+    try:
+        from db import _get_db
+        db = _get_db()
+        db.execute("SELECT 1").fetchone()
+        db.close()
+        checks["telemetry_db"] = {"ok": True, "detail": "reachable"}
+    except Exception as e:
+        checks["telemetry_db"] = {"ok": False, "detail": f"{type(e).__name__}: {e}"[:200]}
+
+    # 4. Gemini endpoint reachability (HEAD request, 3s timeout)
+    #    Fast probe — if Gemini's HTTP endpoint is down or slow, every
+    #    subsequent /v1/generate call will fail or stall. Doing this
+    #    check in the health path means the client can see the problem
+    #    immediately and surface it via the error toast.
+    gemini_t0 = time.monotonic()
+    try:
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            r = await client.get("https://generativelanguage.googleapis.com/")
+        gemini_ms = int((time.monotonic() - gemini_t0) * 1000)
+        reachable = 200 <= r.status_code < 500  # 404 is fine, it means we hit the server
+        checks["gemini_endpoint"] = {
+            "ok": reachable,
+            "detail": f"{r.status_code} in {gemini_ms}ms",
+            "latency_ms": gemini_ms,
+        }
+    except Exception as e:
+        checks["gemini_endpoint"] = {
+            "ok": False,
+            "detail": f"{type(e).__name__}: {e}"[:200],
+        }
+
+    # Aggregate status
+    critical = {"gemini_key", "telemetry_db", "gemini_endpoint"}
+    broken = any(not checks[k]["ok"] for k in critical)
+    degraded = (
+        not broken
+        and checks["gemini_endpoint"].get("latency_ms", 0) > 2000
+    ) or not checks["groq_key"]["ok"]
+    status = "broken" if broken else ("degraded" if degraded else "ok")
+
+    return {
+        "status": status,
+        "version": "0.2.0",
+        "checks": checks,
+        "total_ms": int((time.monotonic() - t0) * 1000),
+    }
 
 
 def _user_feature_flags(email: str | None) -> dict:
@@ -266,7 +347,7 @@ async def telemetry_endpoint(
 import os
 import html as _html
 from fastapi.responses import HTMLResponse
-from db import search_events, get_stats
+from db import search_events, get_stats, get_user_detail
 
 def _esc(s) -> str:
     """HTML-escape user-controlled strings for safe rendering."""
@@ -290,7 +371,12 @@ async def admin_dashboard(key: str = ""):
 
     users_html = ""
     for u in stats["active_users"]:
-        users_html += f"<tr><td>{_esc(u['user_email'])}</td><td>{u['event_count']}</td><td>{_esc(u['last_seen'][:19])}</td></tr>"
+        email = u["user_email"]
+        users_html += (
+            f"<tr><td><a href=\"/admin/user?key={_esc(key)}&email={_esc(email)}\">{_esc(email)}</a></td>"
+            f"<td>{u['event_count']}</td>"
+            f"<td>{_esc(u['last_seen'][:19])}</td></tr>"
+        )
 
     return HTMLResponse(f"""<!DOCTYPE html>
 <html><head><title>Déjà Admin</title>
@@ -371,5 +457,79 @@ async def admin_search(key: str = "", q: str = "", event: str = ""):
 
 <p>{len(results)} result(s)</p>
 <table><tr><th>Time</th><th>Event</th><th>User</th><th>Request ID</th><th>Details</th></tr>{rows_html}</table>
+
+</body></html>""")
+
+
+@app.get("/admin/user")
+async def admin_user_detail(key: str = "", email: str = ""):
+    """Per-user drill-down — aggregate counts, event breakdown, timeline.
+
+    Accessed by clicking an email on the main dashboard. Shows everything
+    the proxy knows about one user without requiring a free-text search.
+    """
+    if not ADMIN_KEY or key != ADMIN_KEY:
+        return HTMLResponse("<h1>Unauthorized</h1>", status_code=401)
+    if not email:
+        return HTMLResponse("<h1>Missing email</h1>", status_code=400)
+
+    detail = get_user_detail(email, limit=100)
+    profile = detail["profile"]
+
+    if not profile or not profile.get("total_events"):
+        return HTMLResponse(f"<h1>No events for {_esc(email)}</h1>", status_code=404)
+
+    first_seen = profile.get("first_seen", "")[:19]
+    last_seen = profile.get("last_seen", "")[:19]
+
+    breakdown_html = ""
+    for row in detail["event_breakdown"]:
+        breakdown_html += f"<tr><td>{_esc(row['event'])}</td><td>{row['count']}</td></tr>"
+
+    timeline_html = ""
+    for e in detail["recent_events"]:
+        timeline_html += (
+            f"<tr><td>{_esc(e['timestamp'][:19])}</td>"
+            f"<td>{_esc(e['event'])}</td>"
+            f"<td>{_esc(e['request_id']) or '—'}</td>"
+            f"<td><small>{_esc((e['properties'] or '')[:200])}</small></td></tr>"
+        )
+
+    return HTMLResponse(f"""<!DOCTYPE html>
+<html><head><title>Déjà Admin — {_esc(email)}</title>
+<style>
+  body {{ font-family: -apple-system, sans-serif; max-width: 1100px; margin: 40px auto; background: #111; color: #eee; padding: 0 20px; }}
+  h1 {{ color: #fff; }} h2 {{ color: #aaa; margin-top: 32px; }}
+  a {{ color: #8cf; }}
+  .stats {{ display: flex; gap: 16px; margin: 20px 0; flex-wrap: wrap; }}
+  .stat {{ background: #222; padding: 14px 20px; border-radius: 8px; min-width: 110px; }}
+  .stat-num {{ font-size: 22px; font-weight: bold; color: #fff; }}
+  .stat-label {{ font-size: 11px; color: #888; margin-top: 4px; }}
+  table {{ width: 100%; border-collapse: collapse; margin-top: 8px; }}
+  th, td {{ text-align: left; padding: 8px 10px; border-bottom: 1px solid #333; font-size: 12px; vertical-align: top; }}
+  th {{ color: #888; font-weight: 600; }}
+  .meta {{ color: #888; font-size: 13px; margin-top: 8px; }}
+  .error {{ color: #f66; }}
+</style></head><body>
+<h1><a href="/admin?key={_esc(key)}">← Déjà Admin</a> — {_esc(email)}</h1>
+<div class="meta">
+  Client: <strong>{_esc(detail['current_version'])}</strong> ·
+  First seen: {_esc(first_seen)} ·
+  Last seen: {_esc(last_seen)}
+</div>
+
+<div class="stats">
+  <div class="stat"><div class="stat-num">{profile.get('total_events', 0)}</div><div class="stat-label">Total events</div></div>
+  <div class="stat"><div class="stat-num">{profile.get('cycles', 0)}</div><div class="stat-label">Cycles run</div></div>
+  <div class="stat"><div class="stat-num">{profile.get('commands', 0)}</div><div class="stat-label">Commands</div></div>
+  <div class="stat"><div class="stat-num">{profile.get('llm_calls', 0)}</div><div class="stat-label">LLM calls</div></div>
+  <div class="stat"><div class="stat-num error">{profile.get('errors', 0)}</div><div class="stat-label">Errors</div></div>
+</div>
+
+<h2>Event breakdown</h2>
+<table><tr><th>Event</th><th>Count</th></tr>{breakdown_html}</table>
+
+<h2>Recent events (last 100)</h2>
+<table><tr><th>Time</th><th>Event</th><th>Request ID</th><th>Details</th></tr>{timeline_html}</table>
 
 </body></html>""")

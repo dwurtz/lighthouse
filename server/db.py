@@ -91,6 +91,62 @@ def search_events(
     return [dict(r) for r in rows]
 
 
+def get_user_detail(email: str, limit: int = 100) -> dict:
+    """Per-user summary + recent event timeline for the admin drill-down.
+
+    Returns aggregate counts, the event-type breakdown, and a timeline
+    of the N most recent events. Drives the admin dashboard's user
+    detail page.
+    """
+    db = _get_db()
+
+    profile = db.execute(
+        """SELECT
+             MIN(timestamp) as first_seen,
+             MAX(timestamp) as last_seen,
+             COUNT(*) as total_events,
+             COUNT(DISTINCT client_version) as version_count,
+             SUM(CASE WHEN event = 'error' THEN 1 ELSE 0 END) as errors,
+             SUM(CASE WHEN event = 'llm_call' THEN 1 ELSE 0 END) as llm_calls,
+             SUM(CASE WHEN event = 'cycle_completed' THEN 1 ELSE 0 END) as cycles,
+             SUM(CASE WHEN event = 'command_dispatched' THEN 1 ELSE 0 END) as commands
+           FROM events WHERE user_email = ?""",
+        (email,),
+    ).fetchone()
+
+    # Most recent client_version this user reported — useful to know
+    # which build they're on when debugging support issues.
+    version_row = db.execute(
+        """SELECT client_version FROM events
+           WHERE user_email = ? AND client_version IS NOT NULL AND client_version != ''
+           ORDER BY timestamp DESC LIMIT 1""",
+        (email,),
+    ).fetchone()
+
+    event_breakdown = db.execute(
+        """SELECT event, COUNT(*) as count FROM events
+           WHERE user_email = ?
+           GROUP BY event ORDER BY count DESC LIMIT 20""",
+        (email,),
+    ).fetchall()
+
+    recent = db.execute(
+        """SELECT * FROM events WHERE user_email = ?
+           ORDER BY timestamp DESC LIMIT ?""",
+        (email, limit),
+    ).fetchall()
+
+    db.close()
+
+    return {
+        "email": email,
+        "profile": dict(profile) if profile else {},
+        "current_version": version_row["client_version"] if version_row else "unknown",
+        "event_breakdown": [dict(r) for r in event_breakdown],
+        "recent_events": [dict(r) for r in recent],
+    }
+
+
 def get_stats() -> dict:
     """Get summary stats for the dashboard."""
     db = _get_db()
