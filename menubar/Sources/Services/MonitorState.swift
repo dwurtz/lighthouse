@@ -1,8 +1,10 @@
-import SwiftUI
 import AppKit
-import Foundation
+import ApplicationServices
+import AVFoundation
 import CoreGraphics
+import Foundation
 import ServiceManagement
+import SwiftUI
 
 // MARK: - Monitor State
 
@@ -62,6 +64,8 @@ class MonitorState: ObservableObject {
     // Permission state — checked on launch and periodically
     @Published var hasScreenRecording: Bool = false
     @Published var hasFullDiskAccess: Bool = false
+    @Published var hasAccessibility: Bool = false
+    @Published var hasMicrophone: Bool = false
     @Published var missingPermissions: [String] = []
     @Published var micBusy: Bool = false
     @Published var setupNeeded: Bool = false
@@ -303,6 +307,12 @@ class MonitorState: ObservableObject {
             self?.hasFullDiskAccess = fdaOK
             self?.missingPermissions = missing
         }
+        // Accessibility can be probed directly via AXIsProcessTrusted.
+        // Microphone has no non-prompting probe on macOS — AVCaptureDevice
+        // authorizationStatus returns the cached decision the system made.
+        self.hasAccessibility = AXIsProcessTrusted()
+        let micStatus = AVCaptureDevice.authorizationStatus(for: .audio)
+        self.hasMicrophone = (micStatus == .authorized)
     }
 
     // MARK: - Backfill Delegation
@@ -358,8 +368,34 @@ class MonitorState: ObservableObject {
         guard screenshotTimer == nil else { return }
         keystrokeMonitor.start()
         captureScreenshot()
-        screenshotTimer = Timer.scheduledTimer(withTimeInterval: 6.0, repeats: true) { [weak self] _ in
+        rescheduleScreenshotTimer()
+
+        // On app focus change, accelerate the next capture. Instead of
+        // adding a separate capture (which could double-fire), we
+        // reschedule the existing timer to fire in 0.5s — just enough
+        // for the new window to finish drawing. The 6s cadence resumes
+        // after that accelerated tick.
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.rescheduleScreenshotTimer(delay: 0.5)
+        }
+    }
+
+    /// (Re)schedule the repeating screenshot timer. When called with a
+    /// short ``delay`` (e.g. 0.5s after a focus change), the NEXT tick
+    /// fires sooner than the normal 6s cadence. Subsequent ticks resume
+    /// at the standard interval.
+    private func rescheduleScreenshotTimer(delay: TimeInterval = 6.0) {
+        screenshotTimer?.invalidate()
+        screenshotTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
             self?.captureScreenshot()
+            // Resume normal 6s cadence after the accelerated tick
+            self?.screenshotTimer = Timer.scheduledTimer(withTimeInterval: 6.0, repeats: true) { [weak self] _ in
+                self?.captureScreenshot()
+            }
         }
     }
 

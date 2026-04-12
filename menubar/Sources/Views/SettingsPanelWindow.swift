@@ -10,12 +10,10 @@ class SettingsPanelWindow: NSPanel {
     init(monitor: MonitorState) {
         super.init(
             contentRect: NSRect(x: 0, y: 0, width: 520, height: 620),
-            styleMask: [.borderless, .nonactivatingPanel, .titled, .closable],
+            styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
-        titleVisibility = .hidden
-        titlebarAppearsTransparent = true
         level = .floating
         isOpaque = false
         backgroundColor = .clear

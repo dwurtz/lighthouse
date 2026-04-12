@@ -100,6 +100,22 @@ struct SettingsView: View {
                             granted: monitor.hasFullDiskAccess,
                             settingsURL: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"
                         )
+
+                        permissionRow(
+                            icon: "accessibility",
+                            title: "Accessibility",
+                            description: "Read window titles and global hotkeys",
+                            granted: monitor.hasAccessibility,
+                            settingsURL: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
+                        )
+
+                        permissionRow(
+                            icon: "mic",
+                            title: "Microphone",
+                            description: "Dictate commands and record meeting transcripts",
+                            granted: monitor.hasMicrophone,
+                            settingsURL: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone"
+                        )
                     }
                     .padding(16)
 
@@ -120,19 +136,6 @@ struct SettingsView: View {
                                 Image(systemName: "folder")
                                     .font(.system(size: 12))
                                 Text("Open Wiki in Finder")
-                                    .font(.system(size: 13))
-                            }
-                            .foregroundColor(.white.opacity(0.7))
-                        }
-                        .buttonStyle(.plain)
-
-                        Button(action: {
-                            monitor.restart()
-                        }) {
-                            HStack(spacing: 6) {
-                                Image(systemName: "arrow.clockwise")
-                                    .font(.system(size: 12))
-                                Text("Restart Monitor")
                                     .font(.system(size: 13))
                             }
                             .foregroundColor(.white.opacity(0.7))
@@ -350,26 +353,37 @@ struct SettingsView: View {
 
             Spacer()
 
-            if granted {
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 14))
-                    .foregroundColor(.green)
-            } else {
-                Button(action: {
-                    if let url = URL(string: settingsURL) {
-                        NSWorkspace.shared.open(url)
-                    }
-                }) {
-                    Text("Grant")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 4)
-                        .background(Color.white.opacity(0.15))
-                        .clipShape(RoundedRectangle(cornerRadius: 6))
+            // Every row has the same right-side affordance: a button
+            // that opens System Settings for this permission. Label
+            // varies by state so "Grant" is the call-to-action when
+            // not yet granted, and "Manage" lets the user revoke
+            // when it is granted. Consistent width/shape across both
+            // states keeps the column aligned.
+            Button(action: {
+                if let url = URL(string: settingsURL) {
+                    NSWorkspace.shared.open(url)
                 }
-                .buttonStyle(.plain)
+            }) {
+                HStack(spacing: 4) {
+                    if granted {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 11))
+                            .foregroundColor(.green)
+                    }
+                    Text(granted ? "Manage" : "Grant")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(.white.opacity(granted ? 0.75 : 1.0))
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .background(Color.white.opacity(granted ? 0.06 : 0.15))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(Color.white.opacity(granted ? 0.10 : 0.0), lineWidth: 1)
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 6))
             }
+            .buttonStyle(.plain)
         }
     }
 }
