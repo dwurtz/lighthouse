@@ -55,50 +55,12 @@ def test_check_wiki_missing(isolated_home):
 def test_check_wiki_complete(isolated_home):
     _, wiki = isolated_home
     (wiki / "index.md").write_text("index")
-    prompts = wiki / "prompts"
-    prompts.mkdir()
-    # CLAUDE.md was removed; its rules live inline in integrate.md/onboard.md
-    # now. The required prompt list must match health_check.py's REQUIRED
-    # tuple exactly (any drift is a test/code mismatch worth catching).
-    for name in (
-        "integrate.md",
-        "dedup_confirm.md",
-        "contradict.md",
-        "describe_screen.md",
-        "prefilter.md",
-        "command.md",
-        "onboard.md",
-        "query.md",
-    ):
-        (prompts / name).write_text("prompt")
+    # Prompts are bundled inside the package now — no wiki/prompts/
+    # directory to check. The health check only verifies index.md + git.
     (wiki / ".git").mkdir()
 
     results = _check_wiki()
     assert all(r.ok for r in results), [r for r in results if not r.ok]
-
-
-def test_check_wiki_missing_prompt(isolated_home):
-    _, wiki = isolated_home
-    (wiki / "index.md").write_text("index")
-    prompts = wiki / "prompts"
-    prompts.mkdir()
-    # Deliberately missing prefilter.md
-    for name in (
-        "integrate.md",
-        "dedup_confirm.md",
-        "contradict.md",
-        "describe_screen.md",
-        "command.md",
-        "onboard.md",
-        "query.md",
-    ):
-        (prompts / name).write_text("prompt")
-    (wiki / ".git").mkdir()
-
-    results = _check_wiki()
-    prompts_result = next(r for r in results if r.name == "wiki/prompts/")
-    assert prompts_result.ok is False
-    assert "prefilter.md" in prompts_result.detail
 
 
 def test_check_server_direct_mode(monkeypatch):

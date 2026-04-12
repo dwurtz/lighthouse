@@ -223,25 +223,13 @@ def _run_configure() -> None:
     print("=" * 60)
     print()
 
-    # --- 1. Wiki layout + default prompts ---
+    # --- 1. Wiki layout ---
     print("[1/4] Wiki layout")
     print(f"  wiki lives at: {WIKI_DIR}")
     WIKI_DIR.mkdir(parents=True, exist_ok=True)
     (WIKI_DIR / "people").mkdir(exist_ok=True)
     (WIKI_DIR / "projects").mkdir(exist_ok=True)
-    (WIKI_DIR / "prompts").mkdir(exist_ok=True)
-
-    # Copy bundled default prompts if missing
-    from pathlib import Path
-    repo_defaults = Path(__file__).parent / "default_assets"
-    if repo_defaults.is_dir():
-        for src in repo_defaults.glob("prompts/*.md"):
-            dst = WIKI_DIR / "prompts" / src.name
-            if not dst.exists():
-                dst.write_text(src.read_text())
-                print(f"  created prompts/{src.name}")
-    else:
-        print(f"  (default assets not found at {repo_defaults} — skipping defaults)")
+    # Prompts are bundled inside the package — no wiki copy needed.
 
     # Ensure the wiki is a git repo
     try:

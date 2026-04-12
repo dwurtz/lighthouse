@@ -92,36 +92,10 @@ def _check_wiki() -> list[CheckResult]:
             fix=f"Create {p} — the monitor cannot run without the wiki index.",
         ))
 
-    # Required prompt files
-    prompts_dir = WIKI_DIR / "prompts"
-    if not prompts_dir.exists():
-        results.append(CheckResult(
-            name="wiki/prompts/",
-            ok=False,
-            detail="missing",
-            fix=f"Create {prompts_dir} and populate with integrate.md, dedup_confirm.md, describe_screen.md, prefilter.md, command.md, onboard.md.",
-        ))
-    else:
-        required = (
-            "integrate.md",
-            "dedup_confirm.md",
-            "contradict.md",
-            "describe_screen.md",
-            "prefilter.md",
-            "command.md",
-            "onboard.md",
-            "query.md",
-        )
-        missing = [n for n in required if not (prompts_dir / n).exists()]
-        if missing:
-            results.append(CheckResult(
-                name="wiki/prompts/",
-                ok=False,
-                detail=f"missing files: {', '.join(missing)}",
-                fix=f"Recreate the missing prompt files in {prompts_dir}.",
-            ))
-        else:
-            results.append(CheckResult(name="wiki/prompts/", ok=True, detail=f"{len(required)} files", fix=""))
+    # Prompts are bundled inside the package — no wiki directory check
+    # needed. ``deja.prompts.load()`` reads from ``default_assets/``
+    # directly, so missing prompts surface as a packaging bug at call
+    # time, not a wiki-health problem.
 
     # Git repo
     if (WIKI_DIR / ".git").exists():

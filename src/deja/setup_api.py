@@ -140,7 +140,7 @@ def set_identity(body: dict) -> dict:
 
     # Initialize wiki directory structure
     WIKI_DIR.mkdir(parents=True, exist_ok=True)
-    for subdir in ["people", "projects", "events", "prompts"]:
+    for subdir in ["people", "projects", "events"]:
         (WIKI_DIR / subdir).mkdir(exist_ok=True)
 
     # Create self-page
@@ -153,23 +153,9 @@ def set_identity(body: dict) -> dict:
             f"The user behind Deja.\n"
         )
 
-    # Copy default prompts. Missing source files are a packaging bug —
-    # fail loudly so the user sees the real problem instead of running
-    # on half-installed defaults.
-    import importlib.resources as pkg_resources
-    prompts_dir = WIKI_DIR / "prompts"
-    for prompt_name in ["integrate", "dedup_confirm", "contradict", "describe_screen", "prefilter", "command", "onboard", "query"]:
-        dest = prompts_dir / f"{prompt_name}.md"
-        if dest.exists():
-            continue
-        src = pkg_resources.files("deja") / "default_assets" / "prompts" / f"{prompt_name}.md"
-        if not src.is_file():
-            raise RuntimeError(
-                f"Packaging error: default_assets/prompts/{prompt_name}.md is "
-                f"missing from the deja package. Fix the source tree or rebuild."
-            )
-        dest.write_text(src.read_text())
-        log.info("Copied default prompt: %s", prompt_name)
+    # Prompts are bundled inside the package — no wiki copy needed.
+    # ``deja.prompts.load()`` reads from ``default_assets/prompts/``
+    # directly, so Sparkle updates deliver new prompts automatically.
 
     # Create goals.md if not present
     goals = WIKI_DIR / "goals.md"

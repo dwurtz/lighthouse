@@ -110,7 +110,6 @@ def _extract_placeholders(text: str) -> set[str]:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.real_wiki  # needs real prompts dir, not the isolated tmp
 @pytest.mark.parametrize("name", sorted(EXPECTED_PLACEHOLDERS.keys()))
 def test_prompt_placeholders_match_expected(name):
     """Every bundled prompt's placeholders must match the caller contract.
@@ -118,6 +117,9 @@ def test_prompt_placeholders_match_expected(name):
     If this fails after a prompt edit, either (a) the edit added a new
     token and the caller needs to be updated, or (b) the edit removed
     a token and the expected set here needs to be updated.
+
+    No longer ``real_wiki``-gated: prompts are bundled inside the
+    package, so this test reads the bundled copy directly.
     """
     bundled = BUNDLED_PROMPTS_DIR / f"{name}.md"
     assert bundled.exists(), (
@@ -135,7 +137,6 @@ def test_prompt_placeholders_match_expected(name):
     )
 
 
-@pytest.mark.real_wiki
 @pytest.mark.parametrize("name", sorted(EXPECTED_PLACEHOLDERS.keys()))
 def test_prompt_loads_and_formats_cleanly(name):
     """``load_prompt(name).format(...)`` must succeed with the expected kwargs.
@@ -144,6 +145,9 @@ def test_prompt_loads_and_formats_cleanly(name):
     braces, unmatched placeholder quoting, etc. A template that passes
     the placeholder-set check above can still explode here if there's
     a stray ``{`` in a JSON example that wasn't properly escaped.
+
+    No longer ``real_wiki``-gated: prompts are bundled inside the
+    package now, not read from ``~/Deja/prompts/``.
     """
     template = load_prompt(name)
     dummy_kwargs = {key: f"(test-{key})" for key in EXPECTED_PLACEHOLDERS[name]}
@@ -159,31 +163,6 @@ def test_prompt_loads_and_formats_cleanly(name):
     assert "}}" not in rendered
 
 
-@pytest.mark.real_wiki
-def test_bundled_and_live_prompts_are_identical():
-    """Every bundled prompt must match the live ``~/Deja/prompts`` copy.
-
-    Setup copies bundled defaults on first run but ``if dest.exists():
-    continue`` — so on upgrade, the live copy can silently drift from
-    the bundled version. We've been bitten by this before (the integrate
-    events rewrite + the cp command that overwrote it). This test
-    catches drift before it matters.
-    """
-    live_dir = Path.home() / "Deja" / "prompts"
-    if not live_dir.exists():
-        pytest.skip("no live ~/Deja/prompts — fresh install or test-only env")
-
-    mismatches: list[str] = []
-    for name in EXPECTED_PLACEHOLDERS.keys():
-        bundled = BUNDLED_PROMPTS_DIR / f"{name}.md"
-        live = live_dir / f"{name}.md"
-        if not bundled.exists() or not live.exists():
-            continue
-        if bundled.read_text() != live.read_text():
-            mismatches.append(name)
-
-    assert not mismatches, (
-        f"Live wiki prompts have drifted from bundled defaults: {mismatches}. "
-        f"Re-sync with `cp src/deja/default_assets/prompts/*.md ~/Deja/prompts/` "
-        f"or investigate which side is authoritative before shipping."
-    )
+    # test_bundled_and_live_prompts_are_identical removed: prompts are
+    # now bundled inside the package and loaded from default_assets/
+    # directly. There is no ~/Deja/prompts/ copy to drift from.
