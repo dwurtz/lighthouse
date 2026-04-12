@@ -39,7 +39,6 @@ def isolated_home(request, monkeypatch, tmp_path):
     # Patch modules that cached the paths at import time.
     import deja.config as config
     monkeypatch.setattr(config, "DEJA_HOME", home)
-    monkeypatch.setattr(config, "LIGHTHOUSE_HOME", home)  # back-compat alias
     monkeypatch.setattr(config, "WIKI_DIR", wiki)
 
     import deja.wiki as wiki_mod
