@@ -3,7 +3,7 @@
 import time
 import logging
 
-from fastapi import FastAPI, Request, Header, File, UploadFile
+from fastapi import FastAPI, Request, Header, File, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -58,6 +58,18 @@ class ChatRequest(BaseModel):
 class TelemetryRequest(BaseModel):
     event: str
     properties: dict = {}
+    client_version: str = "unknown"
+
+
+class DiagnosticRequest(BaseModel):
+    """Log bundle uploaded by the desktop client for support/debugging.
+
+    ``bundle`` is a plain-text concatenation of deja.log, errors.jsonl,
+    audit.jsonl, Swift ``log show`` output, and system metadata. Capped
+    at 2MB server-side; client trims before sending.
+    """
+    bundle: str
+    note: str = ""
     client_version: str = "unknown"
 
 
@@ -365,6 +377,46 @@ async def telemetry_endpoint(
     return {"status": "ok"}
 
 
+MAX_DIAGNOSTIC_BYTES = 2 * 1024 * 1024  # 2MB — generous but bounded
+
+
+@app.post("/v1/diagnostics")
+@limiter.limit("10/minute")
+async def upload_diagnostic(
+    request: Request,
+    body: DiagnosticRequest,
+    authorization: str = Header(...),
+):
+    """Accept a diagnostic bundle from the desktop client and store it.
+
+    Replaces the old mailto-based "Send Logs" flow — email is insecure
+    and lossy. Clients bundle their logs, the server stores them keyed
+    by a UUID + user email, and admins view them via
+    ``/admin/diagnostic/{id}``. Returns ``{id}`` so the user can share
+    the ID with support when filing a ticket.
+    """
+    import uuid
+    token = authorization.removeprefix("Bearer ").strip()
+    user = await validate_token(token)
+
+    if len(body.bundle.encode("utf-8")) > MAX_DIAGNOSTIC_BYTES:
+        raise HTTPException(status_code=413, detail="bundle too large")
+
+    diag_id = uuid.uuid4().hex[:16]
+    store_diagnostic(
+        diag_id=diag_id,
+        user_email=user.get("email"),
+        client_version=body.client_version,
+        note=body.note[:500],
+        bundle=body.bundle,
+    )
+    logger.info(
+        "diagnostic stored id=%s user=%s size=%d",
+        diag_id, user.get("email"), len(body.bundle),
+    )
+    return {"id": diag_id}
+
+
 # -- Admin Dashboard ----------------------------------------------------------
 
 import base64
@@ -376,7 +428,7 @@ import time as _time
 import html as _html
 from fastapi import Cookie
 from fastapi.responses import HTMLResponse, RedirectResponse
-from db import search_events, get_stats, get_user_detail
+from db import search_events, get_stats, get_user_detail, store_diagnostic, list_diagnostics, get_diagnostic
 
 def _esc(s) -> str:
     """HTML-escape user-controlled strings for safe rendering."""
@@ -594,6 +646,7 @@ async def admin_dashboard(deja_admin_session: str | None = Cookie(default=None))
 <div style="display:flex;align-items:baseline;gap:16px;">
   <h1 style="margin:0;">Déjà Admin</h1>
   <div style="color:#888;font-size:12px;flex:1;">Signed in as <strong>{_esc(admin_email)}</strong></div>
+  <a href="/admin/diagnostics" style="color:#888;font-size:12px;">Diagnostics</a>
   <a href="/admin/logout" style="color:#888;font-size:12px;">Sign out</a>
 </div>
 
@@ -739,4 +792,77 @@ async def admin_user_detail(
 <h2>Recent events (last 100)</h2>
 <table><tr><th>Time</th><th>Event</th><th>Request ID</th><th>Details</th></tr>{timeline_html}</table>
 
+</body></html>""")
+
+
+@app.get("/admin/diagnostics")
+async def admin_diagnostics_list(
+    email: str = "",
+    deja_admin_session: str | None = Cookie(default=None),
+):
+    """List uploaded diagnostic bundles, optionally filtered by user."""
+    gate = _require_admin(deja_admin_session)
+    if isinstance(gate, HTMLResponse):
+        return gate
+
+    rows = list_diagnostics(limit=200, email=email or None)
+    rows_html = ""
+    for r in rows:
+        size_kb = int((r.get("size_bytes") or 0) / 1024)
+        rows_html += (
+            f"<tr><td>{_esc(r['timestamp'][:19])}</td>"
+            f"<td><a href=\"/admin/user?email={_esc(r['user_email'] or '')}\">{_esc(r['user_email']) or '—'}</a></td>"
+            f"<td>{_esc(r.get('client_version'))}</td>"
+            f"<td>{size_kb} KB</td>"
+            f"<td>{_esc((r.get('note') or '')[:80])}</td>"
+            f"<td><a href=\"/admin/diagnostic/{_esc(r['id'])}\">{_esc(r['id'])}</a></td></tr>"
+        )
+
+    heading = f" — {_esc(email)}" if email else ""
+    return HTMLResponse(f"""<!DOCTYPE html>
+<html><head><title>Déjà Admin — Diagnostics</title>
+<style>
+  body {{ font-family: -apple-system, sans-serif; max-width: 1100px; margin: 40px auto; background: #111; color: #eee; padding: 0 20px; }}
+  h1 {{ color: #fff; }} a {{ color: #8cf; }}
+  table {{ width: 100%; border-collapse: collapse; margin-top: 8px; }}
+  th, td {{ text-align: left; padding: 8px 10px; border-bottom: 1px solid #333; font-size: 12px; }}
+  th {{ color: #888; font-weight: 600; }}
+</style></head><body>
+<h1><a href="/admin">← Déjà Admin</a> — Diagnostics{heading}</h1>
+<p>{len(rows)} bundle(s)</p>
+<table><tr><th>Time</th><th>User</th><th>Client</th><th>Size</th><th>Note</th><th>ID</th></tr>{rows_html}</table>
+</body></html>""")
+
+
+@app.get("/admin/diagnostic/{diag_id}")
+async def admin_diagnostic_detail(
+    diag_id: str,
+    deja_admin_session: str | None = Cookie(default=None),
+):
+    """Render one uploaded diagnostic bundle as plain text."""
+    gate = _require_admin(deja_admin_session)
+    if isinstance(gate, HTMLResponse):
+        return gate
+
+    diag = get_diagnostic(diag_id)
+    if not diag:
+        return HTMLResponse(f"<h1>Not found: {_esc(diag_id)}</h1>", status_code=404)
+
+    return HTMLResponse(f"""<!DOCTYPE html>
+<html><head><title>Déjà Diagnostic {_esc(diag_id)}</title>
+<style>
+  body {{ font-family: -apple-system, sans-serif; max-width: 1100px; margin: 40px auto; background: #111; color: #eee; padding: 0 20px; }}
+  h1 {{ color: #fff; }} a {{ color: #8cf; }}
+  .meta {{ color: #888; font-size: 13px; margin: 8px 0 20px; }}
+  pre {{ background: #1a1a1a; padding: 16px; border-radius: 6px; font-size: 11px; line-height: 1.4; overflow-x: auto; white-space: pre-wrap; word-break: break-all; }}
+</style></head><body>
+<h1><a href="/admin/diagnostics">← Diagnostics</a> — {_esc(diag_id)}</h1>
+<div class="meta">
+  User: <strong>{_esc(diag.get('user_email')) or '—'}</strong> ·
+  Client: {_esc(diag.get('client_version'))} ·
+  Uploaded: {_esc(diag.get('timestamp', '')[:19])} ·
+  Size: {int((diag.get('size_bytes') or 0)/1024)} KB
+</div>
+{f'<p><strong>Note:</strong> {_esc(diag.get("note"))}</p>' if diag.get('note') else ''}
+<pre>{_esc(diag.get('bundle', ''))}</pre>
 </body></html>""")

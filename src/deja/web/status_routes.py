@@ -7,6 +7,7 @@ import json
 from datetime import datetime, timezone
 
 from fastapi import APIRouter
+from pydantic import BaseModel
 
 from deja import audit
 from deja.web.helpers import OBSERVATIONS_LOG
@@ -181,3 +182,112 @@ def get_activity(limit: int = 50) -> dict:
             }
         )
     return {"entries": entries}
+
+
+class DiagnosticUploadRequest(BaseModel):
+    note: str = ""
+
+
+@router.post("/api/diagnostics/upload")
+async def upload_diagnostics(body: DiagnosticUploadRequest) -> dict:
+    """Bundle local logs and ship them to the Deja proxy for support.
+
+    Replaces the old ``mailto:`` flow. Bundles:
+      * last 500 lines of ``~/.deja/deja.log``
+      * full ``~/.deja/errors.jsonl``
+      * last 200 lines of ``~/.deja/audit.jsonl``
+      * Swift side logs via ``log show --process Deja --last 10m``
+      * system + app metadata
+
+    POSTs the concatenated text bundle to ``{DEJA_API_URL}/v1/diagnostics``
+    authenticated with the user's OAuth token. Returns ``{"id": ...}``
+    which the user shares with support to look up the bundle via the
+    admin dashboard.
+    """
+    import subprocess
+    import platform
+    import httpx
+    from deja.auth import get_auth_token
+    from deja.config import DEJA_HOME
+    from deja.llm_client import DEJA_API_URL
+
+    def _tail(path, n):
+        try:
+            if not path.exists():
+                return f"(missing: {path})"
+            with open(path, "r", errors="replace") as f:
+                lines = f.readlines()
+            return "".join(lines[-n:])
+        except Exception as e:
+            return f"(read error: {e})"
+
+    def _full(path, max_bytes=200_000):
+        try:
+            if not path.exists():
+                return f"(missing: {path})"
+            data = path.read_text(errors="replace")
+            if len(data) > max_bytes:
+                data = "(truncated head)\n" + data[-max_bytes:]
+            return data
+        except Exception as e:
+            return f"(read error: {e})"
+
+    parts: list[str] = []
+    parts.append("=== metadata ===")
+    parts.append(f"now: {datetime.now(timezone.utc).isoformat()}")
+    parts.append(f"platform: {platform.platform()}")
+    parts.append(f"python: {platform.python_version()}")
+    if body.note:
+        parts.append(f"note: {body.note}")
+    parts.append("")
+
+    parts.append("=== deja.log (last 500 lines) ===")
+    parts.append(_tail(DEJA_HOME / "deja.log", 500))
+    parts.append("")
+
+    parts.append("=== errors.jsonl ===")
+    parts.append(_full(DEJA_HOME / "errors.jsonl"))
+    parts.append("")
+
+    parts.append("=== audit.jsonl (last 200 lines) ===")
+    parts.append(_tail(DEJA_HOME / "audit.jsonl", 200))
+    parts.append("")
+
+    parts.append("=== log show --process Deja --last 10m ===")
+    try:
+        r = subprocess.run(
+            ["log", "show", "--process", "Deja", "--last", "10m", "--info"],
+            capture_output=True, text=True, timeout=20,
+        )
+        parts.append(r.stdout or "(empty)")
+        if r.stderr:
+            parts.append(f"(stderr: {r.stderr[:500]})")
+    except Exception as e:
+        parts.append(f"(log show failed: {e})")
+
+    bundle = "\n".join(parts)
+    # Cap to server max (2MB) minus a safety margin.
+    max_chars = 1_900_000
+    if len(bundle) > max_chars:
+        bundle = bundle[-max_chars:]
+
+    token = get_auth_token()
+    if not token:
+        return {"error": "not signed in"}
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                f"{DEJA_API_URL}/v1/diagnostics",
+                headers={"Authorization": f"Bearer {token}"},
+                json={
+                    "bundle": bundle,
+                    "note": body.note,
+                    "client_version": "0.2.0",
+                },
+            )
+        if 200 <= resp.status_code < 300:
+            return resp.json()
+        return {"error": f"HTTP {resp.status_code}: {resp.text[:200]}"}
+    except Exception as e:
+        return {"error": str(e)[:300]}

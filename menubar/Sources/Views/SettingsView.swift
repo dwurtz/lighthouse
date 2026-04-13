@@ -9,6 +9,9 @@ import Sparkle
 struct SettingsView: View {
     @ObservedObject var monitor: MonitorState
 
+    @State private var diagnosticStatus: String = ""
+    @State private var diagnosticUploading: Bool = false
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
@@ -189,16 +192,24 @@ struct SettingsView: View {
                             .foregroundColor(.white.opacity(0.4))
                             .textCase(.uppercase)
 
-                        Button(action: { sendLogs() }) {
+                        Button(action: { uploadDiagnostics() }) {
                             HStack(spacing: 6) {
-                                Image(systemName: "envelope")
+                                Image(systemName: diagnosticUploading ? "arrow.up.circle" : "square.and.arrow.up")
                                     .font(.system(size: 12))
-                                Text("Send Logs to Déjà Support")
+                                Text(diagnosticUploading ? "Uploading diagnostics…" : "Upload Diagnostics to Déjà Support")
                                     .font(.system(size: 13))
                             }
                             .foregroundColor(.white.opacity(0.7))
                         }
                         .buttonStyle(.plain)
+                        .disabled(diagnosticUploading)
+
+                        if !diagnosticStatus.isEmpty {
+                            Text(diagnosticStatus)
+                                .font(.system(size: 11))
+                                .foregroundColor(.white.opacity(0.5))
+                                .textSelection(.enabled)
+                        }
                     }
                     .padding(16)
 
@@ -312,31 +323,32 @@ struct SettingsView: View {
         }
     }
 
-    // MARK: - Send Logs
+    // MARK: - Upload Diagnostics
 
-    func sendLogs() {
-        DispatchQueue.global(qos: .utility).async {
-            let home = NSHomeDirectory() + "/.deja"
-            var logContent = "=== Déjà Support Logs ===\n"
-            logContent += "Date: \(Date())\n"
-            logContent += "App version: 0.2.0\n"
-            logContent += "macOS: \(ProcessInfo.processInfo.operatingSystemVersionString)\n\n"
+    func uploadDiagnostics() {
+        diagnosticUploading = true
+        diagnosticStatus = ""
 
-            // Include deja.log (last 500 lines)
-            let logPath = home + "/deja.log"
-            if let data = FileManager.default.contents(atPath: logPath),
-               let text = String(data: data, encoding: .utf8) {
-                let lines = text.components(separatedBy: "\n")
-                let tail = lines.suffix(500).joined(separator: "\n")
-                logContent += "=== deja.log (last 500 lines) ===\n\(tail)\n\n"
-            }
-
-            // For now, compose an email with the logs attached
-            let encoded = logContent.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
-            let mailto = "mailto:david@trydeja.com?subject=Déjà%20Support%20Logs&body=\(encoded)"
-            if let mailURL = URL(string: String(mailto.prefix(50000))) {
-                DispatchQueue.main.async {
-                    NSWorkspace.shared.open(mailURL)
+        let payload = try? JSONSerialization.data(withJSONObject: ["note": ""])
+        localAPICall("/api/diagnostics/upload", method: "POST", body: payload, timeoutInterval: 60) { data, err in
+            DispatchQueue.main.async {
+                diagnosticUploading = false
+                if let err = err {
+                    diagnosticStatus = "Upload failed: \(err.localizedDescription)"
+                    return
+                }
+                guard let data = data,
+                      let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+                else {
+                    diagnosticStatus = "Upload failed: invalid response"
+                    return
+                }
+                if let id = obj["id"] as? String {
+                    diagnosticStatus = "Uploaded. Reference ID: \(id)"
+                } else if let e = obj["error"] as? String {
+                    diagnosticStatus = "Upload failed: \(e)"
+                } else {
+                    diagnosticStatus = "Upload failed: unknown response"
                 }
             }
         }

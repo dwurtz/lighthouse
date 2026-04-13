@@ -31,8 +31,75 @@ def _get_db() -> sqlite3.Connection:
     db.execute("CREATE INDEX IF NOT EXISTS idx_events_user_email ON events(user_email)")
     db.execute("CREATE INDEX IF NOT EXISTS idx_events_event ON events(event)")
     db.execute("CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp)")
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS diagnostics (
+            id TEXT PRIMARY KEY,
+            timestamp TEXT NOT NULL,
+            user_email TEXT,
+            client_version TEXT,
+            note TEXT,
+            bundle TEXT NOT NULL,
+            size_bytes INTEGER
+        )
+    """)
+    db.execute("CREATE INDEX IF NOT EXISTS idx_diagnostics_user_email ON diagnostics(user_email)")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_diagnostics_timestamp ON diagnostics(timestamp)")
     db.commit()
     return db
+
+
+def store_diagnostic(
+    diag_id: str,
+    user_email: str | None,
+    client_version: str,
+    note: str,
+    bundle: str,
+) -> None:
+    db = _get_db()
+    db.execute(
+        """INSERT INTO diagnostics (id, timestamp, user_email, client_version, note, bundle, size_bytes)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (
+            diag_id,
+            datetime.now(timezone.utc).isoformat(),
+            user_email,
+            client_version,
+            note,
+            bundle,
+            len(bundle.encode("utf-8")),
+        ),
+    )
+    db.commit()
+    db.close()
+
+
+def list_diagnostics(limit: int = 100, email: str | None = None) -> list[dict]:
+    db = _get_db()
+    if email:
+        rows = db.execute(
+            """SELECT id, timestamp, user_email, client_version, note, size_bytes
+               FROM diagnostics WHERE user_email = ?
+               ORDER BY timestamp DESC LIMIT ?""",
+            (email, limit),
+        ).fetchall()
+    else:
+        rows = db.execute(
+            """SELECT id, timestamp, user_email, client_version, note, size_bytes
+               FROM diagnostics ORDER BY timestamp DESC LIMIT ?""",
+            (limit,),
+        ).fetchall()
+    db.close()
+    return [dict(r) for r in rows]
+
+
+def get_diagnostic(diag_id: str) -> dict | None:
+    db = _get_db()
+    row = db.execute(
+        "SELECT * FROM diagnostics WHERE id = ?",
+        (diag_id,),
+    ).fetchone()
+    db.close()
+    return dict(row) if row else None
 
 
 def store_event(
