@@ -79,7 +79,14 @@ class MonitorState: ObservableObject {
     /// Transient operational errors (proxy 502, one failed LLM call)
     /// are NOT structural and surface via the error toast + request id
     /// path instead.
-    @Published var isBlocked: Bool = true
+    /// Default false — we haven't checked permissions yet, so we can't
+    /// claim the app is blocked. The first ``recomputeBlockedState()``
+    /// call after permission probes runs within milliseconds of launch
+    /// and will flip this true if anything is actually missing. If we
+    /// defaulted to true, the Combine subscriber in AppDelegate would
+    /// briefly flash the setup panel on every launch before the probe
+    /// completes.
+    @Published var isBlocked: Bool = false
 
     // Meeting recording state
     @Published var meetingAvailable: Bool = false
@@ -273,6 +280,16 @@ class MonitorState: ObservableObject {
             checkRuntimePermissions()
             Timer.scheduledTimer(withTimeInterval: 60.0, repeats: true) { [weak self] _ in
                 self?.checkRuntimePermissions()
+            }
+
+            // Probe /api/me once the local backend is reachable. Drives
+            // the "Open Admin Dashboard" tray item and surfaces the
+            // signed-in identity at the top of the menu. Only ran from
+            // completeSetup() before, which meant returning users (no
+            // wizard) never got isAdmin populated and the menu item
+            // stayed hidden forever.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
+                self?.fetchAdminStatus()
             }
         }
     }
@@ -1064,11 +1081,21 @@ class MonitorState: ObservableObject {
     /// If an admin grant is applied to a live app, the user can
     /// relaunch to pick it up (or the tray menu's "Sign out" →
     /// "Sign in" flow refetches when that lands).
-    func fetchAdminStatus() {
-        swiftLog("fetchAdminStatus → /api/me")
+    func fetchAdminStatus(attempt: Int = 1) {
+        swiftLog("fetchAdminStatus → /api/me (attempt \(attempt))")
         localAPICall("/api/me", method: "GET", timeoutInterval: 5) { [weak self] data, err in
             if let err = err {
                 swiftLog("/api/me error: \(err.localizedDescription)")
+                // The Unix socket doesn't exist until uvicorn finishes
+                // booting. Boot time varies (cold launch on a busy system
+                // can take 10s+), so a single fixed delay isn't enough.
+                // Retry up to ~30s with linear backoff.
+                if attempt < 10 {
+                    let delay = Double(attempt) * 2.0
+                    DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                        self?.fetchAdminStatus(attempt: attempt + 1)
+                    }
+                }
                 return
             }
             guard let data = data else {

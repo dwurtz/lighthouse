@@ -148,9 +148,14 @@ func swiftLog(_ message: String) {
     let line = "\(Date()) [swift] \(message)\n"
     let path = NSHomeDirectory() + "/.deja/deja.log"
     guard let data = line.data(using: .utf8) else { return }
-    if let fh = FileHandle(forWritingAtPath: path) {
-        fh.seekToEndOfFile()
-        fh.write(data)
-        try? fh.close()
+    // Use POSIX fopen("a") so the file is created if missing and we
+    // append atomically. FileHandle(forWritingAtPath:) returns nil when
+    // the file doesn't exist, which silently drops every log line.
+    guard let fp = fopen(path, "a") else { return }
+    data.withUnsafeBytes { buf in
+        if let base = buf.baseAddress {
+            _ = fwrite(base, 1, data.count, fp)
+        }
     }
+    fclose(fp)
 }

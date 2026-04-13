@@ -14,6 +14,19 @@ from deja.web.helpers import OBSERVATIONS_LOG
 
 router = APIRouter()
 
+# Lightweight in-memory call tracker used by /api/debug/state. Each
+# entry is the most recent invocation of an endpoint with timestamp +
+# response summary, so a single GET /api/debug/state answers
+# "what does the backend think happened?" without log scraping.
+_LAST_CALLS: dict[str, dict] = {}
+
+
+def _record_call(name: str, **fields) -> None:
+    _LAST_CALLS[name] = {
+        "at": datetime.now(timezone.utc).isoformat(),
+        **fields,
+    }
+
 
 @router.get("/api/status")
 def get_status() -> dict:
@@ -100,9 +113,12 @@ def admin_dashboard_url() -> dict:
 
         token = get_auth_token()
         if not token:
+            _record_call("admin_dashboard_url", result="not_signed_in")
             return {"error": "not signed in"}
+        _record_call("admin_dashboard_url", result="ok")
         return {"url": f"{DEJA_API_URL}/admin/login?token={quote(token)}"}
     except Exception as e:
+        _record_call("admin_dashboard_url", result="error", error=str(e)[:200])
         return {"error": str(e)[:200]}
 
 
@@ -123,6 +139,7 @@ async def whoami() -> dict:
 
         token = get_auth_token()
         if not token:
+            _record_call("me", result="not_signed_in")
             return {"email": "", "is_admin": False, "signed_in": False}
 
         async with httpx.AsyncClient(timeout=5.0) as client:
@@ -132,13 +149,17 @@ async def whoami() -> dict:
             )
         if 200 <= resp.status_code < 300:
             data = resp.json()
-            return {
+            out = {
                 "email": data.get("email", ""),
                 "is_admin": bool(data.get("is_admin", False)),
                 "signed_in": True,
             }
+            _record_call("me", result="ok", email=out["email"], is_admin=out["is_admin"])
+            return out
+        _record_call("me", result="http_error", status=resp.status_code)
         return {"email": "", "is_admin": False, "signed_in": False, "error": f"HTTP {resp.status_code}"}
     except Exception as e:
+        _record_call("me", result="exception", error=str(e)[:120])
         return {"email": "", "is_admin": False, "signed_in": False, "error": str(e)[:120]}
 
 
@@ -182,6 +203,68 @@ def get_activity(limit: int = 50) -> dict:
             }
         )
     return {"entries": entries}
+
+
+@router.get("/api/debug/state")
+def debug_state() -> dict:
+    """One-shot snapshot of what the backend knows right now.
+
+    Designed for remote debugging: a single GET answers questions like
+    "did the menubar app ever call /api/me?", "what did the server say
+    when it did?", "is the auth token even present?", and "what are
+    the most recent Swift-side log lines?". Avoids forcing a user to
+    upload a 100KB diagnostic just to check one fact.
+    """
+    from deja.auth import get_auth_token
+    from deja.config import DEJA_HOME
+
+    token = None
+    auth_error = None
+    try:
+        token = get_auth_token()
+    except Exception as e:
+        auth_error = str(e)[:200]
+
+    swift_lines: list[str] = []
+    log_path = DEJA_HOME / "deja.log"
+    if log_path.exists():
+        try:
+            with open(log_path, "r", errors="replace") as f:
+                # Read last ~64KB and keep [swift]-tagged lines.
+                try:
+                    f.seek(-65536, 2)
+                except OSError:
+                    f.seek(0)
+                tail = f.read().splitlines()
+            swift_lines = [ln for ln in tail if "[swift]" in ln][-50:]
+        except Exception as e:
+            swift_lines = [f"(read error: {e})"]
+
+    recent_errors: list[dict] = []
+    err_path = DEJA_HOME / "errors.jsonl"
+    if err_path.exists():
+        try:
+            with open(err_path, "r", errors="replace") as f:
+                lines = f.readlines()[-10:]
+            for ln in lines:
+                try:
+                    recent_errors.append(json.loads(ln))
+                except json.JSONDecodeError:
+                    pass
+        except Exception as e:
+            recent_errors = [{"error": str(e)}]
+
+    return {
+        "now": datetime.now(timezone.utc).isoformat(),
+        "auth": {
+            "token_present": bool(token),
+            "token_prefix": (token[:8] + "…") if token else None,
+            "error": auth_error,
+        },
+        "last_calls": _LAST_CALLS,
+        "swift_log_tail": swift_lines,
+        "recent_errors": recent_errors,
+    }
 
 
 class DiagnosticUploadRequest(BaseModel):

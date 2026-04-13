@@ -380,31 +380,35 @@ struct SettingsView: View {
             // macOS toggle switch footprint used in the General and
             // Connected AI Assistants sections, so all three columns
             // of trailing controls align to the same right edge.
-            Button(action: {
-                if let url = URL(string: settingsURL) {
-                    NSWorkspace.shared.open(url)
-                }
-            }) {
-                HStack(spacing: 4) {
-                    if granted {
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(.system(size: 11))
-                            .foregroundColor(.green)
+            HStack {
+                Spacer()
+                Button(action: {
+                    if let url = URL(string: settingsURL) {
+                        NSWorkspace.shared.open(url)
                     }
-                    Text(granted ? "Manage" : "Grant")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundColor(.white.opacity(granted ? 0.75 : 1.0))
+                }) {
+                    HStack(spacing: 4) {
+                        if granted {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.system(size: 11))
+                                .foregroundColor(.green)
+                        }
+                        Text(granted ? "Manage" : "Grant")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(.white.opacity(granted ? 0.75 : 1.0))
+                    }
+                    .fixedSize(horizontal: true, vertical: false)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(Color.white.opacity(granted ? 0.06 : 0.15))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                            .stroke(Color.white.opacity(granted ? 0.10 : 0.0), lineWidth: 1)
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
                 }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 4)
-                .background(Color.white.opacity(granted ? 0.06 : 0.15))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 6)
-                        .stroke(Color.white.opacity(granted ? 0.10 : 0.0), lineWidth: 1)
-                )
-                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
             .frame(width: 78, alignment: .trailing)
         }
     }
