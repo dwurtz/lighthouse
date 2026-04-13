@@ -100,6 +100,13 @@ class MonitorState: ObservableObject {
     /// Drives the "Open Admin Dashboard" tray menu item — hidden
     /// for non-admin users so they never see the option.
     @Published var isAdmin: Bool = false
+
+    /// Signed-in Google account identity — shown at the top of the
+    /// tray menu so the user can see which account Deja is bound to.
+    /// Populated by ``fetchAdminStatus`` (which returns email + name
+    /// in the same response from /api/me).
+    @Published var signedInEmail: String = ""
+    @Published var signedInName: String = ""
     @Published var backfillRunning: Bool = false
     @Published var backfillStep: String = ""
     @Published var backfillPages: Int = 0
@@ -341,17 +348,15 @@ class MonitorState: ObservableObject {
         checkRuntimePermissions()
         // Wait briefly for the local backend to be reachable before
         // probing /api/me — at startup the FastAPI server may still
-        // be booting. The 5-min refresh below picks up admin grants
-        // made later via DEJA_ADMIN_EMAILS env var changes.
+        // be booting. Fetched once; admin list membership changes
+        // rarely enough that polling isn't worth the network chatter.
+        // Users can relaunch to pick up a freshly-granted admin.
         DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
             self?.fetchAdminStatus()
         }
 
         Timer.scheduledTimer(withTimeInterval: 60.0, repeats: true) { [weak self] _ in
             self?.checkRuntimePermissions()
-        }
-        Timer.scheduledTimer(withTimeInterval: 300.0, repeats: true) { [weak self] _ in
-            self?.fetchAdminStatus()
         }
 
         NotificationCenter.default.post(name: .setupCompleted, object: nil)
@@ -1053,18 +1058,23 @@ class MonitorState: ObservableObject {
         }
     }
 
-    /// Fetch the user's identity + admin status from the server. Drives
-    /// whether the tray menu shows "Open Admin Dashboard". Called once
-    /// at launch (after the backend is up) and re-checked periodically
-    /// so revoking admin access in the Render env var takes effect
-    /// without a client restart.
+    /// Fetch the user's identity + admin status from the server.
+    /// Called once at launch — admin-list membership changes rarely
+    /// enough that polling isn't worth the constant network chatter.
+    /// If an admin grant is applied to a live app, the user can
+    /// relaunch to pick it up (or the tray menu's "Sign out" →
+    /// "Sign in" flow refetches when that lands).
     func fetchAdminStatus() {
         localAPICall("/api/me", method: "GET", timeoutInterval: 5) { [weak self] data, _ in
             guard let data = data,
                   let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
             let admin = (obj["is_admin"] as? Bool) ?? false
+            let email = (obj["email"] as? String) ?? ""
+            let name = (obj["name"] as? String) ?? ""
             DispatchQueue.main.async {
                 self?.isAdmin = admin
+                self?.signedInEmail = email
+                self?.signedInName = name
             }
         }
     }

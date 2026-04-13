@@ -82,7 +82,7 @@ async def whoami(authorization: str = Header("")):
     return {
         "email": email,
         "name": user.get("name", ""),
-        "is_admin": email in _admin_emails(),
+        "is_admin": email.lower() in _admin_emails(),
     }
 
 

@@ -322,6 +322,22 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func buildTrayMenu() -> NSMenu {
         let menu = NSMenu()
 
+        // Header: signed-in identity. Disabled item (not clickable)
+        // that shows the email Deja is bound to. Helps users notice
+        // when they're logged in as the wrong account.
+        if !monitor.signedInEmail.isEmpty {
+            let label: String
+            if !monitor.signedInName.isEmpty {
+                label = "\(monitor.signedInName) — \(monitor.signedInEmail)"
+            } else {
+                label = monitor.signedInEmail
+            }
+            let identity = NSMenuItem(title: label, action: nil, keyEquivalent: "")
+            identity.isEnabled = false
+            menu.addItem(identity)
+            menu.addItem(NSMenuItem.separator())
+        }
+
         if monitor.setupNeeded {
             let resume = NSMenuItem(
                 title: "Resume Setup…",
@@ -343,9 +359,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Admin Dashboard — only shown to users on the server-side
         // DEJA_ADMIN_EMAILS allowlist. Non-admins never see this entry.
-        // Status is fetched from /api/me at launch and refreshed
-        // periodically; the menu is rebuilt on every click so it
-        // reflects the current state.
+        // Admin status is fetched once at launch via /api/me; the menu
+        // is rebuilt on every click so it reflects the current state.
         if monitor.isAdmin {
             let admin = NSMenuItem(
                 title: "Open Admin Dashboard",
@@ -358,6 +373,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(NSMenuItem.separator())
 
+        // Sign out — revokes the Google OAuth token and quits. On next
+        // launch the user sees the setup wizard again and must re-auth.
+        let signOut = NSMenuItem(
+            title: "Sign out…",
+            action: #selector(signOut),
+            keyEquivalent: ""
+        )
+        signOut.target = self
+        menu.addItem(signOut)
+
         let quitItem = NSMenuItem(
             title: "Quit Déjà",
             action: #selector(quitApp),
@@ -367,6 +392,24 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(quitItem)
 
         return menu
+    }
+
+    @objc private func signOut() {
+        // Revoke the Google OAuth token + delete the local credentials
+        // so the next launch forces a fresh sign-in. Runs on a
+        // background thread because gws auth revoke hits the network,
+        // then quits cleanly on the main thread so NSApplication's
+        // shutdown teardown happens.
+        DispatchQueue.global(qos: .userInitiated).async {
+            let task = Process()
+            task.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+            task.arguments = ["gws", "auth", "revoke"]
+            try? task.run()
+            task.waitUntilExit()
+            DispatchQueue.main.async {
+                NSApplication.shared.terminate(nil)
+            }
+        }
     }
 
     @objc private func openAdminDashboard() {
