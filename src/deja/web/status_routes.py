@@ -79,6 +79,68 @@ def get_status() -> dict:
     }
 
 
+@router.get("/api/admin-dashboard-url")
+def admin_dashboard_url() -> dict:
+    """Build the one-shot admin login URL for the Swift app to open.
+
+    The URL embeds the user's current OAuth token as a query param so
+    the server can validate it via the same code path every /v1/*
+    route uses, then set a signed cookie + redirect to /admin. The
+    token only lives in browser history for one redirect; the cookie
+    is HttpOnly and what persists.
+
+    Returns ``{"url": "..."}`` on success or ``{"error": "..."}`` if
+    the user isn't signed in or the proxy URL isn't configured.
+    """
+    try:
+        from urllib.parse import quote
+        from deja.auth import get_auth_token
+        from deja.llm_client import DEJA_API_URL
+
+        token = get_auth_token()
+        if not token:
+            return {"error": "not signed in"}
+        return {"url": f"{DEJA_API_URL}/admin/login?token={quote(token)}"}
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+@router.get("/api/me")
+async def whoami() -> dict:
+    """Identity + admin check — proxies to server /v1/me.
+
+    Used by the Swift app to decide whether to show the "Open Admin
+    Dashboard" tray menu item. Non-admin accounts get ``is_admin:
+    false`` and the menu item stays hidden. If the user isn't signed
+    in (no token) or the server is unreachable, returns a safe
+    default with ``is_admin: false``.
+    """
+    try:
+        import httpx
+        from deja.auth import get_auth_token
+        from deja.llm_client import DEJA_API_URL
+
+        token = get_auth_token()
+        if not token:
+            return {"email": "", "is_admin": False, "signed_in": False}
+
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(
+                f"{DEJA_API_URL}/v1/me",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+        if 200 <= resp.status_code < 300:
+            data = resp.json()
+            return {
+                "email": data.get("email", ""),
+                "is_admin": bool(data.get("is_admin", False)),
+                "signed_in": True,
+            }
+        return {"email": "", "is_admin": False, "signed_in": False, "error": f"HTTP {resp.status_code}"}
+    except Exception as e:
+        return {"email": "", "is_admin": False, "signed_in": False, "error": str(e)[:120]}
+
+
 @router.get("/api/briefing")
 def get_briefing() -> dict:
     """Return the 'right now' briefing for the notch panel.

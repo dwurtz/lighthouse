@@ -94,6 +94,12 @@ class MonitorState: ObservableObject {
     @Published var meetingTimeRange: String = ""
     @Published var showSettings: Bool = false
     @Published var launchAtLogin: Bool = true
+
+    /// Whether the signed-in Google account is on the server-side
+    /// admin allowlist (``DEJA_ADMIN_EMAILS`` env var on Render).
+    /// Drives the "Open Admin Dashboard" tray menu item — hidden
+    /// for non-admin users so they never see the option.
+    @Published var isAdmin: Bool = false
     @Published var backfillRunning: Bool = false
     @Published var backfillStep: String = ""
     @Published var backfillPages: Int = 0
@@ -333,9 +339,19 @@ class MonitorState: ObservableObject {
         }
         startMeetingPolling()
         checkRuntimePermissions()
+        // Wait briefly for the local backend to be reachable before
+        // probing /api/me — at startup the FastAPI server may still
+        // be booting. The 5-min refresh below picks up admin grants
+        // made later via DEJA_ADMIN_EMAILS env var changes.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
+            self?.fetchAdminStatus()
+        }
 
         Timer.scheduledTimer(withTimeInterval: 60.0, repeats: true) { [weak self] _ in
             self?.checkRuntimePermissions()
+        }
+        Timer.scheduledTimer(withTimeInterval: 300.0, repeats: true) { [weak self] _ in
+            self?.fetchAdminStatus()
         }
 
         NotificationCenter.default.post(name: .setupCompleted, object: nil)
@@ -1033,6 +1049,37 @@ class MonitorState: ObservableObject {
                   let decoded = try? JSONDecoder().decode(Briefing.self, from: data) else { return }
             DispatchQueue.main.async {
                 self?.briefing = decoded
+            }
+        }
+    }
+
+    /// Fetch the user's identity + admin status from the server. Drives
+    /// whether the tray menu shows "Open Admin Dashboard". Called once
+    /// at launch (after the backend is up) and re-checked periodically
+    /// so revoking admin access in the Render env var takes effect
+    /// without a client restart.
+    func fetchAdminStatus() {
+        localAPICall("/api/me", method: "GET", timeoutInterval: 5) { [weak self] data, _ in
+            guard let data = data,
+                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+            let admin = (obj["is_admin"] as? Bool) ?? false
+            DispatchQueue.main.async {
+                self?.isAdmin = admin
+            }
+        }
+    }
+
+    /// Open the admin dashboard in the user's default browser.
+    /// Resolves the login URL (with embedded OAuth token) via the
+    /// local Python backend, then hands off to NSWorkspace.
+    func openAdminDashboardInBrowser() {
+        localAPICall("/api/admin-dashboard-url", method: "GET", timeoutInterval: 5) { data, _ in
+            guard let data = data,
+                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let urlStr = obj["url"] as? String,
+                  let url = URL(string: urlStr) else { return }
+            DispatchQueue.main.async {
+                NSWorkspace.shared.open(url)
             }
         }
     }

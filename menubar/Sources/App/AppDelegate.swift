@@ -35,13 +35,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var voiceDispatcher: VoiceCommandDispatcher?
     private var healthCancellables = Set<AnyCancellable>()
 
-    // Loud-startup / health observation. We want to open the panel
-    // once, on the first .broken report of a launch — not every tick.
-    // `lastLoudStatus` lets us fire again on a regression (.ok → .broken)
-    // without spamming during steady-state.
-    private var didShowStartupHealthToast: Bool = false
-    private var lastLoudStatus: HealthStatus = .ok
-    private var healthObserver: NSObjectProtocol?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -51,16 +44,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Health service — polls ~/.deja/health.json + native TCC
         // probes and publishes the merged state for the notch chip
-        // and the HealthPanel. We observe `overall` to drive the
-        // loud-startup behavior: auto-open on .broken, amber on
-        // .degraded, silent on .ok. Fires once per regression.
+        // and the HealthPanel. The chip is the only user-facing
+        // signal; we deliberately don't surface a toast on degraded/
+        // broken because the chip already communicates it, and a
+        // second pill with a fake request_id is just noise. Operational
+        // errors with real request IDs still surface via the error
+        // toast path. Structural issues (missing permissions) are
+        // handled by `monitor.isBlocked` auto-opening the setup panel.
         HealthState.shared.start()
-        HealthState.shared.$overall
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] status in
-                self?.handleHealthChange(status)
-            }
-            .store(in: &healthCancellables)
 
         // Voice recording runs in-process now (was a DejaRecorder
         // subprocess, which didn't hold mic TCC because it has no
@@ -229,72 +220,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         dismissMeetingPill()
     }
 
-    // MARK: - Health observation
-
-    /// Drive the "loud" startup behavior. `.broken` auto-opens the
-    /// notch panel on HealthPanel and surfaces a persistent toast;
-    /// `.degraded` is non-modal; `.ok` is silent. We only fire the
-    /// startup toast ONCE per launch unless the status regresses from
-    /// a healthier state back down — otherwise the user would see the
-    /// same toast every 15s forever.
-    private func handleHealthChange(_ status: HealthStatus) {
-        defer { lastLoudStatus = status }
-
-        guard status != lastLoudStatus else { return }
-
-        switch status {
-        case .broken:
-            // Structural issues are now handled by ``monitor.isBlocked``
-            // which auto-opens the setup panel. Keep the toast for
-            // operational-broken states (e.g. Render proxy 502) that
-            // aren't permission-related — the setup panel won't surface
-            // those, but the user still deserves to know.
-            if !didShowStartupHealthToast || lastLoudStatus != .broken {
-                didShowStartupHealthToast = true
-                surfaceHealthToast(
-                    message: "Déjà is having trouble — tap for details",
-                    code: "health_broken",
-                    persistent: true
-                )
-            }
-        case .degraded:
-            // Non-modal. Amber toast, no auto-open. Only when
-            // regressing into degraded (not every re-report).
-            if lastLoudStatus == .ok {
-                surfaceHealthToast(
-                    message: "Déjà is running in degraded mode — tap for details",
-                    code: "health_degraded",
-                    persistent: false
-                )
-            }
-        case .ok:
-            break
-        }
-    }
-
-    /// Route a health-driven toast through the existing ``currentError``
-    /// channel so it pins above the pill like any other error. We
-    /// synthesize a DejaError with a stable request_id so it dedupes
-    /// correctly inside ErrorPollingService's lastSeen check.
-    private func surfaceHealthToast(message: String, code: String, persistent: Bool) {
-        // Prefer the real request_id from the most recent underlying
-        // error so support lookup works. Fall back to a synthetic ID
-        // only if the agent hasn't logged anything yet.
-        let rid = HealthState.shared.lastErrorRequestId
-            ?? "req_health_\(Int(Date().timeIntervalSince1970))"
-        let err = DejaError(
-            requestId: rid,
-            code: code,
-            message: message,
-            timestamp: ISO8601DateFormatter().string(from: Date()),
-            details: nil
-        )
-        monitor.currentError = err
-        // Toast now persists until user dismisses, so we don't need to
-        // re-assert. If user explicitly dismisses while still broken,
-        // respect that — they know.
-        _ = persistent
-    }
 
 
     var notificationPopover: NSPopover?
@@ -416,6 +341,21 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         settings.target = self
         menu.addItem(settings)
 
+        // Admin Dashboard — only shown to users on the server-side
+        // DEJA_ADMIN_EMAILS allowlist. Non-admins never see this entry.
+        // Status is fetched from /api/me at launch and refreshed
+        // periodically; the menu is rebuilt on every click so it
+        // reflects the current state.
+        if monitor.isAdmin {
+            let admin = NSMenuItem(
+                title: "Open Admin Dashboard",
+                action: #selector(openAdminDashboard),
+                keyEquivalent: ""
+            )
+            admin.target = self
+            menu.addItem(admin)
+        }
+
         menu.addItem(NSMenuItem.separator())
 
         let quitItem = NSMenuItem(
@@ -427,6 +367,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(quitItem)
 
         return menu
+    }
+
+    @objc private func openAdminDashboard() {
+        // Build the login URL with the user's existing Google OAuth
+        // token as a query param. The server validates the token via
+        // the same code path every /v1/* route uses, checks the email
+        // against DEJA_ADMIN_EMAILS, and sets a session cookie before
+        // redirecting to /admin. The query-param token only lives in
+        // browser history for one redirect — the cookie is what
+        // persists, and it's HttpOnly + SameSite=Lax + Secure.
+        monitor.openAdminDashboardInBrowser()
     }
 
     @objc private func showSetupPanelFromMenu() {

@@ -63,6 +63,29 @@ class TelemetryRequest(BaseModel):
 
 # -- Routes ------------------------------------------------------------------
 
+@app.get("/v1/me")
+async def whoami(authorization: str = Header("")):
+    """Identity + admin check for the logged-in client.
+
+    Called by the desktop app at launch so the tray menu can decide
+    whether to show the "Open Admin Dashboard" option. Non-admin
+    users get ``is_admin: false`` and the option stays hidden. The
+    admin allowlist lives server-side (env var ``DEJA_ADMIN_EMAILS``)
+    so revoking access is one Render config change, not a client
+    update.
+    """
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing token")
+    token = authorization[7:]
+    user = await validate_token(token)
+    email = user.get("email", "")
+    return {
+        "email": email,
+        "name": user.get("name", ""),
+        "is_admin": email in _admin_emails(),
+    }
+
+
 @app.get("/v1/health")
 async def health():
     """Check proxy reachability + every dependency that could break LLM calls.
@@ -344,24 +367,197 @@ async def telemetry_endpoint(
 
 # -- Admin Dashboard ----------------------------------------------------------
 
+import base64
+import hmac
+import hashlib
+import json as _json
 import os
+import time as _time
 import html as _html
-from fastapi.responses import HTMLResponse
+from fastapi import Cookie
+from fastapi.responses import HTMLResponse, RedirectResponse
 from db import search_events, get_stats, get_user_detail
 
 def _esc(s) -> str:
     """HTML-escape user-controlled strings for safe rendering."""
     return _html.escape(str(s)) if s else ""
 
-ADMIN_KEY = os.environ.get("DEJA_ADMIN_KEY")
-if not ADMIN_KEY:
-    logger.warning("DEJA_ADMIN_KEY not set — admin dashboard disabled")
+
+# ---------------------------------------------------------------------------
+# Admin auth — email-allowlisted cookie session.
+#
+# The legacy ``?key=`` query-param auth was a shared secret with no user
+# attribution. The new flow:
+#
+#   1. Desktop app opens /admin/login?token=<user's existing Google OAuth
+#      token> in the default browser. The token is validated with the same
+#      code every /v1/* route uses.
+#   2. /admin/login extracts the email, checks DEJA_ADMIN_EMAILS, and sets
+#      a signed session cookie that carries email + expiry.
+#   3. Every /admin/* route reads the cookie, verifies the HMAC, and
+#      re-checks the email against DEJA_ADMIN_EMAILS on each request
+#      (so revoking a user's admin access in Render takes effect
+#      immediately, regardless of cookie validity).
+# ---------------------------------------------------------------------------
+
+SESSION_SECRET = os.environ.get("DEJA_SESSION_SECRET", "")
+SESSION_COOKIE = "deja_admin_session"
+SESSION_TTL_SECONDS = 7 * 24 * 3600  # 7 days
+
+if not SESSION_SECRET:
+    logger.warning(
+        "DEJA_SESSION_SECRET not set — admin dashboard cookie auth disabled. "
+        "Set to a random 32+ char string to enable."
+    )
+
+
+def _admin_emails() -> set[str]:
+    """Parse the admin allowlist fresh each call so env changes take effect
+    without a deploy. Comma-separated, case-insensitive matching."""
+    raw = os.environ.get("DEJA_ADMIN_EMAILS", "")
+    return {e.strip().lower() for e in raw.split(",") if e.strip()}
+
+
+def _sign_session(email: str) -> str:
+    """Return a signed cookie value that encodes ``email`` + expiry.
+
+    Format: ``base64(payload).hex(hmac)``. Payload is JSON with email +
+    exp timestamp so verification can reject expired cookies without
+    DB state. HMAC uses SHA-256 over the raw payload bytes.
+    """
+    payload = _json.dumps({"email": email, "exp": int(_time.time()) + SESSION_TTL_SECONDS}, separators=(",", ":"))
+    payload_b = payload.encode("utf-8")
+    payload_b64 = base64.urlsafe_b64encode(payload_b).rstrip(b"=").decode("ascii")
+    sig = hmac.new(SESSION_SECRET.encode(), payload_b, hashlib.sha256).hexdigest()
+    return f"{payload_b64}.{sig}"
+
+
+def _verify_session(cookie_value: str | None) -> str | None:
+    """Return the email encoded in the cookie if the signature and expiry
+    check out AND the email is still in DEJA_ADMIN_EMAILS. None otherwise.
+
+    We re-check the allowlist on every request so removing someone from
+    DEJA_ADMIN_EMAILS in Render takes effect immediately — their next
+    request 403s even if their cookie is still valid.
+    """
+    if not cookie_value or not SESSION_SECRET:
+        return None
+    try:
+        payload_b64, sig = cookie_value.split(".", 1)
+    except ValueError:
+        return None
+
+    # Re-pad the base64 (we stripped "=" for cookie friendliness)
+    padding = 4 - (len(payload_b64) % 4)
+    if padding and padding < 4:
+        payload_b64 += "=" * padding
+    try:
+        payload_b = base64.urlsafe_b64decode(payload_b64)
+    except Exception:
+        return None
+
+    expected_sig = hmac.new(SESSION_SECRET.encode(), payload_b, hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(sig, expected_sig):
+        return None
+
+    try:
+        data = _json.loads(payload_b.decode("utf-8"))
+    except Exception:
+        return None
+
+    if int(data.get("exp", 0)) < _time.time():
+        return None
+
+    email = (data.get("email") or "").lower()
+    if email not in _admin_emails():
+        return None
+    return email
+
+
+def _require_admin(session_cookie: str | None) -> str | HTMLResponse:
+    """Return the admin email if the cookie is valid; otherwise an
+    HTMLResponse redirecting to /admin/login. Caller must short-circuit
+    on HTMLResponse — admin routes do `if isinstance(...): return ...`.
+    """
+    email = _verify_session(session_cookie)
+    if email:
+        return email
+    return HTMLResponse(
+        '<h1>Not signed in</h1><p><a href="/admin/login">Sign in via Deja.app</a></p>',
+        status_code=401,
+    )
+
+
+@app.get("/admin/login")
+async def admin_login(token: str = ""):
+    """Entry point for the desktop app → admin dashboard handoff.
+
+    The desktop app opens this URL in the user's browser with the
+    user's Google OAuth token as a query param. We validate the
+    token via the same code path every /v1/* route uses, check the
+    email against DEJA_ADMIN_EMAILS, and set a signed session cookie.
+    The cookie is HttpOnly + SameSite=Lax so the query-param token
+    only lives in history for one redirect, not in a durable cookie.
+    """
+    if not token:
+        return HTMLResponse(
+            '<h1>Missing token</h1>'
+            '<p>Open the admin dashboard from inside Deja.app — '
+            'the desktop client passes your session token here.</p>',
+            status_code=400,
+        )
+    try:
+        user = await validate_token(token)
+    except HTTPException as e:
+        return HTMLResponse(f"<h1>Invalid token</h1><p>{_esc(e.detail)}</p>", status_code=401)
+
+    email = (user.get("email") or "").lower()
+    if email not in _admin_emails():
+        logger.warning("admin login denied for %s", email)
+        return HTMLResponse(
+            f'<h1>Not authorized</h1>'
+            f'<p>{_esc(email)} is not in the admin allowlist.</p>',
+            status_code=403,
+        )
+
+    if not SESSION_SECRET:
+        return HTMLResponse(
+            "<h1>Dashboard disabled</h1>"
+            "<p>DEJA_SESSION_SECRET is not set on the server. "
+            "Ask an operator to configure it in Render env vars.</p>",
+            status_code=503,
+        )
+
+    cookie_value = _sign_session(email)
+    response = RedirectResponse(url="/admin", status_code=303)
+    response.set_cookie(
+        key=SESSION_COOKIE,
+        value=cookie_value,
+        max_age=SESSION_TTL_SECONDS,
+        httponly=True,
+        secure=True,
+        samesite="lax",
+        path="/admin",
+    )
+    return response
+
+
+@app.get("/admin/logout")
+async def admin_logout():
+    response = HTMLResponse(
+        '<h1>Signed out</h1>'
+        '<p><a href="/admin/login">Sign in again</a></p>'
+    )
+    response.delete_cookie(SESSION_COOKIE, path="/admin")
+    return response
 
 
 @app.get("/admin")
-async def admin_dashboard(key: str = ""):
-    if not ADMIN_KEY or key != ADMIN_KEY:
-        return HTMLResponse("<h1>Unauthorized</h1>", status_code=401)
+async def admin_dashboard(deja_admin_session: str | None = Cookie(default=None)):
+    gate = _require_admin(deja_admin_session)
+    if isinstance(gate, HTMLResponse):
+        return gate
+    admin_email = gate
 
     stats = get_stats()
     errors_html = ""
@@ -373,7 +569,7 @@ async def admin_dashboard(key: str = ""):
     for u in stats["active_users"]:
         email = u["user_email"]
         users_html += (
-            f"<tr><td><a href=\"/admin/user?key={_esc(key)}&email={_esc(email)}\">{_esc(email)}</a></td>"
+            f"<tr><td><a href=\"/admin/user?email={_esc(email)}\">{_esc(email)}</a></td>"
             f"<td>{u['event_count']}</td>"
             f"<td>{_esc(u['last_seen'][:19])}</td></tr>"
         )
@@ -395,7 +591,11 @@ async def admin_dashboard(key: str = ""):
   button {{ background: #fff; color: #000; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 14px; }}
   .error {{ color: #f66; }}
 </style></head><body>
-<h1>Déjà Admin</h1>
+<div style="display:flex;align-items:baseline;gap:16px;">
+  <h1 style="margin:0;">Déjà Admin</h1>
+  <div style="color:#888;font-size:12px;flex:1;">Signed in as <strong>{_esc(admin_email)}</strong></div>
+  <a href="/admin/logout" style="color:#888;font-size:12px;">Sign out</a>
+</div>
 
 <div class="stats">
   <div class="stat"><div class="stat-num">{stats['unique_users']}</div><div class="stat-label">Users</div></div>
@@ -405,7 +605,6 @@ async def admin_dashboard(key: str = ""):
 
 <h2>Search</h2>
 <form action="/admin/search" method="get">
-  <input type="hidden" name="key" value="{key}">
   <input type="text" name="q" placeholder="Request ID, email, or keyword...">
   <button type="submit">Search</button>
 </form>
@@ -420,9 +619,14 @@ async def admin_dashboard(key: str = ""):
 
 
 @app.get("/admin/search")
-async def admin_search(key: str = "", q: str = "", event: str = ""):
-    if key != ADMIN_KEY:
-        return HTMLResponse("<h1>Unauthorized</h1>", status_code=401)
+async def admin_search(
+    q: str = "",
+    event: str = "",
+    deja_admin_session: str | None = Cookie(default=None),
+):
+    gate = _require_admin(deja_admin_session)
+    if isinstance(gate, HTMLResponse):
+        return gate
 
     results = search_events(query=q, event_type=event, limit=200)
 
@@ -447,10 +651,9 @@ async def admin_search(key: str = "", q: str = "", event: str = ""):
   th {{ color: #888; font-weight: 600; }}
   .error {{ color: #f66; }}
 </style></head><body>
-<h1><a href="/admin?key={_esc(key)}">← Déjà Admin</a> — Search: "{_esc(q or event)}"</h1>
+<h1><a href="/admin">← Déjà Admin</a> — Search: "{_esc(q or event)}"</h1>
 
 <form action="/admin/search" method="get">
-  <input type="hidden" name="key" value="{_esc(key)}">
   <input type="text" name="q" placeholder="Request ID, email, or keyword..." value="{_esc(q)}">
   <button type="submit">Search</button>
 </form>
@@ -462,14 +665,18 @@ async def admin_search(key: str = "", q: str = "", event: str = ""):
 
 
 @app.get("/admin/user")
-async def admin_user_detail(key: str = "", email: str = ""):
+async def admin_user_detail(
+    email: str = "",
+    deja_admin_session: str | None = Cookie(default=None),
+):
     """Per-user drill-down — aggregate counts, event breakdown, timeline.
 
     Accessed by clicking an email on the main dashboard. Shows everything
     the proxy knows about one user without requiring a free-text search.
     """
-    if not ADMIN_KEY or key != ADMIN_KEY:
-        return HTMLResponse("<h1>Unauthorized</h1>", status_code=401)
+    gate = _require_admin(deja_admin_session)
+    if isinstance(gate, HTMLResponse):
+        return gate
     if not email:
         return HTMLResponse("<h1>Missing email</h1>", status_code=400)
 
@@ -511,7 +718,7 @@ async def admin_user_detail(key: str = "", email: str = ""):
   .meta {{ color: #888; font-size: 13px; margin-top: 8px; }}
   .error {{ color: #f66; }}
 </style></head><body>
-<h1><a href="/admin?key={_esc(key)}">← Déjà Admin</a> — {_esc(email)}</h1>
+<h1><a href="/admin">← Déjà Admin</a> — {_esc(email)}</h1>
 <div class="meta">
   Client: <strong>{_esc(detail['current_version'])}</strong> ·
   First seen: {_esc(first_seen)} ·
