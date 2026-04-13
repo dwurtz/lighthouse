@@ -1065,12 +1065,26 @@ class MonitorState: ObservableObject {
     /// relaunch to pick it up (or the tray menu's "Sign out" →
     /// "Sign in" flow refetches when that lands).
     func fetchAdminStatus() {
-        localAPICall("/api/me", method: "GET", timeoutInterval: 5) { [weak self] data, _ in
-            guard let data = data,
-                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
-            let admin = (obj["is_admin"] as? Bool) ?? false
+        swiftLog("fetchAdminStatus → /api/me")
+        localAPICall("/api/me", method: "GET", timeoutInterval: 5) { [weak self] data, err in
+            if let err = err {
+                swiftLog("/api/me error: \(err.localizedDescription)")
+                return
+            }
+            guard let data = data else {
+                swiftLog("/api/me returned nil data")
+                return
+            }
+            let body = String(data: data, encoding: .utf8) ?? "<non-utf8>"
+            swiftLog("/api/me body: \(body.prefix(200))")
+            guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                swiftLog("/api/me JSON parse failed")
+                return
+            }
+            let admin = (obj["is_admin"] as? Bool) ?? ((obj["is_admin"] as? NSNumber)?.boolValue ?? false)
             let email = (obj["email"] as? String) ?? ""
             let name = (obj["name"] as? String) ?? ""
+            swiftLog("/api/me → admin=\(admin) email=\(email)")
             DispatchQueue.main.async {
                 self?.isAdmin = admin
                 self?.signedInEmail = email

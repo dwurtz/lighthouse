@@ -140,3 +140,17 @@ func localAPICall(
         }
     }
 }
+
+// Append a Swift-side log line to ~/.deja/deja.log. The Python backend
+// already writes there; mixing Swift lines in keeps the support-log
+// upload cohesive without needing to scrape `log show`.
+func swiftLog(_ message: String) {
+    let line = "\(Date()) [swift] \(message)\n"
+    let path = NSHomeDirectory() + "/.deja/deja.log"
+    guard let data = line.data(using: .utf8) else { return }
+    if let fh = FileHandle(forWritingAtPath: path) {
+        fh.seekToEndOfFile()
+        fh.write(data)
+        try? fh.close()
+    }
+}

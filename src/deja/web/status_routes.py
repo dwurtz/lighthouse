@@ -204,7 +204,6 @@ async def upload_diagnostics(body: DiagnosticUploadRequest) -> dict:
     which the user shares with support to look up the bundle via the
     admin dashboard.
     """
-    import subprocess
     import platform
     import httpx
     from deja.auth import get_auth_token
@@ -253,17 +252,9 @@ async def upload_diagnostics(body: DiagnosticUploadRequest) -> dict:
     parts.append(_tail(DEJA_HOME / "audit.jsonl", 200))
     parts.append("")
 
-    parts.append("=== log show --process Deja --last 10m ===")
-    try:
-        r = subprocess.run(
-            ["log", "show", "--process", "Deja", "--last", "10m", "--info"],
-            capture_output=True, text=True, timeout=20,
-        )
-        parts.append(r.stdout or "(empty)")
-        if r.stderr:
-            parts.append(f"(stderr: {r.stderr[:500]})")
-    except Exception as e:
-        parts.append(f"(log show failed: {e})")
+    # Swift-side log lines are already appended to ~/.deja/deja.log via
+    # swiftLog() in the menubar app, so no need to scrape `log show` and
+    # ship megabytes of Apple framework noise.
 
     bundle = "\n".join(parts)
     # Cap to server max (2MB) minus a safety margin.
