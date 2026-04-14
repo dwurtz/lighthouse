@@ -4,9 +4,10 @@ GET /api/activity — recent activity feed for the notch popover."""
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timezone
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from pydantic import BaseModel
 
 from deja import audit
@@ -94,7 +95,7 @@ def get_status() -> dict:
 
 
 @router.get("/api/admin-dashboard-url")
-def admin_dashboard_url() -> dict:
+def admin_dashboard_url(request: Request) -> dict:
     """Build the one-shot admin login URL for the Swift app to open.
 
     The URL embeds the user's current OAuth token as a query param so
@@ -111,19 +112,20 @@ def admin_dashboard_url() -> dict:
         from deja.auth import get_auth_token
         from deja.llm_client import DEJA_API_URL
 
+        rid = request.headers.get("x-deja-request-id")
         token = get_auth_token()
         if not token:
-            _record_call("admin_dashboard_url", result="not_signed_in")
+            _record_call("admin_dashboard_url", result="not_signed_in", rid=rid)
             return {"error": "not signed in"}
-        _record_call("admin_dashboard_url", result="ok")
+        _record_call("admin_dashboard_url", result="ok", rid=rid)
         return {"url": f"{DEJA_API_URL}/admin/login?token={quote(token)}"}
     except Exception as e:
-        _record_call("admin_dashboard_url", result="error", error=str(e)[:200])
+        _record_call("admin_dashboard_url", result="error", error=str(e)[:200], rid=request.headers.get("x-deja-request-id"))
         return {"error": str(e)[:200]}
 
 
 @router.get("/api/me")
-async def whoami() -> dict:
+async def whoami(request: Request) -> dict:
     """Identity + admin check — proxies to server /v1/me.
 
     Used by the Swift app to decide whether to show the "Open Admin
@@ -137,9 +139,10 @@ async def whoami() -> dict:
         from deja.auth import get_auth_token
         from deja.llm_client import DEJA_API_URL
 
+        rid = request.headers.get("x-deja-request-id")
         token = get_auth_token()
         if not token:
-            _record_call("me", result="not_signed_in")
+            _record_call("me", result="not_signed_in", rid=rid)
             return {"email": "", "is_admin": False, "signed_in": False}
 
         async with httpx.AsyncClient(timeout=5.0) as client:
@@ -154,12 +157,12 @@ async def whoami() -> dict:
                 "is_admin": bool(data.get("is_admin", False)),
                 "signed_in": True,
             }
-            _record_call("me", result="ok", email=out["email"], is_admin=out["is_admin"])
+            _record_call("me", result="ok", email=out["email"], is_admin=out["is_admin"], rid=rid)
             return out
-        _record_call("me", result="http_error", status=resp.status_code)
+        _record_call("me", result="http_error", status=resp.status_code, rid=rid)
         return {"email": "", "is_admin": False, "signed_in": False, "error": f"HTTP {resp.status_code}"}
     except Exception as e:
-        _record_call("me", result="exception", error=str(e)[:120])
+        _record_call("me", result="exception", error=str(e)[:120], rid=request.headers.get("x-deja-request-id"))
         return {"email": "", "is_admin": False, "signed_in": False, "error": str(e)[:120]}
 
 
@@ -254,6 +257,17 @@ def debug_state() -> dict:
         except Exception as e:
             recent_errors = [{"error": str(e)}]
 
+    swift_state = None
+    swift_state_error = None
+    sstate_path = DEJA_HOME / "swift_state.json"
+    if sstate_path.exists():
+        try:
+            swift_state = json.loads(sstate_path.read_text(errors="replace"))
+        except Exception as e:
+            swift_state_error = str(e)[:200]
+    else:
+        swift_state_error = "missing"
+
     return {
         "now": datetime.now(timezone.utc).isoformat(),
         "auth": {
@@ -264,7 +278,44 @@ def debug_state() -> dict:
         "last_calls": _LAST_CALLS,
         "swift_log_tail": swift_lines,
         "recent_errors": recent_errors,
+        "swift_state": swift_state,
+        "swift_state_error": swift_state_error,
     }
+
+
+def _trim_tracebacks(text: str) -> str:
+    """Collapse Python traceback line runs into a single annotated line.
+
+    A traceback block starts at a line equal to ``Traceback (most recent call last):``
+    and continues while subsequent lines are indented (start with whitespace).
+    The block ends at the next non-indented line, which is the exception
+    summary and is kept as the anchor. Output: ``<exception line> [+N traceback lines]``.
+    """
+    lines = text.splitlines(keepends=True)
+    out: list[str] = []
+    i = 0
+    n = len(lines)
+    tb_re = re.compile(r"^Traceback \(most recent call last\):")
+    while i < n:
+        line = lines[i]
+        # Strip timestamp/prefix? Just look at the raw line.
+        if tb_re.search(line):
+            start = i
+            i += 1
+            # Consume indented frames.
+            while i < n and (lines[i].startswith(" ") or lines[i].startswith("\t")):
+                i += 1
+            # Next line (if any) is the exception summary.
+            exc_line = lines[i].rstrip("\n") if i < n else lines[start].rstrip("\n")
+            collapsed = (i - start)  # number of traceback lines collapsed (incl. header)
+            if i < n:
+                i += 1
+            newline = "\n" if (out or i < n) else ""
+            out.append(f"{exc_line} [+{collapsed} traceback lines]{newline}")
+            continue
+        out.append(line)
+        i += 1
+    return "".join(out)
 
 
 class DiagnosticUploadRequest(BaseModel):
@@ -323,8 +374,26 @@ async def upload_diagnostics(body: DiagnosticUploadRequest) -> dict:
         parts.append(f"note: {body.note}")
     parts.append("")
 
-    parts.append("=== deja.log (last 500 lines) ===")
-    parts.append(_tail(DEJA_HOME / "deja.log", 500))
+    parts.append("=== debug state ===")
+    try:
+        parts.append(json.dumps(debug_state(), indent=2, default=str))
+    except Exception as e:
+        parts.append(f"(debug_state error: {e})")
+    parts.append("")
+
+    parts.append("=== swift state ===")
+    sstate_path = DEJA_HOME / "swift_state.json"
+    if sstate_path.exists():
+        try:
+            parts.append(sstate_path.read_text(errors="replace"))
+        except Exception as e:
+            parts.append(f"(read error: {e})")
+    else:
+        parts.append("(missing)")
+    parts.append("")
+
+    parts.append("=== deja.log (last 500 lines, tracebacks collapsed) ===")
+    parts.append(_trim_tracebacks(_tail(DEJA_HOME / "deja.log", 500)))
     parts.append("")
 
     parts.append("=== errors.jsonl ===")

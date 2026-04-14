@@ -32,8 +32,48 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=["https://trydeja.com", "http://localhost:5055"],
     allow_methods=["GET", "POST"],
-    allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
+    allow_headers=["Authorization", "Content-Type", "X-Request-ID", "X-Deja-Request-Id"],
+    expose_headers=["X-Deja-Request-Id"],
 )
+
+
+# Request-ID correlation middleware. Swift menubar generates
+# ``swift_<uuid>`` and forwards it via the local Python backend on every
+# /v1/* call; we echo it back and prefix every log line with
+# ``[rid=...]`` so a single user action can be traced across all three
+# layers (Swift → local Python → server). Missing header = server-side
+# fallback so older clients keep working.
+@app.middleware("http")
+async def request_id_middleware(request: Request, call_next):
+    import uuid as _uuid
+    rid = request.headers.get("x-deja-request-id") or f"srv_{_uuid.uuid4().hex}"
+    request.state.rid = rid
+    path = request.url.path
+    log_it = path.startswith("/v1/")
+    if log_it:
+        ua = request.headers.get("user-agent", "")
+        logger.info(
+            "[rid=%s] %s %s user_agent=%s",
+            rid, request.method, path, ua,
+        )
+    start = time.time()
+    try:
+        response = await call_next(request)
+    except Exception:
+        duration_ms = round((time.time() - start) * 1000)
+        logger.exception(
+            "[rid=%s] %s %s -> 500 (%dms)",
+            rid, request.method, path, duration_ms,
+        )
+        raise
+    duration_ms = round((time.time() - start) * 1000)
+    response.headers["X-Deja-Request-Id"] = rid
+    if log_it:
+        logger.info(
+            "[rid=%s] %s %s -> %d (%dms)",
+            rid, request.method, path, response.status_code, duration_ms,
+        )
+    return response
 
 
 # -- Models ------------------------------------------------------------------
@@ -76,7 +116,7 @@ class DiagnosticRequest(BaseModel):
 # -- Routes ------------------------------------------------------------------
 
 @app.get("/v1/me")
-async def whoami(authorization: str = Header("")):
+async def whoami(request: Request, authorization: str = Header("")):
     """Identity + admin check for the logged-in client.
 
     Called by the desktop app at launch so the tray menu can decide
@@ -281,8 +321,8 @@ async def generate_endpoint(
     cached_tokens = result.get("usage_metadata", {}).get("cached_content_token_count", 0)
 
     logger.info(
-        "generate rid=%s user=%s model=%s in=%d cached=%d out=%d ms=%d",
-        request_id, user["email"], body.model,
+        "[rid=%s] generate legacy_rid=%s user=%s model=%s in=%d cached=%d out=%d ms=%d",
+        request.state.rid, request_id, user["email"], body.model,
         input_tokens, cached_tokens, output_tokens, latency_ms,
     )
 
@@ -324,8 +364,8 @@ async def chat_endpoint(
     latency_ms = round((time.time() - start) * 1000)
 
     logger.info(
-        "chat rid=%s user=%s model=%s chars=%d ms=%d",
-        request_id, user["email"], body.model, len(text), latency_ms,
+        "[rid=%s] chat legacy_rid=%s user=%s model=%s chars=%d ms=%d",
+        request.state.rid, request_id, user["email"], body.model, len(text), latency_ms,
     )
 
     return {"text": text}
@@ -350,8 +390,8 @@ async def transcribe_endpoint(
     latency_ms = round((time.time() - start) * 1000)
 
     logger.info(
-        "transcribe user=%s size=%d ms=%d",
-        user["email"], len(audio_bytes), latency_ms,
+        "[rid=%s] transcribe user=%s size=%d ms=%d",
+        request.state.rid, user["email"], len(audio_bytes), latency_ms,
     )
 
     return {"text": text}
@@ -411,8 +451,8 @@ async def upload_diagnostic(
         bundle=body.bundle,
     )
     logger.info(
-        "diagnostic stored id=%s user=%s size=%d",
-        diag_id, user.get("email"), len(body.bundle),
+        "[rid=%s] diagnostic stored id=%s user=%s size=%d",
+        request.state.rid, diag_id, user.get("email"), len(body.bundle),
     )
     return {"id": diag_id}
 

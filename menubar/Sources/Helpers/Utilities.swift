@@ -64,12 +64,28 @@ func localAPICall(
     timeoutInterval: TimeInterval = 10,
     completion: @escaping (Data?, Error?) -> Void
 ) {
+    let rid = "swift_" + String(UUID().uuidString.prefix(12))
+    swiftLog(component: "http", event: "request", fields: ["rid": rid, "method": method, "path": path])
+    let wrappedCompletion: (Data?, Error?) -> Void = { data, err in
+        swiftLog(
+            component: "http",
+            event: "response",
+            ok: err == nil,
+            fields: [
+                "rid": rid,
+                "path": path,
+                "bytes": data?.count ?? 0,
+                "error": err?.localizedDescription ?? "",
+            ]
+        )
+        completion(data, err)
+    }
     DispatchQueue.global(qos: .userInitiated).async {
         let socketPath = MonitorState.home + "/deja.sock"
 
         let fd = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
         guard fd >= 0 else {
-            completion(nil, NSError(domain: "deja.ipc", code: -1, userInfo: [NSLocalizedDescriptionKey: "socket() failed"]))
+            wrappedCompletion(nil, NSError(domain: "deja.ipc", code: -1, userInfo: [NSLocalizedDescriptionKey: "socket() failed"]))
             return
         }
 
@@ -93,12 +109,12 @@ func localAPICall(
         })
         guard connectResult == 0 else {
             Darwin.close(fd)
-            completion(nil, NSError(domain: "deja.ipc", code: -2, userInfo: [NSLocalizedDescriptionKey: "connect() failed: \(String(cString: strerror(errno)))"]))
+            wrappedCompletion(nil, NSError(domain: "deja.ipc", code: -2, userInfo: [NSLocalizedDescriptionKey: "connect() failed: \(String(cString: strerror(errno)))"]))
             return
         }
 
         // Build raw HTTP/1.1 request
-        var http = "\(method) \(path) HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n"
+        var http = "\(method) \(path) HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\nUser-Agent: Deja/swift\r\nX-Deja-Request-Id: \(rid)\r\n"
         if let body = body {
             http += "Content-Type: application/json\r\nContent-Length: \(body.count)\r\n"
         }
@@ -133,19 +149,22 @@ func localAPICall(
         let separator = Data("\r\n\r\n".utf8)
         if let range = responseData.range(of: separator) {
             let bodyData = responseData.subdata(in: range.upperBound..<responseData.endIndex)
-            completion(bodyData, nil)
+            wrappedCompletion(bodyData, nil)
         } else {
             // No headers found — return raw data
-            completion(responseData.isEmpty ? nil : responseData, nil)
+            wrappedCompletion(responseData.isEmpty ? nil : responseData, nil)
         }
     }
 }
 
-// Append a Swift-side log line to ~/.deja/deja.log. The Python backend
-// already writes there; mixing Swift lines in keeps the support-log
-// upload cohesive without needing to scrape `log show`.
-func swiftLog(_ message: String) {
-    let line = "\(Date()) [swift] \(message)\n"
+// ISO8601 with milliseconds — shared by structured and prose loggers.
+private let _swiftLogISOFormatter: ISO8601DateFormatter = {
+    let f = ISO8601DateFormatter()
+    f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    return f
+}()
+
+private func _swiftLogWriteLine(_ line: String) {
     let path = NSHomeDirectory() + "/.deja/deja.log"
     guard let data = line.data(using: .utf8) else { return }
     // Use POSIX fopen("a") so the file is created if missing and we
@@ -158,4 +177,26 @@ func swiftLog(_ message: String) {
         }
     }
     fclose(fp)
+}
+
+// Append a Swift-side log line to ~/.deja/deja.log as one-line JSON.
+// Every line is valid JSON so `jq -c .` / grep both stay easy.
+func swiftLog(_ message: String) {
+    let obj: [String: Any] = ["t": _swiftLogISOFormatter.string(from: Date()), "msg": message]
+    guard let data = try? JSONSerialization.data(withJSONObject: obj, options: []),
+          let str = String(data: data, encoding: .utf8) else { return }
+    _swiftLogWriteLine(str + "\n")
+}
+
+func swiftLog(component: String, event: String, ok: Bool = true, fields: [String: Any] = [:]) {
+    var obj: [String: Any] = [
+        "t": _swiftLogISOFormatter.string(from: Date()),
+        "component": component,
+        "event": event,
+        "ok": ok,
+    ]
+    for (k, v) in fields { obj[k] = v }
+    guard let data = try? JSONSerialization.data(withJSONObject: obj, options: []),
+          let str = String(data: data, encoding: .utf8) else { return }
+    _swiftLogWriteLine(str + "\n")
 }

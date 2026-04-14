@@ -140,8 +140,13 @@ class MonitorState: ObservableObject {
     private var meetingTimer: Timer?
 
     private var statsTimer: Timer?
+    private var stateSnapshotTimer: Timer?
     private var screenshotTimer: Timer?
     private let keystrokeMonitor = KeystrokeMonitor()
+    /// Snapshots focused text-field contents via AX; emits "finished
+    /// thought" records to ~/.deja/typed_content.jsonl. Reuses the
+    /// existing Accessibility grant — no new TCC prompt.
+    private lazy var typedContentMonitor = TypedContentMonitor(keystrokeMonitor: keystrokeMonitor)
     /// Timestamp of the last SUCCESSFUL capture. Updated only when a
     /// capture actually goes through — NOT on deferred ticks. This is
     /// what the max-deferral safety valve compares against, so the
@@ -241,6 +246,14 @@ class MonitorState: ObservableObject {
         recomputeBlockedState()
         loadLaunchAtLoginState()
 
+        // Debug snapshot: ~/.deja/swift_state.json refreshed every 5s so
+        // the Python side (and log archives) can inspect what the Swift
+        // UI believes is true without IPC round-trips.
+        writeStateSnapshot()
+        stateSnapshotTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
+            self?.writeStateSnapshot()
+        }
+
         startErrorPolling()
 
         startWeb()
@@ -296,8 +309,10 @@ class MonitorState: ObservableObject {
 
     func stop() {
         statsTimer?.invalidate(); statsTimer = nil
+        stateSnapshotTimer?.invalidate(); stateSnapshotTimer = nil
         screenshotTimer?.invalidate(); screenshotTimer = nil
         keystrokeMonitor.stop()
+        typedContentMonitor.stop()
         dbReaderTimer?.invalidate(); dbReaderTimer = nil
         errorPoller.stop()
         processManager.stopAll()
@@ -462,6 +477,7 @@ class MonitorState: ObservableObject {
     func startScreenshotCapture() {
         guard screenshotTimer == nil else { return }
         keystrokeMonitor.start()
+        typedContentMonitor.start()
         captureScreenshot()
         rescheduleScreenshotTimer()
 
@@ -1075,6 +1091,45 @@ class MonitorState: ObservableObject {
         }
     }
 
+    /// Write a JSON snapshot of key UI state to ~/.deja/swift_state.json.
+    /// Atomic (temp file + rename) so concurrent readers never see a
+    /// half-written file. Best-effort: silently drops on serialization
+    /// or IO failure — this is debugging scaffolding, not a feature.
+    func writeStateSnapshot() {
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let obj: [String: Any] = [
+            "updated_at": iso.string(from: Date()),
+            "isAdmin": isAdmin,
+            "signedInEmail": signedInEmail,
+            "signedInName": signedInName,
+            "setupNeeded": setupNeeded,
+            "isBlocked": isBlocked,
+            "hasScreenRecording": hasScreenRecording,
+            "hasFullDiskAccess": hasFullDiskAccess,
+            "hasAccessibility": hasAccessibility,
+            "hasMicrophone": hasMicrophone,
+            "voicePillEnabled": voicePillEnabled,
+            "voicePillActive": voicePillActive,
+            "running": running,
+            "meetingAvailable": meetingAvailable,
+            "meetingRecording": meetingRecording,
+            "backfillRunning": backfillRunning,
+            "lastSignalISO": lastSignalISO,
+            "signals": signals,
+            "matches": matches,
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: obj, options: [.prettyPrinted]) else { return }
+        let finalPath = MonitorState.home + "/swift_state.json"
+        let tmpPath = finalPath + ".tmp"
+        do {
+            try data.write(to: URL(fileURLWithPath: tmpPath), options: .atomic)
+            _ = rename(tmpPath, finalPath)
+        } catch {
+            // Best-effort; no logging to avoid feedback loops with swiftLog.
+        }
+    }
+
     /// Fetch the user's identity + admin status from the server.
     /// Called once at launch — admin-list membership changes rarely
     /// enough that polling isn't worth the constant network chatter.
@@ -1082,10 +1137,10 @@ class MonitorState: ObservableObject {
     /// relaunch to pick it up (or the tray menu's "Sign out" →
     /// "Sign in" flow refetches when that lands).
     func fetchAdminStatus(attempt: Int = 1) {
-        swiftLog("fetchAdminStatus → /api/me (attempt \(attempt))")
+        swiftLog(component: "admin", event: "fetch_me", fields: ["attempt": attempt])
         localAPICall("/api/me", method: "GET", timeoutInterval: 5) { [weak self] data, err in
             if let err = err {
-                swiftLog("/api/me error: \(err.localizedDescription)")
+                swiftLog(component: "admin", event: "fetch_me_error", ok: false, fields: ["attempt": attempt, "error": err.localizedDescription])
                 // The Unix socket doesn't exist until uvicorn finishes
                 // booting. Boot time varies (cold launch on a busy system
                 // can take 10s+), so a single fixed delay isn't enough.
@@ -1099,19 +1154,18 @@ class MonitorState: ObservableObject {
                 return
             }
             guard let data = data else {
-                swiftLog("/api/me returned nil data")
+                swiftLog(component: "admin", event: "fetch_me_nil_data", ok: false)
                 return
             }
             let body = String(data: data, encoding: .utf8) ?? "<non-utf8>"
-            swiftLog("/api/me body: \(body.prefix(200))")
             guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                swiftLog("/api/me JSON parse failed")
+                swiftLog(component: "admin", event: "fetch_me_parse_failed", ok: false, fields: ["body": String(body.prefix(200))])
                 return
             }
             let admin = (obj["is_admin"] as? Bool) ?? ((obj["is_admin"] as? NSNumber)?.boolValue ?? false)
             let email = (obj["email"] as? String) ?? ""
             let name = (obj["name"] as? String) ?? ""
-            swiftLog("/api/me → admin=\(admin) email=\(email)")
+            swiftLog(component: "admin", event: "fetch_me_ok", fields: ["admin": admin, "email": email])
             DispatchQueue.main.async {
                 self?.isAdmin = admin
                 self?.signedInEmail = email
