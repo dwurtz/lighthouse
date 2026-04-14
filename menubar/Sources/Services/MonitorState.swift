@@ -1138,28 +1138,36 @@ class MonitorState: ObservableObject {
     /// "Sign in" flow refetches when that lands).
     func fetchAdminStatus(attempt: Int = 1) {
         swiftLog(component: "admin", event: "fetch_me", fields: ["attempt": attempt])
-        localAPICall("/api/me", method: "GET", timeoutInterval: 5) { [weak self] data, err in
-            if let err = err {
-                swiftLog(component: "admin", event: "fetch_me_error", ok: false, fields: ["attempt": attempt, "error": err.localizedDescription])
-                // The Unix socket doesn't exist until uvicorn finishes
-                // booting. Boot time varies (cold launch on a busy system
-                // can take 10s+), so a single fixed delay isn't enough.
-                // Retry up to ~30s with linear backoff.
+        // 20s timeout: /api/me internally does an httpx call to the
+        // proxy with its own 5s timeout. If we use 5s here too, we race
+        // the proxy call and often read nil when Render is warming up.
+        localAPICall("/api/me", method: "GET", timeoutInterval: 20) { [weak self] data, err in
+            // Single retry helper shared across every failure path
+            // (socket error, nil data, empty body, parse error, HTTP
+            // error). Any one of these previously left isAdmin stuck
+            // at false forever.
+            let retry: () -> Void = {
                 if attempt < 10 {
                     let delay = Double(attempt) * 2.0
                     DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
                         self?.fetchAdminStatus(attempt: attempt + 1)
                     }
                 }
+            }
+            if let err = err {
+                swiftLog(component: "admin", event: "fetch_me_error", ok: false, fields: ["attempt": attempt, "error": err.localizedDescription])
+                retry()
                 return
             }
-            guard let data = data else {
-                swiftLog(component: "admin", event: "fetch_me_nil_data", ok: false)
+            guard let data = data, !data.isEmpty else {
+                swiftLog(component: "admin", event: "fetch_me_nil_data", ok: false, fields: ["attempt": attempt])
+                retry()
                 return
             }
             let body = String(data: data, encoding: .utf8) ?? "<non-utf8>"
             guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                swiftLog(component: "admin", event: "fetch_me_parse_failed", ok: false, fields: ["body": String(body.prefix(200))])
+                swiftLog(component: "admin", event: "fetch_me_parse_failed", ok: false, fields: ["attempt": attempt, "body": String(body.prefix(200))])
+                retry()
                 return
             }
             let admin = (obj["is_admin"] as? Bool) ?? ((obj["is_admin"] as? NSNumber)?.boolValue ?? false)

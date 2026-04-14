@@ -29,6 +29,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var updaterController: SPUStandardUpdaterController!
     var setupPanelWindow: SetupPanelWindow?
     var settingsPanelWindow: SettingsPanelWindow?
+    var signalHealthPanelWindow: SignalHealthPanelWindow?
     var voicePillWindow: VoicePillWindow?
     var didSetupVoicePill: Bool = false
     let hotkeyManager = HotkeyManager()
@@ -352,10 +353,22 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let settings = NSMenuItem(
             title: "Settings…",
             action: #selector(showSettingsFromMenu),
-            keyEquivalent: ","
+            keyEquivalent: ""
         )
         settings.target = self
         menu.addItem(settings)
+
+        // Signal Health — diagnostic panel showing per-source
+        // collector liveness (email, imessage, screenshot, …). A
+        // user-facing escape hatch so people can see at a glance
+        // whether Déjà is still ingesting from every surface.
+        let signalHealth = NSMenuItem(
+            title: "Signal Health…",
+            action: #selector(showSignalHealth),
+            keyEquivalent: ""
+        )
+        signalHealth.target = self
+        menu.addItem(signalHealth)
 
         // Admin Dashboard — only shown to users on the server-side
         // DEJA_ADMIN_EMAILS allowlist. Non-admins never see this entry.
@@ -429,6 +442,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func showSettingsFromMenu() {
         showSettingsPanel()
+    }
+
+    @objc private func showSignalHealth() {
+        if let existing = signalHealthPanelWindow {
+            existing.orderFront(nil)
+            existing.makeKey()
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+        let panel = SignalHealthPanelWindow(monitor: monitor)
+        panel.orderFront(nil)
+        panel.makeKey()
+        NSApp.activate(ignoringOtherApps: true)
+        signalHealthPanelWindow = panel
     }
 
     private func showSettingsPanel() {

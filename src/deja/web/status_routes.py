@@ -208,6 +208,81 @@ def get_activity(limit: int = 50) -> dict:
     return {"entries": entries}
 
 
+@router.get("/api/signal_health")
+def get_signal_health() -> dict:
+    """Per-source collector health snapshot for the Swift tray menu.
+
+    Reconstructs each source's state from the last day of
+    ``~/.deja/audit.jsonl`` (``collector_ok`` / ``collector_error`` /
+    ``collector_stalled`` rows) and the tail of ``observations.jsonl``.
+    No in-process coupling — the menubar app is free to poll this
+    endpoint across backend restarts and still see accurate history.
+    """
+    from deja.signal_health import compute_signal_health
+    return compute_signal_health()
+
+
+def _read_collector_audits(limit: int = 500, source_id: str | None = None) -> list[dict]:
+    """Tail ``audit.jsonl`` for rows whose action starts with ``collector_``.
+
+    Newest-first. Optional ``source_id`` filters to a single target.
+    Safe against partial writes and unparseable rows.
+    """
+    from deja.config import DEJA_HOME
+    audit_path = DEJA_HOME / "audit.jsonl"
+    if not audit_path.exists():
+        return []
+    rows: list[dict] = []
+    try:
+        for line in audit_path.read_text(encoding="utf-8", errors="replace").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+            except Exception:
+                continue
+            action = rec.get("action") or ""
+            if not action.startswith("collector_"):
+                continue
+            if source_id and rec.get("target") != source_id:
+                continue
+            rows.append(rec)
+    except OSError:
+        return []
+    rows.sort(key=lambda r: r.get("ts", ""), reverse=True)
+    if limit and limit > 0:
+        rows = rows[:limit]
+    return rows
+
+
+@router.get("/api/signal_health/source/{source_id}/timeline")
+def get_signal_health_timeline(source_id: str, limit: int = 20) -> dict:
+    """Recent ``collector_*`` audit entries for one source, newest-first.
+
+    Powers the row-expanded timeline view in the Signal Health panel.
+    Returns ``{"source_id": ..., "entries": [...]}``. Limit is clamped
+    to [1, 200] so the UI can't accidentally pull the whole file.
+    """
+    limit = max(1, min(int(limit), 200))
+    return {
+        "source_id": source_id,
+        "entries": _read_collector_audits(limit=limit, source_id=source_id),
+    }
+
+
+@router.get("/api/signal_health/history")
+def get_signal_health_history(limit: int = 500) -> dict:
+    """All recent ``collector_*`` audit entries across every source.
+
+    Powers the "Export history" button in the Signal Health panel.
+    Returns ``{"entries": [...]}`` newest-first. Limit clamped to
+    [1, 5000].
+    """
+    limit = max(1, min(int(limit), 5000))
+    return {"entries": _read_collector_audits(limit=limit)}
+
+
 @router.get("/api/debug/state")
 def debug_state() -> dict:
     """One-shot snapshot of what the backend knows right now.
@@ -239,7 +314,13 @@ def debug_state() -> dict:
                 except OSError:
                     f.seek(0)
                 tail = f.read().splitlines()
-            swift_lines = [ln for ln in tail if "[swift]" in ln][-50:]
+            # Structured JSON lines (new format) carry "component":"…";
+            # legacy prose lines carry the "[swift]" prefix. Accept both
+            # so a mixed-era log tail stays readable.
+            swift_lines = [
+                ln for ln in tail
+                if '"component"' in ln or "[swift]" in ln
+            ][-50:]
         except Exception as e:
             swift_lines = [f"(read error: {e})"]
 
