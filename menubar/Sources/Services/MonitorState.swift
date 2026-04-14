@@ -304,6 +304,13 @@ class MonitorState: ObservableObject {
             DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
                 self?.fetchAdminStatus()
             }
+            // Refetch every 5 min so a transient Render blip on launch
+            // (502 / cold start) self-heals without the user having to
+            // relaunch the app. Admin-list membership rarely changes, so
+            // the cost is tiny and the reliability win is real.
+            Timer.scheduledTimer(withTimeInterval: 300.0, repeats: true) { [weak self] _ in
+                self?.fetchAdminStatus()
+            }
         }
     }
 
@@ -1167,6 +1174,18 @@ class MonitorState: ObservableObject {
             let body = String(data: data, encoding: .utf8) ?? "<non-utf8>"
             guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
                 swiftLog(component: "admin", event: "fetch_me_parse_failed", ok: false, fields: ["attempt": attempt, "body": String(body.prefix(200))])
+                retry()
+                return
+            }
+            // The Python endpoint catches its own httpx exceptions and
+            // returns `{"is_admin": false, "signed_in": false, "error":
+            // "..."}` as valid JSON rather than propagating a 5xx.
+            // Without this guard, a transient Render blip on launch
+            // poisons isAdmin=false for the entire session.
+            let errorField = (obj["error"] as? String) ?? ""
+            let signedIn = (obj["signed_in"] as? Bool) ?? true
+            if !errorField.isEmpty || !signedIn {
+                swiftLog(component: "admin", event: "fetch_me_soft_error", ok: false, fields: ["attempt": attempt, "error": errorField, "signed_in": signedIn])
                 retry()
                 return
             }

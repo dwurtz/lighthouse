@@ -199,18 +199,47 @@ async def generate(
     except Exception:
         pass
 
-    try:
-        response = client.models.generate_content(
-            model=model,
-            contents=contents,
-            config=gen_config,
-        )
-    except genai.errors.ClientError as exc:
-        logger.error("Gemini ClientError: %s", exc)
-        raise HTTPException(status_code=400, detail="LLM request failed — check model and parameters")
-    except Exception as exc:
-        logger.exception("Gemini generate failed")
-        raise HTTPException(status_code=502, detail="LLM service temporarily unavailable")
+    # Wrap the SDK call in our own retry loop. The google-genai SDK
+    # retries internally via tenacity, but only ~3 times with a tight
+    # budget — not enough for a 30-60s Gemini capacity spike. We add
+    # an outer retry (3 attempts, 2s/4s/8s backoff) that's specific to
+    # ServerError (503 UNAVAILABLE, rarely 500). Client-side errors
+    # bail immediately, since retrying a 400 won't help.
+    import asyncio
+    last_exc: Exception | None = None
+    for attempt in range(3):
+        try:
+            response = client.models.generate_content(
+                model=model,
+                contents=contents,
+                config=gen_config,
+            )
+            break
+        except genai.errors.ClientError as exc:
+            logger.error("Gemini ClientError (no retry): %s", exc)
+            raise HTTPException(status_code=400, detail="LLM request failed — check model and parameters")
+        except genai.errors.ServerError as exc:
+            last_exc = exc
+            logger.warning("Gemini ServerError attempt %d/3: %s", attempt + 1, exc)
+            if attempt < 2:
+                await asyncio.sleep(2 ** (attempt + 1))
+                continue
+            # Exhausted — surface as a proper 503 with Retry-After so
+            # the client's own retry logic treats it as transient, not
+            # a 502 "backend dead" that spams the user-facing error
+            # toast.
+            raise HTTPException(
+                status_code=503,
+                detail="Gemini is experiencing high demand. Retrying now won't help; try again in ~30 seconds.",
+                headers={"Retry-After": "30"},
+            )
+        except Exception as exc:
+            logger.exception("Gemini generate failed (unexpected)")
+            raise HTTPException(status_code=502, detail="LLM service temporarily unavailable")
+    else:
+        # Loop completed without break — shouldn't happen because we
+        # raise inside the ServerError branch, but belt + suspenders.
+        raise HTTPException(status_code=503, detail="LLM upstream unavailable")
 
     return _serialize_response(response)
 
