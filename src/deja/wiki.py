@@ -84,18 +84,83 @@ def backup_page(path: Path):
 # in deterministic code rather than relying on LLM discipline.
 _FRONTMATTER_RE = re.compile(r"\A(---\s*\n.*?\n---\s*\n)", re.DOTALL)
 
+# Catches the one-line corruption pattern integrate sometimes produces:
+#     ---date: 2026-04-06time: "17:47"people: [foo]projects: [bar]---
+# (no newlines between keys). 30+ event files currently have this shape.
+_ONELINE_FRONTMATTER_RE = re.compile(r"\A---([^\n]+?)---\s*\n?", re.DOTALL)
+
 
 def extract_frontmatter(content: str) -> tuple[str, str]:
     """Split `content` into (frontmatter_block, body).
 
     Returns ("", content) if no frontmatter is present. The frontmatter
     block includes its trailing `---\\n` so grafting it back is just a
-    string concatenation.
+    string concatenation. Does NOT match one-line-corrupted frontmatter
+    (use ``canonicalize_frontmatter`` to repair those first).
     """
     m = _FRONTMATTER_RE.match(content)
     if not m:
         return "", content
     return m.group(1), content[m.end():]
+
+
+def _split_inline_yaml(inline: str) -> list[tuple[str, str]]:
+    """Split a one-line YAML blob into (key, value) pairs.
+
+    Input looks like ``date: 2026-04-06time: "17:47"people: [foo]projects: [bar]``.
+    Returns a list of tuples preserving order. Quoted strings and
+    bracketed lists are kept intact. Used by canonicalize_frontmatter
+    to repair integrate's one-line corruption.
+    """
+    pairs: list[tuple[str, str]] = []
+    # Keys are always a-z_ followed by colon. Walk the string using a
+    # regex that captures everything up to the next key or end.
+    key_re = re.compile(r"([a-z_][a-z0-9_]*)\s*:\s*", re.IGNORECASE)
+    matches = list(key_re.finditer(inline))
+    for i, m in enumerate(matches):
+        key = m.group(1)
+        start = m.end()
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(inline)
+        value = inline[start:end].rstrip()
+        # Trim trailing whitespace but preserve leading brackets/quotes
+        pairs.append((key, value.strip()))
+    return pairs
+
+
+def canonicalize_frontmatter(content: str) -> tuple[str, bool]:
+    """Repair one-line corrupted frontmatter to clean multi-line form.
+
+    Returns (maybe_repaired_content, was_repaired). If the content has
+    clean multi-line frontmatter (or no frontmatter at all), returns
+    it unchanged with ``was_repaired=False``.
+
+    This fixes the shape integrate occasionally produces where all
+    keys land on one line between the opening and closing ``---``:
+
+        ---date: 2026-04-06time: "17:47"people: [foo]projects: [bar]---
+
+    becomes:
+
+        ---
+        date: 2026-04-06
+        time: "17:47"
+        people: [foo]
+        projects: [bar]
+        ---
+    """
+    # Already canonical? Done.
+    if _FRONTMATTER_RE.match(content):
+        return content, False
+    m = _ONELINE_FRONTMATTER_RE.match(content)
+    if not m:
+        return content, False
+    inline = m.group(1).strip()
+    pairs = _split_inline_yaml(inline)
+    if not pairs:
+        return content, False
+    new_fm = "---\n" + "\n".join(f"{k}: {v}" for k, v in pairs) + "\n---\n"
+    body = content[m.end():].lstrip("\n")
+    return new_fm + body, True
 
 
 def preserve_frontmatter(new_content: str, old_content: str) -> tuple[str, bool]:
@@ -191,6 +256,22 @@ def write_page(category: str, slug: str, content: str) -> Path:
                 "wiki: grafted frontmatter back onto %s/%s (LLM stripped it)",
                 category, slug,
             )
+
+    # Auto-repair one-line frontmatter corruption before persisting.
+    # Without this, integrate's occasional single-line YAML output
+    # ("---date: ...time: ...people: [...]---" on one line) propagates
+    # through retrieval, cluster analysis, and display. The check is
+    # cheap and deterministic; repair is safer than relying on
+    # prompt-level discipline to always produce multi-line YAML.
+    content, canonicalized = canonicalize_frontmatter(content)
+    if canonicalized:
+        log.warning(
+            "wiki: canonicalized one-line frontmatter on %s/%s "
+            "(integrate produced the broken form — consider tightening "
+            "the prompt if this becomes frequent)",
+            category, slug,
+        )
+
     path.write_text(content.rstrip() + "\n")
     return path
 

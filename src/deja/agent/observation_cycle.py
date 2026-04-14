@@ -9,9 +9,55 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import time
 from datetime import datetime, timezone
 
 log = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# OCR signal cleanup — strip menu bar chrome and label signals clearly
+# ---------------------------------------------------------------------------
+
+
+def _read_ax_sidecar(display_sender: str | None) -> dict | None:
+    """Read the per-display AX sidecar that Swift writes at capture time.
+
+    ``display_sender`` is the observation's sender field, which the
+    screenshot collector sets to ``"display-1"``, ``"display-2"``, etc.
+    We convert that to ``screen_N_ax.json`` and read it. This is a
+    point-in-time capture — the app/window state at the moment
+    screencapture fired — which avoids the "focus moved while Python
+    processed the image" race.
+
+    Returns a dict with ``app`` / ``window_title`` keys or None if
+    no sidecar exists (e.g. single-screen fallback, fresh install
+    before the Swift change rolled out).
+    """
+    if not display_sender or not display_sender.startswith("display-"):
+        return None
+    try:
+        import json as _json
+        import os as _os
+
+        num = display_sender.replace("display-", "")
+        path = _os.path.expanduser(f"~/.deja/screen_{num}_ax.json")
+        if not _os.path.exists(path):
+            return None
+        with open(path) as f:
+            data = _json.load(f)
+        if isinstance(data, dict) and (data.get("app") or data.get("window_title")):
+            return data
+    except Exception:
+        log.debug("ax sidecar read failed", exc_info=True)
+    return None
+
+
+def _label_for_app(app: str, title: str) -> str:
+    """Return a signal header like 'Messages: Rob HealthspanMD'.
+    Flash-Lite knows what these apps are — no translation needed."""
+    if app and title:
+        return f"{app}: {title}"
+    return app or "Screen content"
 
 
 # Timestamp of the most recent voice entry we already injected into a
@@ -94,57 +140,6 @@ def _recent_voice_context(window_seconds: int = 15) -> str:
     return ""
 
 
-async def _shadow_save_triple(
-    loop_ref,
-    image_path: str,
-    local_desc: str,
-    voice_context: str,
-    timestamp: datetime,
-) -> None:
-    """Run cloud vision on the same image and save (image, local, cloud) triple.
-
-    Used by VISION_SHADOW_EVAL mode to build a real-world dataset for
-    iterating on the local vision model's prompt.
-    """
-    import json
-    import shutil
-    from deja.config import VISION_SHADOW_DIR
-
-    VISION_SHADOW_DIR.mkdir(parents=True, exist_ok=True)
-    ts = timestamp.strftime("%Y%m%d-%H%M%S")
-
-    # Run cloud vision (Gemini) on the same image
-    cloud_desc = ""
-    cloud_error = ""
-    try:
-        cloud_result = await loop_ref.gemini.describe_screen(image_path, voice_context=voice_context)
-        cloud_desc = (cloud_result.get("summary") or "").strip()
-    except Exception as e:
-        cloud_error = str(e)[:200]
-        log.warning("vision shadow: cloud call failed: %s", cloud_error)
-        return
-
-    if not cloud_desc:
-        return
-
-    # Save the triple: image + JSON metadata
-    try:
-        dest_png = VISION_SHADOW_DIR / f"{ts}.png"
-        dest_meta = VISION_SHADOW_DIR / f"{ts}.json"
-        shutil.copy(image_path, dest_png)
-        meta = {
-            "timestamp": timestamp.isoformat(),
-            "voice_context": voice_context,
-            "local_desc": local_desc,
-            "cloud_desc": cloud_desc,
-        }
-        dest_meta.write_text(json.dumps(meta, indent=2), encoding="utf-8")
-        log.info("vision shadow: saved %s (local=%dch cloud=%dch)",
-                 ts, len(local_desc), len(cloud_desc))
-    except Exception as e:
-        log.warning("vision shadow: failed to write triple: %s", e)
-
-
 async def run_collect_cycle(loop_ref) -> None:
     """One collection cycle -- gather all new signals.
 
@@ -178,8 +173,17 @@ async def run_collect_cycle(loop_ref) -> None:
                         # Empty dict when AX is unavailable or the frontmost
                         # app has broken AX support; the formatter handles
                         # that as a no-op in the prompt.
-                        from deja.ax_context import capture as capture_ax
-                        ax_context = capture_ax()
+                        # AX context: per-display sidecar written by
+                        # Swift at capture time — `screen_N_ax.json`.
+                        # This avoids the "wrong app labeled on
+                        # screen_1 because focus was on screen_2 when
+                        # Python processed it" bug. If no sidecar
+                        # exists (single-screen fallback path), fall
+                        # back to live AX capture.
+                        ax_context = _read_ax_sidecar(sig.sender)
+                        if not ax_context:
+                            from deja.ax_context import capture as capture_ax
+                            ax_context = capture_ax()
                         if ax_context:
                             log.debug(
                                 "ax_context: app=%r win=%r focus=%r",
@@ -188,39 +192,55 @@ async def run_collect_cycle(loop_ref) -> None:
                                 ax_context.get("focused_role"),
                             )
 
-                        # Try local FastVLM first (private, free, ~3.5s)
-                        # Falls back to Gemini via proxy if mlx-vlm not installed
-                        from deja.vision_local import describe_screen_local, is_available
-                        local_desc = None
-                        avail = is_available()
-                        log.info("Local vision available: %s", avail)
-                        if avail:
-                            local_desc = describe_screen_local(
-                                image_path,
-                                voice_context=voice_context,
-                                ax_context=ax_context,
-                            )
-                            log.info("Local vision result: %s", "OK" if local_desc else "EMPTY")
+                        # Vision pipeline: macOS OCR + AX context.
+                        #
+                        # Apple Vision OCR extracts text perfectly from
+                        # any screenshot in ~1.5s on-device. Combined
+                        # with AX context (app name + window title), this
+                        # gives integrate everything it needs — real text
+                        # to reason about, not hallucinated descriptions.
+                        #
+                        # This replaced FastVLM 3-pass (which scored 90.9%
+                        # on fixtures but confabulated message content on
+                        # live screens) and cloud Gemini (which was perfect
+                        # but cost money and leaked pixels off-device).
+                        from deja.vision_local import ocr_screen
 
-                        if local_desc:
-                            sig.text = local_desc
-                        else:
-                            # Fallback to cloud Gemini
-                            vision_result = await loop_ref.gemini.describe_screen(image_path, voice_context=voice_context)
-                            sig.text = (vision_result.get("summary") or "").strip() or "(empty vision description)"
+                        t_ocr = time.time()
+                        ocr_text = ocr_screen(image_path)
+                        ocr_elapsed = time.time() - t_ocr
 
-                        # Vision shadow eval — if both models ran, save the
-                        # paired (image, local, cloud) triple for prompt iteration.
-                        # The downstream `sig.text` is unchanged; we only collect.
-                        try:
-                            from deja.config import VISION_SHADOW_EVAL
-                            if VISION_SHADOW_EVAL and local_desc:
-                                await _shadow_save_triple(
-                                    loop_ref, image_path, local_desc,
-                                    voice_context, sig.timestamp,
+                        if ocr_text:
+                            # Label the signal clearly so integrate
+                            # knows what kind of content to expect.
+                            # The window list is NOT included — it goes
+                            # into the integrate prompt once per cycle.
+                            app = (ax_context or {}).get("app", "")
+                            title = (ax_context or {}).get("window_title", "")
+                            label = _label_for_app(app, title)
+
+                            header = f"[{label}]"
+                            if voice_context:
+                                header = (
+                                    f"[User just said: \"{voice_context}\"]\n"
+                                    + header
                                 )
-                        except Exception:
-                            log.debug("vision shadow save failed", exc_info=True)
+
+                            sig.text = header + "\n\n" + ocr_text
+                            log.info(
+                                "Vision (OCR+AX): %.1fs, %d chars, %s",
+                                ocr_elapsed, len(sig.text),
+                                image_path.split("/")[-1],
+                            )
+                        else:
+                            log.error(
+                                "OCR returned empty for %s — deja-ocr "
+                                "binary may be missing or the image is "
+                                "unreadable. No fallback.",
+                                image_path,
+                            )
+                            sig.text = "(OCR failed — no text extracted)"
+
                     finally:
                         # Optional retention for vision A/B eval — gated by
                         # config.VISION_RETENTION. Saves PNG + sidecar .txt

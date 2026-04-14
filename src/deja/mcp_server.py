@@ -327,31 +327,34 @@ def _goals_for_topic(topic: str) -> str:
 
 
 def _qmd_query(topic: str, collection: str | None = None, limit: int = 5) -> str:
-    """Run a QMD hybrid query (BM25 + vector + HyDE reranking).
+    """Run a BM25 search against the wiki via ``qmd search``.
 
-    Returns the formatted text output from ``qmd query``. Falls back to
-    ``qmd search`` (BM25 only) if ``query`` fails, and returns an empty
-    string on any failure so callers degrade gracefully.
+    Deliberately NOT ``qmd query`` — that path runs HyDE rerank, which
+    issues an LLM call per search and takes ~10s on this wiki. BM25
+    alone scores named-entity matches at 85%+ (Amanda → amanda-peffer.md)
+    and returns in ~0.3s. HyDE's conceptual-query edge isn't worth the
+    30x latency for any caller we have today: command classification,
+    query synthesis, and MCP get_context all need fast entity lookup,
+    not fuzzy conceptual retrieval.
+
+    Raises ``RuntimeError`` on any failure so callers surface the
+    problem instead of silently running against a blank wiki — that
+    was the root cause of the "draft email to Amanda" dispatch
+    failing with missing ``to``.
     """
     import subprocess
-    cmd = ["qmd", "query", topic, "-n", str(limit)]
+
+    cmd = ["qmd", "search", topic, "-n", str(limit)]
     if collection:
         cmd += ["-c", collection]
-    try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-        if r.returncode == 0 and r.stdout.strip():
-            return r.stdout.strip()
-    except Exception:
-        pass
-    # Fallback to BM25 only
-    cmd[1] = "search"
-    try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-        if r.returncode == 0:
-            return r.stdout.strip()
-    except Exception:
-        pass
-    return ""
+
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+    if r.returncode != 0:
+        raise RuntimeError(
+            f"qmd search failed (rc={r.returncode}): "
+            f"{r.stderr[:400] or '(no stderr)'}"
+        )
+    return (r.stdout or "").strip()
 
 
 def _get_context(topic: str) -> str:

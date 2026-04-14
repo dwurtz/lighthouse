@@ -38,11 +38,31 @@ def sync_feature_flags() -> dict:
             resp.raise_for_status()
             data = resp.json()
 
-        flags = data.get("feature_flags", {}) or {}
+        server_flags = data.get("feature_flags", {}) or {}
+
+        # Merge with existing local flags instead of replacing them.
+        # This lets developers set local-only flags (e.g. experiments
+        # the server doesn't know about) without having them wiped on
+        # every startup. Server flags take precedence for keys the
+        # server DOES know about; unknown local keys survive.
+        local_flags = {}
+        if _FLAGS_PATH.exists():
+            try:
+                local_flags = json.loads(_FLAGS_PATH.read_text())
+                if not isinstance(local_flags, dict):
+                    local_flags = {}
+            except Exception:
+                local_flags = {}
+
+        merged = {**local_flags, **server_flags}
         _FLAGS_PATH.parent.mkdir(parents=True, exist_ok=True)
-        _FLAGS_PATH.write_text(json.dumps(flags, indent=2))
-        log.info("Synced feature flags from server: %s", flags)
-        return flags
+        _FLAGS_PATH.write_text(json.dumps(merged, indent=2))
+        log.info(
+            "Synced feature flags from server: server=%s local-only=%s",
+            server_flags,
+            {k: v for k, v in local_flags.items() if k not in server_flags},
+        )
+        return merged
     except Exception as e:
         log.debug("feature flag sync failed: %s", e)
         return {}

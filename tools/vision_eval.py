@@ -117,6 +117,15 @@ MODELS = {
         "input_per_mtok_usd": 0.0,
         "output_per_mtok_usd": 0.0,
     },
+    # Apple FastVLM 0.5B via mlx-vlm (the production local vision path).
+    # Calls describe_screen_local() so the test exercises the exact
+    # prompt + code path that runs in the deployed app.
+    "fastvlm": {
+        "id": "fastvlm",
+        "backend": "fastvlm",
+        "input_per_mtok_usd": 0.0,
+        "output_per_mtok_usd": 0.0,
+    },
 }
 
 
@@ -293,6 +302,41 @@ async def describe_one_ollama(
     return text, in_tok, out_tok, latency_ms, resources
 
 
+async def describe_one_fastvlm(
+    image_path: Path,
+) -> tuple[str, int, int, int, dict]:
+    """Call FastVLM via describe_screen_local — the real production path.
+
+    Deliberately reuses describe_screen_local (not a custom prompt) so
+    the eval harness exercises exactly what ships. mlx-vlm doesn't
+    expose token counts, so we approximate output tokens from character
+    length for the cost-parity report (cost is 0 anyway — local model).
+    """
+    from deja.vision_local import describe_screen_local
+
+    resources_before = _get_resource_usage()
+    t0 = time.time()
+    # No voice/ax context: fixtures are standalone PNGs with no
+    # surrounding app state, which mirrors how the harness should
+    # exercise the baseline prompt path.
+    text = describe_screen_local(str(image_path)) or ""
+    latency_ms = int((time.time() - t0) * 1000)
+    resources_after = _get_resource_usage()
+
+    resources = {
+        "cpu_percent_peak": max(
+            resources_before["cpu_percent"],
+            resources_after["cpu_percent"],
+        ),
+        "memory_mb_peak": max(
+            resources_before["memory_mb"],
+            resources_after["memory_mb"],
+        ),
+    }
+    out_tok_approx = max(1, len(text) // 4)
+    return text, 0, out_tok_approx, latency_ms, resources
+
+
 async def describe_one(
     client,
     types_mod,
@@ -424,13 +468,17 @@ async def evaluate(args):
         for model_alias in model_aliases:
             model_info = MODELS[model_alias]
             model_id = model_info["id"]
-            is_ollama = model_info.get("backend") == "ollama"
+            backend = model_info.get("backend", "gemini")
             for sample_idx in range(args.samples):
                 try:
                     resources = {}
-                    if is_ollama:
+                    if backend == "ollama":
                         text, in_tok, out_tok, latency, resources = await describe_one_ollama(
                             image_bytes, mime, prompt, model_id
+                        )
+                    elif backend == "fastvlm":
+                        text, in_tok, out_tok, latency, resources = await describe_one_fastvlm(
+                            fx_path
                         )
                     else:
                         client, genai_types = get_gemini()

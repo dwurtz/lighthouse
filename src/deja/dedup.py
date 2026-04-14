@@ -417,7 +417,7 @@ async def confirm_candidates(
     if "{pairs}" not in prompt_template:
         raise RuntimeError(
             "Dedup confirm prompt is missing the {pairs} placeholder. "
-            "Check ~/Deja/prompts/dedup_confirm.md."
+            "Check the bundled dedup_confirm.md in default_assets/prompts/."
         )
 
     # Split into batches of CONFIRM_BATCH_SIZE
@@ -439,7 +439,7 @@ async def confirm_candidates(
         except (KeyError, IndexError) as e:
             raise RuntimeError(
                 f"Dedup confirm prompt template has an unexpected format "
-                f"placeholder: {e}. Check ~/Deja/prompts/dedup_confirm.md — "
+                f"placeholder: {e}. Check the bundled dedup_confirm.md in default_assets/prompts/ — "
                 f"only {{pairs}} should be an unescaped placeholder; all "
                 f"literal braces must be doubled as {{{{ }}}}."
             ) from e

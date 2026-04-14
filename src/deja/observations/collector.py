@@ -18,10 +18,12 @@ from deja.observations.drive import DriveObserver
 from deja.observations.email import EmailObserver
 from deja.observations.imessage import IMessageObserver
 from deja.observations.meet import MeetObserver
-from deja.observations.screenshot import capture_screenshot_if_changed
+from deja.observations.screenshot import capture_screenshot_if_changed, ScreenshotObserver
 from deja.observations.tasks import TasksObserver
+from deja.observations.typed_content import TypedContentObserver
 from deja.observations.types import Observation
 from deja.observations.whatsapp import WhatsAppObserver
+from deja.signal_health import SourceHealthTracker, source_id_for
 
 log = logging.getLogger(__name__)
 
@@ -35,15 +37,26 @@ class Observer:
         self._screenshot_every: int = 1
         self._signal_log_path = DEJA_HOME / "observations.jsonl"
 
+        # Per-source health state. Tracks ok/error transitions and
+        # emits heartbeats via deja.audit. See deja.signal_health.
+        self.health = SourceHealthTracker()
+
         # Observers that run every cycle
         self._every_cycle_observers: list[BaseObserver] = [
             IMessageObserver(),
             WhatsAppObserver(),
             ClipboardObserver(),
+            TypedContentObserver(),
         ]
 
-        # Observers gated by a shared GWS counter (every Nth cycle)
-        self._gws_every: int = 5
+        # Observers gated by a shared GWS counter (every Nth cycle).
+        # Email / Calendar / Drive now use delta APIs (historyId /
+        # syncToken / pageToken) so each cycle is O(new-changes) and
+        # cheap to run more often. We bumped 5 → 2 (~6s at 3s/cycle)
+        # on that basis. Going lower would pay rate-limit cost for the
+        # non-delta observers in this bucket (tasks, meet) without
+        # clear upside.
+        self._gws_every: int = 2
         self._gws_counter: int = 0
         self._gws_observers: list[BaseObserver] = [
             EmailObserver(),
@@ -61,6 +74,29 @@ class Observer:
         self.recent_history: deque[Observation] = deque(maxlen=history_size)
         self._load_history()
 
+    def _run_observer(self, obs: BaseObserver, raw: list[Observation]) -> None:
+        """Invoke one observer's ``collect()`` with signal-health tracking.
+
+        Wraps the call so exceptions are swallowed (isolate one bad
+        source from the rest), and every invocation updates the
+        in-memory ``SourceHealthTracker`` — which in turn emits
+        ``collector_ok`` recovery/heartbeat rows and ``collector_error``
+        rows to ``audit.jsonl``. Observers that aren't first-class
+        tracked sources (e.g. Meet) just run without health tracking.
+        """
+        src_id = source_id_for(obs.name)
+        try:
+            signals = obs.collect()
+        except Exception as e:
+            log.exception("%s collector error", obs.name)
+            if src_id is not None:
+                reason = f"{type(e).__name__}: {str(e)[:160]}"
+                self.health.record_error(src_id, reason)
+            return
+        raw.extend(signals)
+        if src_id is not None:
+            self.health.record_success(src_id)
+
     def collect_all(self) -> list[Observation]:
         """
         Run all collectors, deduplicate against previously seen ids,
@@ -70,29 +106,20 @@ class Observer:
 
         # Every-cycle observers (messages, clipboard)
         for obs in self._every_cycle_observers:
-            try:
-                raw.extend(obs.collect())
-            except Exception:
-                log.exception("%s collector error", obs.name)
+            self._run_observer(obs, raw)
 
         # Browser history — every 3rd cycle (~9s)
         self._browser_counter += 1
         if self._browser_counter >= self._browser_every:
             self._browser_counter = 0
-            try:
-                raw.extend(self._browser_observer.collect())
-            except Exception:
-                log.exception("%s collector error", self._browser_observer.name)
+            self._run_observer(self._browser_observer, raw)
 
         # GWS-gated observers — every 5th cycle
         self._gws_counter += 1
         if self._gws_counter >= self._gws_every:
             self._gws_counter = 0
             for obs in self._gws_observers:
-                try:
-                    raw.extend(obs.collect())
-                except Exception:
-                    log.exception("%s collector error", obs.name)
+                self._run_observer(obs, raw)
 
         # Microphone: handled entirely by the web server via
         # /api/mic/start and /api/mic/stop. Nothing to poll here — mic
@@ -109,15 +136,16 @@ class Observer:
         # avoids the TCC prompt entirely.
         from deja.config import SCREENSHOT_ENABLED
         if SCREENSHOT_ENABLED:
-            try:
-                self._screenshot_counter += 1
-                if self._screenshot_counter >= 2:  # 2 cycles x 3s = 6s
-                    self._screenshot_counter = 0
-                    screen = capture_screenshot_if_changed()
-                    if screen:
-                        raw.append(screen)
-            except Exception:
-                log.exception("Screenshot collector error")
+            self._screenshot_counter += 1
+            if self._screenshot_counter >= 2:  # 2 cycles x 3s = 6s
+                self._screenshot_counter = 0
+                # Use ScreenshotObserver.collect() which iterates
+                # all displays (screen_1.png, screen_2.png, ...)
+                # instead of just latest_screen.png. Each display
+                # gets its own perceptual hash and vision pass.
+                if not hasattr(self, "_screenshot_observer"):
+                    self._screenshot_observer = ScreenshotObserver()
+                self._run_observer(self._screenshot_observer, raw)
 
         # Resolve contact names for message signals
         try:
@@ -226,7 +254,7 @@ class Observer:
                 f.write(json.dumps({
                     "source": sig.source,
                     "sender": sig.sender,
-                    "text": sig.text[:500],
+                    "text": sig.text,
                     "timestamp": sig.timestamp.isoformat(),
                     "id_key": sig.id_key,
                 }) + "\n")

@@ -244,8 +244,10 @@ async def _run_analysis_cycle_body(
         loop_ref.phase = "IDLE"
         return
 
-    # 1a. Triage message-type signals via local Gemma.
-    kept_items = await triage_signals(signal_items)
+    # 1a. Deterministic triage: drop automation / off-catalog noise,
+    #     always keep Tier 1 (user-authored / inner-circle) and
+    #     Tier 2 (focused-attention screenshots).
+    kept_items = triage_signals(signal_items)
 
     if not kept_items:
         log.info(
@@ -263,6 +265,11 @@ async def _run_analysis_cycle_body(
             len(kept_items),
             len(signal_items),
         )
+
+    # Register the exact signal id_keys that seed this cycle so every
+    # audit.record() downstream carries `signal_ids` — annotation tools
+    # join writes to their real inputs instead of guessing by time window.
+    audit.set_signals([i.get("id_key") for i in kept_items if i.get("id_key")])
 
     # 1b. Capture the window list ONCE for the whole cycle — this goes
     #     into the integrate prompt as context, not into each signal.
@@ -457,75 +464,9 @@ async def _run_analysis_cycle_body(
 
 
 # ---------------------------------------------------------------------------
-# Triage / formatting helpers
+# Triage / formatting — re-exported from ``deja.signals`` so existing
+# imports (and any tests that patched these names here) keep working.
+# The real implementations now live under ``src/deja/signals/``.
 # ---------------------------------------------------------------------------
 
-def format_signals(items: list[dict]) -> str:
-    """Format structured signal dicts for the integrate prompt.
-
-    No per-signal truncation — Flash-Lite has a 1M token context
-    window. The signal text is whatever the collector captured.
-    """
-    lines: list[str] = []
-    for d in items:
-        ts = d.get("timestamp", "")
-        source = d.get("source", "?")
-        sender = d.get("sender", "?")
-        text = d.get("text", "") or ""
-        lines.append(f"[{ts}] [{source}] {sender}: {text}")
-    return "\n".join(lines)
-
-
-async def triage_signals(items: list[dict]) -> list[dict]:
-    """Filter message-type signals through one batched Flash-Lite call.
-
-    Non-message signals (calendar, drive, tasks, screenshot, clipboard,
-    microphone) pass through untouched. Recall-biased — on any failure
-    every triaged signal is kept.
-
-    **Outbound messages bypass triage entirely.** Anything David wrote
-    himself (imessage/whatsapp sent by "You", email from his address)
-    is intent-laden by definition — commitments, decisions, questions
-    he's asking — and is never worth dropping. Only inbound messages
-    get triaged for noise.
-    """
-    from deja.llm import prefilter as local_llm
-    from deja.observations.types import is_outbound
-
-    # Partition: inbound message signals get triaged. Everything
-    # else (non-message signals AND any outbound message) passes
-    # through untouched.
-    to_triage: list[tuple[int, dict]] = []
-    passthrough: list[tuple[int, dict]] = []
-    for i, d in enumerate(items):
-        if d.get("source") in local_llm.TRIAGE_SOURCES and not is_outbound(d):
-            to_triage.append((i, d))
-        else:
-            passthrough.append((i, d))
-
-    if not to_triage:
-        return items
-
-    # One batched Flash-Lite call for the whole cycle's message signals.
-    index_md = local_llm.load_index_md()
-    triage_items = [d for _, d in to_triage]
-    try:
-        verdicts = await local_llm.triage_batch(triage_items, index_md=index_md)
-    except Exception:
-        log.exception("Triage batch call failed — keeping all signals")
-        verdicts = [(True, "triage exception — keeping")] * len(triage_items)
-
-    kept: list[tuple[int, dict]] = list(passthrough)
-    for (i, d), (relevant, reason) in zip(to_triage, verdicts):
-        if relevant:
-            kept.append((i, d))
-        else:
-            log.info(
-                "Triage dropped [%s] %s: %s",
-                d.get("source", "?"),
-                d.get("sender", "?"),
-                reason,
-            )
-
-    kept.sort(key=lambda pair: pair[0])
-    return [d for _, d in kept]
+from deja.signals import format_signals, triage_signals  # noqa: E402,F401

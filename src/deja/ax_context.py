@@ -216,6 +216,68 @@ def capture() -> dict:
     return result
 
 
+def capture_all_windows() -> list[dict]:
+    """Snapshot every visible window across all running applications.
+
+    Returns a list of dicts, each with ``app`` and ``title`` keys.
+    Ordered by the window layer order (frontmost first) when possible,
+    falling back to app list order. Used to give integrate a full
+    picture of what the user has open — not just the focused window.
+
+    Each entry looks like:
+        {"app": "Messages", "title": "Molly/Ruby Carpool"}
+        {"app": "VS Code", "title": "vision_local.py — deja"}
+        {"app": "Google Chrome", "title": "Zillow — 465 Hale St"}
+
+    Returns an empty list when AX is unavailable.
+    """
+    if not _ensure_bindings():
+        return []
+
+    windows: list[dict] = []
+    seen: set[str] = set()  # dedup "app: title" pairs
+
+    try:
+        workspace = _NSWorkspace.sharedWorkspace()
+        for app in workspace.runningApplications():
+            # Skip background-only apps (daemons, menubar items)
+            policy = app.activationPolicy()
+            if policy != 0:  # 0 = NSApplicationActivationPolicyRegular
+                continue
+
+            name = str(app.localizedName() or "").strip()
+            if not name:
+                continue
+
+            pid = app.processIdentifier()
+            if pid <= 0:
+                continue
+
+            try:
+                ax_app = _AXUIElementCreateApplication(pid)
+                err, win_list = _AXUIElementCopyAttributeValue(
+                    ax_app, "AXWindows", None
+                )
+                if err != 0 or win_list is None:
+                    continue
+
+                for win in win_list:
+                    title = _ax_copy(win, "AXTitle")
+                    if not title:
+                        continue
+                    key = f"{name}: {title}"
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    windows.append({"app": name, "title": title[:200]})
+            except Exception:
+                continue
+    except Exception:
+        log.debug("capture_all_windows failed", exc_info=True)
+
+    return windows
+
+
 def format_for_prompt(ctx: dict) -> str:
     """Render an AX context dict as a prompt block, or empty string.
 

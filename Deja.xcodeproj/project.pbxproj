@@ -8,11 +8,13 @@
 
 /* Begin PBXBuildFile section */
 		070169F7CFC7C96432745E16 /* MeetingPillView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E78982A7A76CA05C3EB71ABE /* MeetingPillView.swift */; };
+		095E6F27DEF16934B06AC1C7 /* TypedContentMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4454C278EB1B7F0CF033512 /* TypedContentMonitor.swift */; };
 		0C01FC2FFCC37AF1B2A160EB /* MeetingRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 546E703E0F803FFACC8456F1 /* MeetingRecorder.swift */; };
 		102162F0747EB5287C007B9C /* CommandCenterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFC477EE190FBC248A2EDB69 /* CommandCenterView.swift */; };
 		12142699C3AB7EDE92148355 /* DejaRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4EB157B404F53D33F9512646 /* DejaRecorder.swift */; };
 		131A4D2CC8EAB60047719E02 /* DejaError.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2E2F7ED5BD9AD0C309AE8AC /* DejaError.swift */; };
 		1F24387ECE2ABE55E8446C0A /* VoiceCommandDispatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 76FFD515F2B4CE855C9FB52D /* VoiceCommandDispatcher.swift */; };
+		20E53B1B3A7FD3125FADABA6 /* SignalHealthPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1F95702676613C975E92EE4 /* SignalHealthPanel.swift */; };
 		222D3A7333DB15AC31B0D93D /* ScreenCaptureKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = EFF72E223E893D4D84DE66CD /* ScreenCaptureKit.framework */; };
 		25F5D3FB4B46BDDDF0B85911 /* SetupPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E156BFF7025A36E0009125B6 /* SetupPanelView.swift */; };
 		2B04A918BD4CEBC454FF8FA6 /* HealthPollingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 494CBCC7DBA38031B73C2883 /* HealthPollingService.swift */; };
@@ -26,6 +28,7 @@
 		479F0B36F8D85B0E5F4EFAE1 /* ErrorPollingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89B3878E43A775210760356A /* ErrorPollingService.swift */; };
 		4932CD8F57C136EC18EBD81A /* ImageIO.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5FBB5CB7483B90FD0ADB9A4A /* ImageIO.framework */; };
 		4A3956D1DCC05A9AC3623D12 /* ScreenCaptureKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = EFF72E223E893D4D84DE66CD /* ScreenCaptureKit.framework */; };
+		4AF0F8A6B585F86D81805144 /* SignalHealthPanelWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97830C6B7FBFBA33392DCD32 /* SignalHealthPanelWindow.swift */; };
 		4F9025FC399B193F856E066E /* AttributedBodyDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DB486F5A3799C4B2E16A0DF /* AttributedBodyDecoder.swift */; };
 		5878450BBB6A4FCF7D791AFC /* DejaApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC62B6B690ED57D0403A32A3 /* DejaApp.swift */; };
 		5F4CD01B06A5CF8AC48FEA92 /* ErrorToast.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3568BE4B2629FE6BB40A3E5 /* ErrorToast.swift */; };
@@ -130,15 +133,18 @@
 		92314037C78AB4CCDD214FC1 /* client_secret.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = client_secret.json; sourceTree = "<group>"; };
 		932FEC9780873CEA3EF0CCDA /* KeystrokeMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeystrokeMonitor.swift; sourceTree = "<group>"; };
 		944177DAA03864CD41A829C7 /* HotkeyManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HotkeyManager.swift; sourceTree = "<group>"; };
+		97830C6B7FBFBA33392DCD32 /* SignalHealthPanelWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignalHealthPanelWindow.swift; sourceTree = "<group>"; };
 		9A5EB680B89515A07DFEB50D /* VoiceRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceRecorder.swift; sourceTree = "<group>"; };
 		9CE4F3CFE527958F5187F603 /* Vision.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Vision.framework; path = System/Library/Frameworks/Vision.framework; sourceTree = SDKROOT; };
 		9DB486F5A3799C4B2E16A0DF /* AttributedBodyDecoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttributedBodyDecoder.swift; sourceTree = "<group>"; };
 		A2EB423F071542766FE3CFF1 /* ServiceManagement.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = ServiceManagement.framework; path = System/Library/Frameworks/ServiceManagement.framework; sourceTree = SDKROOT; };
 		A4706308135587855A7DE9E3 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
 		AAC16F6D765A7DA5D67B53CC /* HealthReport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthReport.swift; sourceTree = "<group>"; };
+		B1F95702676613C975E92EE4 /* SignalHealthPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignalHealthPanel.swift; sourceTree = "<group>"; };
 		BC62B6B690ED57D0403A32A3 /* DejaApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DejaApp.swift; sourceTree = "<group>"; };
 		BCC51732D86F475138598563 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = System/Library/Frameworks/Foundation.framework; sourceTree = SDKROOT; };
 		C28EE339AA283B98EF4D7949 /* tray-icon.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "tray-icon.png"; sourceTree = "<group>"; };
+		C4454C278EB1B7F0CF033512 /* TypedContentMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TypedContentMonitor.swift; sourceTree = "<group>"; };
 		CFC477EE190FBC248A2EDB69 /* CommandCenterView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandCenterView.swift; sourceTree = "<group>"; };
 		CFCF4C5C14F22AA2EA07F25D /* SettingsPanelWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsPanelWindow.swift; sourceTree = "<group>"; };
 		D2E2F7ED5BD9AD0C309AE8AC /* DejaError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DejaError.swift; sourceTree = "<group>"; };
@@ -284,6 +290,7 @@
 				546E703E0F803FFACC8456F1 /* MeetingRecorder.swift */,
 				53B9C764CDEDAB4DC7902FAE /* MonitorState.swift */,
 				651D730D288689BC54939D75 /* SetupManager.swift */,
+				C4454C278EB1B7F0CF033512 /* TypedContentMonitor.swift */,
 				76FFD515F2B4CE855C9FB52D /* VoiceCommandDispatcher.swift */,
 				9A5EB680B89515A07DFEB50D /* VoiceRecorder.swift */,
 			);
@@ -304,6 +311,8 @@
 				DEBD0855AD78D7C16A60FE1D /* SettingsView.swift */,
 				E156BFF7025A36E0009125B6 /* SetupPanelView.swift */,
 				271A14CAA2FA0EB2E1587002 /* SetupPanelWindow.swift */,
+				B1F95702676613C975E92EE4 /* SignalHealthPanel.swift */,
+				97830C6B7FBFBA33392DCD32 /* SignalHealthPanelWindow.swift */,
 				63E38726CE176A2832663B80 /* VoicePillView.swift */,
 				288F28AA7634EFC49D2A4FBB /* VoicePillWindow.swift */,
 			);
@@ -532,6 +541,9 @@
 				B8128765737EF8AE5BE141EE /* SetupManager.swift in Sources */,
 				25F5D3FB4B46BDDDF0B85911 /* SetupPanelView.swift in Sources */,
 				BD60699959C55904B448FFD0 /* SetupPanelWindow.swift in Sources */,
+				20E53B1B3A7FD3125FADABA6 /* SignalHealthPanel.swift in Sources */,
+				4AF0F8A6B585F86D81805144 /* SignalHealthPanelWindow.swift in Sources */,
+				095E6F27DEF16934B06AC1C7 /* TypedContentMonitor.swift in Sources */,
 				94559C662FE0F6196D5528E7 /* Utilities.swift in Sources */,
 				1F24387ECE2ABE55E8446C0A /* VoiceCommandDispatcher.swift in Sources */,
 				479BBE1791DB6EBFC865AEE8 /* VoicePillView.swift in Sources */,

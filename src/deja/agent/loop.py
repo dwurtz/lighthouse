@@ -142,6 +142,17 @@ class AgentLoop:
             log.exception("startup_check failed")
             self._startup_failures = set()
 
+        # Trim audit.jsonl to last 7 days on startup so it never grows
+        # unbounded across uptime spans. Also runs once per reflect cycle
+        # — this catches cases where reflect hasn't fired in a while.
+        try:
+            from deja.audit import trim_older_than
+            dropped = trim_older_than(days=7)
+            if dropped:
+                log.info("Startup audit trim: dropped %d rows > 7d old", dropped)
+        except Exception:
+            log.exception("startup audit trim failed")
+
         # Build the in-memory contact index (AddressBook SQLite) on startup
         try:
             from deja.observations.contacts import _build_index
@@ -218,12 +229,24 @@ class AgentLoop:
             log.exception("meeting_poll_loop failed to start")
             meeting_task = None
 
+        # Health monitor — writes ~/.deja/health.json every 15s for the
+        # Swift UI's health chip. Never raises; isolated failure if it breaks.
+        try:
+            from deja.observability import HealthChecker
+            health_task = asyncio.create_task(HealthChecker().start())
+        except Exception:
+            log.exception("HealthChecker failed to start")
+            health_task = None
+
         tasks = [
             asyncio.create_task(self._signal_loop()),
             asyncio.create_task(self._analysis_loop()),
+            asyncio.create_task(self._watchdog_loop()),
         ]
         if meeting_task:
             tasks.append(meeting_task)
+        if health_task:
+            tasks.append(health_task)
 
         try:
             await asyncio.gather(*tasks)
@@ -251,6 +274,25 @@ class AgentLoop:
             except Exception:
                 log.exception("Error in signal collection cycle")
             await asyncio.sleep(OBSERVE_INTERVAL)
+
+    async def _watchdog_loop(self) -> None:
+        """Scan per-source liveness every 60s, emit ``collector_stalled``.
+
+        Kept separate from the signal-collection loop so one slow
+        collector can't delay the watchdog. Reads the shared
+        ``SourceHealthTracker`` on the collector to know last-ok times
+        and the last-stall-audit timestamp (used to dedupe re-emits).
+        """
+        from deja.signal_health import run_watchdog_once
+        # Give the signal loop a head start so freshly-started
+        # collectors have had one cycle to run before we look at gaps.
+        await asyncio.sleep(90)
+        while self.running:
+            try:
+                run_watchdog_once(self.collector.health)
+            except Exception:
+                log.exception("Signal-health watchdog tick failed")
+            await asyncio.sleep(60)
 
     async def _analysis_loop(self) -> None:
         """Run analysis every INTEGRATE_INTERVAL seconds.

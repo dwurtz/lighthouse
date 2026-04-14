@@ -61,6 +61,9 @@ targets:
       - target: DejaRecorder
         copy:
           destination: executables
+      - target: DejaOCR
+        copy:
+          destination: executables
       - package: Sparkle
         product: Sparkle
       - sdk: AppKit.framework
@@ -98,3 +101,20 @@ targets:
       - sdk: ScreenCaptureKit.framework
       - sdk: AVFoundation.framework
       - sdk: CoreMedia.framework
+
+  DejaOCR:
+    type: tool
+    platform: macOS
+    sources:
+      - path: menubar/Tools/deja-ocr.swift
+    settings:
+      base:
+        CODE_SIGN_IDENTITY: "Deja Dev"
+        CODE_SIGN_STYLE: Manual
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+        SWIFT_VERSION: "5.0"
+        PRODUCT_NAME: deja-ocr
+        SWIFT_OPTIMIZATION_LEVEL: "-O"
+    dependencies:
+      - sdk: AppKit.framework
+      - sdk: Vision.framework

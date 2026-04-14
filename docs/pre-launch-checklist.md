@@ -30,6 +30,7 @@ Running list of things that must be done before Deja ships commercially as a pai
 
 ## Support surface
 
+- [ ] **`support@tryDeja.com` inbox actually works.** The error toast and health panel both open `mailto:support@tryDeja.com` pre-filled with request ID. Today the domain's MX records aren't set up, so those mails bounce. Provision the mailbox (Google Workspace or similar) and confirm with a live send before any user can hit this path. Without this, every "loud" error surface we built is a dead end.
 - [ ] **Send Logs to Support** action actually sends somewhere. Today it's a mailto: link or similar; wire it to a support intake endpoint on the Render proxy so logs land in a queue you can triage.
 - [ ] **Crash reporting.** Hook up Swift crash reports + Python uncaught-exception logging to the same intake endpoint.
 - [ ] **Basic FAQ / docs site.** Linked from the Settings panel's Support section.

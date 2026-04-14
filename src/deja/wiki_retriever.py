@@ -54,6 +54,7 @@ is never a blind spot.
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from pathlib import Path
@@ -93,7 +94,14 @@ _ALLOWED_CATEGORIES = ("people", "projects")
 # "tinker-desk-organizers" ranking #1 for "child's outfit e-commerce"
 # because both documents mention "configuring"). Fewer, higher-quality
 # pages beat a big noisy dump.
-_MAX_PAGES = 6
+# No count caps on any retrieval stage. Semantic bounds do the work:
+#   - recent stage: bounded by distinct pages across the last N cycles
+#   - reminders: bounded by due_reminder_topics() (tiny)
+#   - bm25: bounded by _BM25_MIN_SCORE threshold
+#   - vector: bounded by _MIN_SCORE threshold
+# Flash has 1M context — a noisy day that surfaces 30 pages is still
+# <1% of the window. Dropping pages that passed the score threshold is
+# arbitrary loss of context that the scorer already deemed relevant.
 
 # Minimum similarity score for a page to make it into the prompt.
 # Empirically tuned against realistic signal batches on the 300M
@@ -168,15 +176,44 @@ _PROPER_NOUN_RE = re.compile(r"\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,3}\b")
 _DOMAIN_RE = re.compile(r"\b([a-z][a-z0-9-]{2,})\.(?:com|org|io|co|net|app|dev|ai)\b")
 
 # Common capitalized words that aren't entities — strip these from
-# proper-noun extraction to cut noise.
-_STOP_TOKENS = {
+# proper-noun extraction to cut noise. The user's own name and first
+# name are added dynamically in _stop_tokens_for_user() so BM25 doesn't
+# treat the user's own name as a searchable entity.
+_BASE_STOP_TOKENS = {
     "meeting", "email", "text", "message", "calendar", "chrome",
-    "david", "hey", "david's", "from", "re", "fwd", "david wurtz",
+    "hey", "from", "re", "fwd",
     "the", "this", "that", "monday", "tuesday", "wednesday",
     "thursday", "friday", "saturday", "sunday", "january", "february",
     "march", "april", "may", "june", "july", "august", "september",
     "october", "november", "december", "am", "pm",
 }
+
+
+def _stop_tokens_for_user() -> set[str]:
+    """Return base stop tokens plus the current user's name variants.
+
+    The user's own name appears in almost every signal ("David sent...",
+    "from David") and is useless as a search token — every entity page
+    would match. Adding the user's name dynamically means this works
+    for any installer, not just the original developer.
+    """
+    tokens = set(_BASE_STOP_TOKENS)
+    try:
+        from deja.identity import load_user
+
+        user = load_user()
+        if not user.is_generic:
+            for part in (user.name or "").lower().split():
+                if part:
+                    tokens.add(part)
+                    tokens.add(part + "'s")
+            if user.name:
+                tokens.add(user.name.lower())
+            if user.first_name:
+                tokens.add(user.first_name.lower())
+    except Exception:
+        pass
+    return tokens
 
 
 def _extract_entity_tokens(signal_items: list[dict]) -> list[str]:
@@ -233,11 +270,12 @@ def _extract_entity_tokens(signal_items: list[dict]) -> list[str]:
                 raw.append(host)
 
     # Deduplicate case-insensitively, preserve order, filter stop tokens.
+    stop_tokens = _stop_tokens_for_user()
     seen: set[str] = set()
     out: list[str] = []
     for tok in raw:
         key = tok.lower().strip()
-        if not key or key in seen or key in _STOP_TOKENS:
+        if not key or key in seen or key in stop_tokens:
             continue
         if len(key) < 3:
             continue
@@ -364,8 +402,6 @@ def _collect_hits(results: list[tuple[str, float]]) -> list[tuple[str, str]]:
             continue
         seen.add(key)
         hits.append(key)
-        if len(hits) >= _MAX_PAGES:
-            break
     return hits
 
 
@@ -410,8 +446,6 @@ def _retrieve_bm25(entity_tokens: list[str]) -> list[tuple[str, str]]:
     seen: set[tuple[str, str]] = set()
 
     for token in entity_tokens:
-        if len(hits) >= _MAX_PAGES:
-            break
         try:
             results = search_files(
                 token,
@@ -440,8 +474,6 @@ def _retrieve_bm25(entity_tokens: list[str]) -> list[tuple[str, str]]:
                 continue
             seen.add(key)
             hits.append(key)
-            if len(hits) >= _MAX_PAGES:
-                break
 
     return hits
 
@@ -483,6 +515,91 @@ def _all_slugs() -> list[tuple[str, str]]:
             continue
         for path in sorted(cat_dir.glob("*.md")):
             out.append((category, path.stem))
+    return out
+
+
+_RECENT_CYCLES_TO_CONSIDER = 5  # how many prior integrate cycles to look back
+# Recent stage is deliberately uncapped — it's naturally bounded by the
+# number of distinct pages those cycles actually touched (typically
+# 3-12). Uncapped reflects the reality that if the last 5 cycles
+# touched 10 pages, all 10 are likely still relevant; dropping any is
+# arbitrary loss of continuity.
+
+
+def _retrieve_recent() -> list[tuple[str, str]]:
+    """Pages that the last ~5 integrate cycles touched.
+
+    Reads the tail of ``~/.deja/audit.jsonl`` for write actions
+    (``event_create``, ``wiki_write``, ``contradiction_fix``) emitted
+    by integrate cycles (``trigger.kind == "signal"``), groups by
+    ``cycle`` id, and returns the distinct entity-page targets from
+    the most recent N cycles — newest-first, deduplicated, capped.
+
+    This is tighter than sorting by mtime: it ignores Obsidian edits,
+    nightly reflect rewrites, dedup merges, and onboarding writes.
+    Only integrate-cycle wiki touches count — because that's the
+    thread we want the NEXT integrate cycle to continue on.
+
+    Events excluded — they're log entries; entity pages are the
+    continuity objects. Cheap: reads the last ~500 audit lines. No
+    LLM, no stat, no vector.
+    """
+    from deja.config import DEJA_HOME
+
+    audit_path = DEJA_HOME / "audit.jsonl"
+    if not audit_path.exists():
+        return []
+
+    write_actions = {"event_create", "wiki_write", "contradiction_fix"}
+    per_cycle: dict[str, list[tuple[str, str]]] = {}
+    cycle_order: list[str] = []
+
+    try:
+        # Read tail only — audit.jsonl is append-only, tail is newest.
+        # ~500 lines comfortably covers the last 5 cycles even on
+        # busy days (each cycle writes ~5-20 audit rows).
+        with open(audit_path, "r", encoding="utf-8") as f:
+            lines = f.readlines()[-500:]
+    except OSError:
+        return []
+
+    # Walk newest → oldest; collect distinct cycle ids until we have N.
+    for line in reversed(lines):
+        try:
+            rec = json.loads(line)
+        except Exception:
+            continue
+        if rec.get("action") not in write_actions:
+            continue
+        if (rec.get("trigger") or {}).get("kind") != "signal":
+            continue
+        cycle = rec.get("cycle") or ""
+        if not cycle:
+            continue
+        target = rec.get("target") or ""
+        # Filter to entity pages only (skip events/* targets)
+        if not (target.startswith("people/") or target.startswith("projects/")):
+            continue
+        category, _, slug = target.partition("/")
+        if not slug:
+            continue
+        if cycle not in per_cycle:
+            if len(cycle_order) >= _RECENT_CYCLES_TO_CONSIDER:
+                continue
+            cycle_order.append(cycle)
+            per_cycle[cycle] = []
+        per_cycle[cycle].append((category, slug))
+
+    # Flatten newest-cycle-first, dedupe. Uncapped — bounded naturally
+    # by the distinct pages those cycles actually touched.
+    seen: set[tuple[str, str]] = set()
+    out: list[tuple[str, str]] = []
+    for cycle in cycle_order:
+        for key in per_cycle[cycle]:
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(key)
     return out
 
 
@@ -530,18 +647,25 @@ def build_analysis_context(signal_items: list[dict]) -> str:
     except Exception:
         log.debug("wiki_retrieval: due_reminder_topics failed", exc_info=True)
 
-    # Merge: reminders first (deterministic, pinned — these are questions
-    # the agent explicitly asked its future self), BM25 next (precision),
-    # then vector (recall). Caps at `_MAX_PAGES`.
+    # Stage 4: Recently-edited entity pages. The last integrate cycle
+    # (or a fresh Obsidian edit) just touched these — the next signal
+    # is likely to continue that thread. Pinning guarantees continuity
+    # across integrate cycles even when BM25 / vector wouldn't surface
+    # them from the new signal batch alone.
+    recent_hits = _retrieve_recent()
+
+    # Merge order (highest-priority first):
+    #   1. Due reminders (pinned — questions the agent asked its future self)
+    #   2. Recently-edited pages (continuity across cycles)
+    #   3. BM25 on entity tokens (keyword precision)
+    #   4. Vector on signal batch (semantic recall)
     seen: set[tuple[str, str]] = set()
     retrieved: list[tuple[str, str]] = []
-    for key in reminder_hits + bm25_hits + vector_hits:
+    for key in reminder_hits + recent_hits + bm25_hits + vector_hits:
         if key in seen:
             continue
         seen.add(key)
         retrieved.append(key)
-        if len(retrieved) >= _MAX_PAGES:
-            break
 
     all_pages = _all_slugs()
 
@@ -590,8 +714,9 @@ def build_analysis_context(signal_items: list[dict]) -> str:
         )
 
     log.info(
-        "wiki_retrieval: %d reminders + %d bm25 + %d vector → %d merged, %d remaining",
+        "wiki_retrieval: %d reminders + %d recent + %d bm25 + %d vector → %d merged, %d remaining",
         len(reminder_hits),
+        len(recent_hits),
         len(bm25_hits),
         len(vector_hits),
         len(pages),

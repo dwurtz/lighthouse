@@ -40,9 +40,12 @@ deja = [
 testpaths = ["tests"]
 markers = [
     "vision: live-network regression tests that call Gemini vision (slow, costs tokens)",
+    "live_gws: live gws CLI tests — require Google Workspace auth, no network mocking",
     "real_wiki: opt out of the isolated_home fixture — run against the real wiki",
+    "real_awake: opt out of the signal-health autouse is_awake stub",
 ]
-# Exclude vision tests from default runs — they hit the network and require
-# real screenshots in tests/fixtures/screenshots/. Run with:
+# Exclude vision + live_gws tests from default runs — they hit the network
+# and require auth. Run explicitly:
 #   pytest -m vision
-addopts = "-m 'not vision'"
+#   pytest -m live_gws
+addopts = "-m 'not vision and not live_gws'"

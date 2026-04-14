@@ -77,7 +77,12 @@ MAX_FIXES_PER_RUN = 10
 # blow the context budget.
 PER_PAGE_BODY_CHARS = 2000
 
-CONFIRM_MODEL = "gemini-2.5-flash-lite"
+CONFIRM_MODEL = "gemini-2.5-flash"
+# Upgraded from Flash-Lite 2026-04-13 after observing a batch of
+# spurious "contradictions" that were really complementary mentions
+# of the same entity (recruiter page "confirms" same role as self-page,
+# not contradicts). Reflect runs 3x/day so the ~4x cost increase is
+# pennies/day — worth the accuracy.
 
 META_FILES = {"index.md", "log.md", "reflection.md", "goals.md"}
 
@@ -399,7 +404,7 @@ async def review_clusters(
     if "{cluster}" not in prompt_template:
         raise RuntimeError(
             "Contradict prompt is missing the {cluster} placeholder. "
-            "Check ~/Deja/prompts/contradict.md."
+            "Check the bundled contradict.md in default_assets/prompts/."
         )
 
     to_review = clusters[:MAX_CLUSTERS_PER_RUN]
@@ -435,7 +440,7 @@ async def review_clusters(
         except (KeyError, IndexError) as e:
             raise RuntimeError(
                 f"Contradict prompt template has an unexpected format "
-                f"placeholder: {e}. Check ~/Deja/prompts/contradict.md — "
+                f"placeholder: {e}. Check the bundled contradict.md in default_assets/prompts/ — "
                 f"only {{cluster}} should be an unescaped placeholder; "
                 f"all literal braces must be doubled as {{{{ }}}}."
             ) from e

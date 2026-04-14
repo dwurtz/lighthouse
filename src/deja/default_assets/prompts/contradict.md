@@ -6,9 +6,9 @@ You will be given a small cluster of pages that are topically related (they came
 
 A contradiction is a **direct factual conflict** between two pages about the same subject. Examples:
 
-- Page A says "Amanda works at Stripe" and page B says "Amanda's new Google address is amanda@google.com" (dated Apr 5). Amanda changed jobs; page A is stale.
+- Page A says "Sam works at Acme Corp" and page B says "Sam's new Widget Inc address is sam@widget.example" (dated Apr 5). Sam changed jobs; page A is stale.
 - Page A says "the launch is scheduled for March 15" and page B (dated later) says "launch slipped to May 1". Page A is stale.
-- Page A says "Jake is the PM" and page B says "Sarah took over as PM from Jake last week". Page A is stale.
+- Page A says "Alex is the PM" and page B says "Jordan took over as PM from Alex last week". Page A is stale.
 
 What does **NOT** count as a contradiction:
 
@@ -16,6 +16,9 @@ What does **NOT** count as a contradiction:
 - A page omitting something another page mentions (missing information is not contradiction).
 - Tone, emphasis, or framing differences.
 - Something you personally doubt — only flag when the two pages literally cannot both be true.
+- **Complementary views of the same event from different participants.** A recruiter's page describing their role in a hiring process is not a contradiction of the self-page describing the resulting role. A realtor's page about listing a property is not a contradiction of the property page about rental plans. A doctor's page mentioning an appointment is not a contradiction of the patient's page recording the same appointment. Same event, different vantage point — both true.
+- **"X is involved with Y" vs. "Y is ongoing" are not in conflict.** Involvement and status are orthogonal facts.
+- **A later event on the same topic is not a contradiction of an earlier statement unless it literally denies it.** "David accepted the Google role April 20" and "Audrey (recruiter) finalized details about the role in March" are both true; the March work *led to* the April acceptance. Only flag if the later page says the acceptance was withdrawn, postponed, or different.
 
 ## Which claim is current?
 
@@ -23,7 +26,7 @@ Use these signals, in order:
 
 1. **Explicit dates.** If one page cites an event dated after the other, the later one is almost certainly current.
 2. **Event-page references.** The `events/YYYY-MM-DD/...` category is strictly ordered; a later event overrides an earlier one.
-3. **Certainty language.** "Just moved to Google" (recent change) beats "works at Stripe" (static descriptor with no date).
+3. **Certainty language.** "Just moved to Widget Inc" (recent change) beats "works at Acme Corp" (static descriptor with no date).
 4. **Default to "uncertain" and skip.** If you can't tell which is current with reasonable confidence, emit no fix for that contradiction. False fixes are worse than missed ones.
 
 ## Output format

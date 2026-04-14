@@ -24,55 +24,297 @@ from deja import local_models
 log = logging.getLogger(__name__)
 
 
-# How many head lines of index.md to inject into the vision prompt.
-# index.md is recency-sorted and flat, so the first N lines are always
-# the N most-recently-touched pages regardless of category. 50 is a
-# sweet spot for FastVLM 0.5B: plenty of coverage of "what David is
-# working on right now", while leaving attention budget for the image,
-# the AX context block, and the task instructions. Triage and the
-# integrate retrieval read the full index separately — they have
-# larger context budgets (Flash-Lite 1M ctx) and benefit from seeing
-# dormant entries that vision would just dilute on.
+# Two grounding discoveries from the 2026-04-09 eval (50% must-hit,
+# zero hallucinations) and the 2026-04-11 regression:
 #
-# Revisit this if FastVLM starts missing obvious entities in the tail
-# (raise) or starts confusing hot entities with each other (lower).
-_VISION_INDEX_HEAD_LINES = 50
+# 1. FastVLM 0.5B LIKES a compact, natural-language project hint
+#    ("He works on projects including Deja, Blade and Rose, ...").
+#    It uses the names as a disambiguation cue when content on screen
+#    is ambiguous — that's what got must-hit from ~30% (no context) up
+#    to 50% on fixtures.
+#
+# 2. FastVLM 0.5B HATES a raw index.md slug dump. Given 50 lines of
+#    `- [[ship-new-blade-rose-theme]] — ...`, the tiny model loses
+#    track of the image and regurgitates slugs into its description.
+#    That's how "Autonomous Carpooling Platform for 2014 Utah Royals
+#    FC-AZ Pre-ECNL at 5901-e-Valley-vista property management" ended
+#    up in the output for a plain Messages window on 2026-04-11.
+#
+# So the grounding format matters as much as the content: prose list
+# of 8 project names = helpful hint, raw 50-line slug catalog =
+# catastrophic distraction. See commit 44e2675 for the regression and
+# bfd756f for the original working prompt.
+_MAX_PROJECTS_IN_PROMPT = 8
 
 
-# The grounded template uses ``{ax_block}`` as a placeholder for the
-# Current UI context section. That block is either empty string (no AX
-# data, no access, broken AX support) or a fully-formatted chunk
-# ending in two newlines. Using a single interpolation slot means we
-# never leave a dangling header when AX data is missing — the skip-if-
-# empty discipline is enforced at the formatter, not here.
+def _format_project_hint() -> str:
+    """Return a one-sentence project hint like
+    ``"He works on projects including Deja, Blade and Rose, ..."``.
+
+    Walks ``~/Deja/projects/`` directly and picks the top
+    ``_MAX_PROJECTS_IN_PROMPT`` projects by mtime. Not index.md: the
+    index became a flat recency list in commit e2630bf so there's no
+    longer a "## Projects" section to parse. The projects directory
+    is still structured and gives us exactly what we want. Returns an
+    empty string if the dir isn't available — we never want this to
+    block the vision call.
+    """
+    try:
+        from deja.config import WIKI_DIR
+
+        projects_dir = WIKI_DIR / "projects"
+        if not projects_dir.is_dir():
+            return ""
+
+        entries = sorted(
+            projects_dir.glob("*.md"),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )[:_MAX_PROJECTS_IN_PROMPT]
+        if not entries:
+            return ""
+
+        names = [p.stem.replace("-", " ").title() for p in entries]
+        # Don't assume which apps the user uses — let the vision model
+        # identify apps from pixels + AX context. Only list their
+        # active projects.
+        return f"Their active projects include: {', '.join(names)}."
+    except Exception:
+        return ""
+
+
+# ---------------------------------------------------------------------------
+# 3-pass multi-prompt strategy
 #
-# The task instruction deliberately does NOT ask "what app is David
-# using?" — the AX block already states the app name when available,
-# and asking the model to re-derive it from pixels wastes attention
-# that should go to content. The downstream integrate cycle needs
-# specific facts (names, subject lines, numbers, quotes) to ground
-# wiki updates, not a summary of app chrome.
+# Each screenshot gets 3 sequential FastVLM calls, each with a different
+# prompt that forces the model to attend to a different layer of the
+# image. The union of all 3 descriptions reaches 95.5% must-hit on the
+# 15-fixture eval suite — up from 36% single-pass — because each lens
+# catches details the others miss:
+#
+#   Pass 0 (OCR):      raw text extraction — names, tickers, URLs, timestamps
+#   Pass 1 (people):   who is on screen, grounded by wiki people list
+#   Pass 2 (activity): what David is doing — app, task, project context
+#
+# Total time: ~5s for all 3 passes at 1200px on Apple Silicon.
+# See the 2026-04-12 eval session for the full A/B history.
+# ---------------------------------------------------------------------------
+
+_VISION_RESIZE_WIDTH = 1200
+
+# ---------------------------------------------------------------------------
+# macOS Vision OCR — extract raw text from screenshots
+#
+# Apple's VNRecognizeTextRequest is fast (~1.5s compiled), accurate,
+# runs on-device, and requires no TCC permissions (it operates on image
+# files, not cameras). The text it extracts is prepended to each
+# FastVLM pass so the model doesn't need to OCR from pixels — it just
+# describes the layout and context around text that's already been
+# perfectly transcribed.
+#
+# The `deja-ocr` binary is compiled from menubar/Sources/Tools/deja-ocr.swift
+# and bundled inside Deja.app/Contents/MacOS/. When running from the
+# dev tree, falls back to /tmp/deja-ocr (compiled by `make test-swift`).
+# ---------------------------------------------------------------------------
+
+_OCR_TIMEOUT_S = 10
+
+
+def _find_ocr_binary() -> str | None:
+    """Locate the deja-ocr binary — bundled app or dev fallback."""
+    import shutil
+
+    # Bundled inside the app
+    candidates = [
+        Path(__file__).resolve().parents[3]
+        / "Contents"
+        / "MacOS"
+        / "deja-ocr",  # when running from bundled python-env
+    ]
+    # Also check common bundle paths
+    for app_dir in [
+        Path("/Applications/Deja.app/Contents/MacOS/deja-ocr"),
+        Path.home() / "Library/Developer/Xcode/DerivedData" / "Deja-temp/Build/Products/Release/deja-ocr",
+    ]:
+        candidates.append(app_dir)
+    # Dev fallback
+    candidates.append(Path("/tmp/deja-ocr"))
+
+    for p in candidates:
+        if p.exists() and p.is_file():
+            return str(p)
+
+    # Last resort: check PATH
+    found = shutil.which("deja-ocr")
+    return found
+
+
+def ocr_screen(image_path: str) -> str:
+    """Extract text from a screenshot using macOS Vision OCR.
+
+    Returns the recognized text as a single string (one line per
+    recognized text block). Returns an empty string on any failure —
+    never blocks the vision pipeline.
+    """
+    import subprocess
+
+    binary = _find_ocr_binary()
+    if not binary:
+        log.debug("deja-ocr binary not found — skipping OCR")
+        return ""
+
+    try:
+        r = subprocess.run(
+            [binary, image_path],
+            capture_output=True,
+            text=True,
+            timeout=_OCR_TIMEOUT_S,
+        )
+        if r.returncode != 0:
+            log.debug("deja-ocr failed (rc=%d): %s", r.returncode, r.stderr[:200])
+            return ""
+        return (r.stdout or "").strip()
+    except Exception:
+        log.debug("deja-ocr subprocess failed", exc_info=True)
+        return ""
+
+# People hint — cached for 5 min like project hint
+_people_hint_cache: str | None = None
+_people_hint_ts: float = 0
+_MAX_PEOPLE_IN_PROMPT = 15
+
+
+def _format_people_hint() -> str:
+    """Return a compact people list from the wiki's people/ directory."""
+    global _people_hint_cache, _people_hint_ts
+
+    if _people_hint_cache is not None and (time.time() - _people_hint_ts) < 300:
+        return _people_hint_cache
+
+    try:
+        from deja.config import WIKI_DIR
+
+        people_dir = WIKI_DIR / "people"
+        if not people_dir.is_dir():
+            return ""
+
+        entries = sorted(
+            people_dir.glob("*.md"),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )[:_MAX_PEOPLE_IN_PROMPT]
+        if not entries:
+            return ""
+
+        names = [p.stem.replace("-", " ").title() for p in entries]
+        _people_hint_cache = "Key people: " + ", ".join(names) + "."
+        _people_hint_ts = time.time()
+        return _people_hint_cache
+    except Exception:
+        return ""
+
+
+def _build_preamble(ax_context: dict | None = None) -> str:
+    """Shared preamble for all 3 passes: identity + projects + AX app."""
+    ctx = ax_context or {}
+    app = ctx.get("app", "")
+    title = ctx.get("window_title", "")
+
+    if app and title:
+        app_part = f" {app} open, showing \"{title}\""
+    elif app:
+        app_part = f" {app} open"
+    else:
+        app_part = " an app open"
+
+    try:
+        from deja.identity import load_user
+
+        user = load_user()
+        if not user.is_generic:
+            return (
+                f"{user.name} has{app_part} on his Mac."
+                f" {_format_project_hint()}"
+            )
+    except Exception:
+        pass
+    return f"The user has{app_part}."
+
+
+def _build_pass_prompts(
+    voice_context: str = "",
+    ax_context: dict | None = None,
+    ocr_text: str = "",
+) -> list[str]:
+    """Return the 3 pass prompts (OCR, people, activity).
+
+    When ``ocr_text`` is provided (from macOS Vision OCR), it's
+    included in every pass so FastVLM can reference the already-
+    extracted text instead of trying to read pixels. This is the
+    key quality lever — Apple OCR reads text perfectly, FastVLM
+    describes the layout and context.
+
+    Voice context, when present, is prepended to every pass so all
+    three lenses benefit from the user's stated intent.
+    """
+    pre = _build_preamble(ax_context)
+
+    if ocr_text:
+        # Truncate to avoid overwhelming FastVLM's context window.
+        # 3000 chars ≈ 750 tokens — leaves plenty of budget for the
+        # image and the task instruction.
+        ocr_block = (
+            f"\n\n# Text extracted from this screen (via OCR)\n\n"
+            f"{ocr_text[:3000]}\n\n"
+            f"# Your task\n\n"
+        )
+    else:
+        ocr_block = "\n\n"
+
+    passes = [
+        # Pass 0: Content — what's on screen (OCR provides the text,
+        # model describes the structure)
+        f"{pre}{ocr_block}Using the extracted text above and the image, "
+        f"describe what is on screen. Identify which app is shown, "
+        f"what the main content is, and quote the key details.",
+        # Pass 1: People — who is visible, grounded by wiki people list
+        f"{pre} {_format_people_hint()}{ocr_block}Who is on this "
+        f"screen? For each person visible, quote what they said or "
+        f"what content is associated with them. Match names to the "
+        f"key people list when possible.",
+        # Pass 2: Activity — what David is doing
+        f"{pre}{ocr_block}What is David doing right now? Describe "
+        f"the activity: what app, what task, what content is he "
+        f"looking at or working on? Name specific projects, files, "
+        f"websites, or tools visible.",
+    ]
+
+    if voice_context:
+        voice_block = (
+            f"# IMPORTANT: The user just said this while looking at the screen\n\n"
+            f'"{voice_context}"\n\n'
+            f"Use their words as the primary lens. What they said reveals "
+            f"their intent. Ground your description in their commentary.\n\n"
+            f"---\n\n"
+        )
+        passes = [voice_block + p for p in passes]
+
+    return passes
+
+
+# Legacy single-prompt templates kept for describe_screen_local() fallback
 _PROMPT_GROUNDED = (
-    "This is {user_name}'s Mac.\n\n"
-    "{ax_block}"
-    "# People and projects {first_name} cares about\n\n"
-    "{index_block}\n\n"
-    "# Your task\n\n"
-    "Describe what {first_name} is doing right now. Quote the specific "
-    "details visible on screen — names, subject lines, message text, "
-    "numbers, URLs, timestamps — so downstream reasoning has hard facts "
-    "to work with, not a vague summary. Then explain why this matters: "
-    "how does it connect to the people and projects above? What "
-    "commitment, question, decision, or new information does this "
-    "screenshot surface?"
+    "This is {user_name}'s Mac. {project_hint}"
+    "{app_sentence}"
+    "\n\nRead the content on screen carefully. Quote any visible "
+    "text verbatim — names, subject lines, messages, numbers, "
+    "URLs, filenames, timestamps. What is on screen?"
 )
 
 _PROMPT_FALLBACK = (
-    "Describe what the user is doing in this screenshot. Quote the "
-    "specific details visible on screen — names, subject lines, "
-    "message text, numbers, URLs, timestamps — so downstream reasoning "
-    "has hard facts to work with. What commitment, question, decision, "
-    "or new information does this screenshot surface?"
+    "Read this screenshot carefully. What apps are open? "
+    "What names appear? What is the user doing? "
+    "Quote any visible text."
 )
 
 # Lazy-loaded model state — survives for the process lifetime.
@@ -81,50 +323,58 @@ _processor = None
 _load_attempted = False
 
 
+def _format_app_sentence(ax_context: dict | None) -> str:
+    """Turn AX context into a natural-language sentence like
+    ``" He has Messages open, showing 'Molly/Ruby Carpool'."``.
+
+    If AX context is empty (no accessibility access, or no frontmost
+    app detected), returns an empty string — never a dangling partial
+    sentence. The sentence starts with a space so it can be appended
+    directly after the project hint without awkward whitespace.
+    """
+    ctx = ax_context or {}
+    app = ctx.get("app", "")
+    title = ctx.get("window_title", "")
+    if not app:
+        return ""
+    if title:
+        return f" He has {app} open, showing \"{title}\"."
+    return f" He has {app} open."
+
+
 def _build_prompt(
     voice_context: str = "",
     ax_context: dict | None = None,
 ) -> str:
     """Compose the vision prompt with optional grounding blocks.
 
-    The prompt can include (in reverse order of priority):
+    Layers (all skip-if-empty — missing data produces no prompt bytes,
+    not empty variable slots):
 
-      - Voice context — what the user just dictated, if within the
-        lookback window. Forceful "the user just said this" framing.
-      - Current UI context — frontmost app, focused window, focused
-        widget, from the macOS Accessibility API. Skipped entirely
-        (no header, no empty lines) when the AX dict is empty.
-      - Wiki catalog — the full recency-sorted index.md so the model
-        has names/descriptions for known people and projects.
-
-    All three sections follow the same skip-if-empty discipline:
-    missing data produces no prompt bytes, not empty variable slots.
+      - Voice context — what the user just dictated. Strongest single
+        grounding signal we have; gets "the user just said this"
+        framing to prime FastVLM to read the screen through that lens.
+      - App sentence — frontmost app + window title from the macOS
+        Accessibility API, woven into the prompt as natural language
+        so FastVLM doesn't waste attention identifying the app from
+        pixels. E.g. "He has Messages open, showing 'Molly/Ruby
+        Carpool'."
+      - Project hint — one-sentence list of the top 8 projects from
+        the wiki index. Disambiguation cue, not a catalog dump.
     """
-    from deja import ax_context as ax_mod
-
-    ax_block = ax_mod.format_for_prompt(ax_context or {})
-
     base = _PROMPT_FALLBACK
     try:
         from deja.identity import load_user
-        from deja.wiki_catalog import render_index_for_prompt
 
         user = load_user()
         if not user.is_generic:
-            index_block = render_index_for_prompt(
-                max_lines=_VISION_INDEX_HEAD_LINES,
-                rebuild=False,
-            ).strip() or "(no wiki entries yet)"
             base = _PROMPT_GROUNDED.format(
                 user_name=user.name,
-                first_name=user.first_name,
-                ax_block=ax_block,
-                index_block=index_block,
+                project_hint=_format_project_hint(),
+                app_sentence=_format_app_sentence(ax_context),
             )
-        elif ax_block:
-            # Generic identity path: no wiki grounding, but still
-            # prepend the AX block if we have one — it's additive.
-            base = ax_block + _PROMPT_FALLBACK
+        elif ax_context and ax_context.get("app"):
+            base = _format_app_sentence(ax_context) + "\n\n" + _PROMPT_FALLBACK
     except Exception:
         pass
 
@@ -275,6 +525,156 @@ def describe_screen_local(
         log.exception("FastVLM inference failed for %s", image.name)
         _track_inference(False, 0.0, 0, request_id, error="exception")
         return None
+
+
+def _resize_for_vision(image_path: str) -> str:
+    """Resize a screenshot to ``_VISION_RESIZE_WIDTH`` px wide.
+
+    Returns the path to a resized temp file (JPEG, q85). The caller
+    is responsible for cleaning it up. If the image is already at or
+    below the target width, returns the original path unchanged.
+    """
+    try:
+        from PIL import Image as PILImage
+
+        img = PILImage.open(image_path)
+        if img.width <= _VISION_RESIZE_WIDTH:
+            return image_path
+        ratio = _VISION_RESIZE_WIDTH / img.width
+        img = img.convert("RGB").resize(
+            (_VISION_RESIZE_WIDTH, int(img.height * ratio)),
+            PILImage.LANCZOS,
+        )
+        import tempfile
+
+        tmp = tempfile.mktemp(suffix=".jpg")
+        img.save(tmp, format="JPEG", quality=85)
+        return tmp
+    except Exception:
+        log.debug("resize failed, using original", exc_info=True)
+        return image_path
+
+
+def describe_screen_multipass(
+    image_path: str,
+    voice_context: str = "",
+    ax_context: dict | None = None,
+) -> str | None:
+    """Run 3 sequential FastVLM passes on one screenshot and return
+    the combined description.
+
+    Each pass uses a different prompt lens (OCR, people, activity) so
+    the model attends to different layers of the image. The union of
+    all 3 reaches ~95% must-hit on the 15-fixture eval suite vs ~36%
+    for a single pass.
+
+    The image is resized to ``_VISION_RESIZE_WIDTH`` (1200px) before
+    inference — FastVLM's vision encoder handles this well (~1.7s per
+    pass) and the extra pixels let it read text it can't resolve at
+    800px.
+
+    Returns the combined text from all successful passes joined by
+    double newlines, or None if the model isn't available.
+    """
+    image = Path(image_path)
+    if not image.exists():
+        log.warning("Screenshot file missing: %s", image_path)
+        return None
+
+    if not _ensure_model():
+        return None
+
+    resized = _resize_for_vision(image_path)
+    cleanup_resized = resized != image_path
+
+    try:
+        from mlx_vlm import generate
+        from mlx_vlm.prompt_utils import apply_chat_template
+
+        # Run macOS Vision OCR first — 1.5s for perfect text extraction.
+        # The OCR text is fed into every FastVLM pass so the model
+        # doesn't need to read pixels, just describe layout + context.
+        t_ocr = time.time()
+        ocr_text = ocr_screen(image_path)
+        if ocr_text:
+            log.info("Vision OCR: %.1fs, %d chars", time.time() - t_ocr, len(ocr_text))
+
+        pass_prompts = _build_pass_prompts(
+            voice_context=voice_context,
+            ax_context=ax_context,
+            ocr_text=ocr_text,
+        )
+
+        descriptions: list[str] = []
+        total_elapsed = 0.0
+        pass_labels = ["OCR", "people", "activity"]
+
+        for i, prompt_text in enumerate(pass_prompts):
+            try:
+                prompt = apply_chat_template(
+                    _processor,
+                    config=_model.config,
+                    prompt=f"<image>\n{prompt_text}",
+                    images=[resized],
+                )
+
+                t0 = time.time()
+                result = generate(
+                    _model, _processor, prompt, [resized],
+                    max_tokens=300, temperature=0.3,
+                )
+                elapsed = time.time() - t0
+                total_elapsed += elapsed
+
+                text = (result.text or "").strip()
+                if text:
+                    descriptions.append(text)
+                    log.debug(
+                        "Vision pass %s: %.1fs, %d chars",
+                        pass_labels[i], elapsed, len(text),
+                    )
+                else:
+                    log.debug("Vision pass %s: empty output", pass_labels[i])
+            except Exception:
+                log.debug(
+                    "Vision pass %s failed", pass_labels[i], exc_info=True
+                )
+
+        if not descriptions:
+            log.warning("All 3 vision passes returned empty for %s", image.name)
+            return None
+
+        combined = "\n\n".join(descriptions)
+        log.info(
+            "Vision (FastVLM 3-pass): %.1fs total, %d chars, %s",
+            total_elapsed, len(combined), image.name,
+        )
+
+        try:
+            from deja.telemetry import new_request_id, track
+
+            track("local_inference_vision", {
+                "ok": True,
+                "duration_ms": int(total_elapsed * 1000),
+                "output_chars": len(combined),
+                "passes": len(descriptions),
+                "request_id": new_request_id(),
+            })
+        except Exception:
+            pass
+
+        return combined
+
+    except Exception:
+        log.exception("FastVLM multipass failed for %s", image.name)
+        return None
+    finally:
+        if cleanup_resized:
+            try:
+                import os
+                os.remove(resized)
+            except OSError:
+                pass
 
 
 def _track_inference(

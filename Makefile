@@ -1,10 +1,27 @@
-.PHONY: test test-v install run dev dmg release bump
+.PHONY: test test-v test-swift test-live install run dev dmg release bump
 
-test:
+test: test-swift
 	./venv/bin/python -m pytest tests/ -q
 
-test-v:
+test-v: test-swift
 	./venv/bin/python -m pytest tests/ -v
+
+# Live integration tests — hit real APIs (Google Workspace via gws,
+# Gemini vision). Require auth + network. Run explicitly after:
+#   - upgrading gws
+#   - touching observers in src/deja/observations/
+#   - touching the vision pipeline
+test-live:
+	./venv/bin/python -m pytest tests/ -m "live_gws or vision" -v
+
+# Swift unit tests — currently just the iMessage attributedBody
+# decoder regression test. See scripts/test_imessage_decoder.swift
+# for context on the 2026-04-11 carpool bug.
+test-swift:
+	@swiftc -o /tmp/deja_decoder_test \
+		scripts/test_imessage_decoder.swift \
+		menubar/Sources/Services/AttributedBodyDecoder.swift
+	@/tmp/deja_decoder_test
 
 install:
 	./venv/bin/python -m pip install -e .

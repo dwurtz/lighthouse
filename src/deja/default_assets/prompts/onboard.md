@@ -36,7 +36,7 @@ You are looking at a batch of real historical context the user was actively part
 - **Every recurring correspondent** who matters — family, friends, colleagues, service providers, coaches, teachers, vendors. A one-off transactional exchange (receipt, newsletter, 2FA code, cold outreach) is **not** a person page. The bar is: would the user care if this person's page were missing?
 - **Every ongoing project, initiative, situation, or life thread** the batch evidences — work projects, home projects, kid activities, travel plans, recurring logistics, health things, money things, open loops the user is coordinating with someone.
 
-Use both sides of every conversation as evidence. When the user wrote "yes, Thursday at 4 works" and the other side said "for the Del Sol tryout" — that's a concrete fact for the project page.
+Use both sides of every conversation as evidence. When the user wrote "yes, Thursday at 4 works" and the other side said "for the soccer tryout" — that's a concrete fact for the project page.
 
 ## Input shapes
 
@@ -67,8 +67,8 @@ You may see two distinct kinds of items in the batch:
 
 **The wiki is prose, not a CRM record — so project status lives in the sentence that opens the page, not in frontmatter.** Don't add `status:` fields (the schema doesn't support them — nightly reflect will strip them). Instead, when the batch contains outbound user language that unambiguously closes a project — accepting, declining, confirming completion, "all set", "done", "we're good", "passing on this", "decided against", "signed", "moved in" — **rewrite the project page's opening sentence so any reader sees immediately that the project is closed.**
 
-- Good opening after a resolution: *"David declined the Chime offer on April 3 to accept the role at Google. The negotiation covered relocation, vesting, and severance…"*
-- Bad opening (doesn't make closure visible): *"David is in the midst of a Chime offer negotiation with Ted Paquin and Ryan King…"*
+- Good opening after a resolution: *"{user_first_name} declined the Acme Corp offer on April 3 to accept the role at Widget Inc. The negotiation covered relocation, vesting, and severance…"*
+- Bad opening (doesn't make closure visible): *"{user_first_name} is in the midst of an Acme Corp offer negotiation with Sam and Alex…"*
 - Preserve the full history of the project in later paragraphs — lead with closure, keep context.
 - Only rewrite as closed on clear resolution language in the user's own voice. Inbound messages saying "congrats" or "great news" are not enough. The user must have actually taken the closing action.
 - If a project is still ongoing, open with present-tense active framing. If the user is paused or waiting, say so explicitly in the opening sentence.
@@ -76,7 +76,7 @@ You may see two distinct kinds of items in the batch:
 
 ## Capturing contact identifiers from digest headers
 
-iMessage and WhatsApp per-contact digests include the raw identifier (phone number or email) for each participant in the digest header — e.g. ``iMessage with Jake Fowler (+15551234567) — 47 msgs`` or ``WhatsApp with Hadar Dor (hadar@example.com) — 12 msgs``. For group chats, the header lists each participant's identifier in parentheses after their name.
+iMessage and WhatsApp per-contact digests include the raw identifier (phone number or email) for each participant in the digest header — e.g. ``iMessage with Sam Lee (+15551234567) — 47 msgs`` or ``WhatsApp with Alex Chen (alex@example.com) — 12 msgs``. For group chats, the header lists each participant's identifier in parentheses after their name.
 
 **When you create or update a person page from a message-app digest, capture the identifier into frontmatter:**
 - Phone numbers go under `phones:` as a list (preserve the original format, e.g. `+15551234567`).
@@ -92,7 +92,7 @@ This gives every onboarded person a durable lookup handle that later cycles can 
 
 - **Copy every existing fact, sentence, and section from the current page into your new `content` field**, then merge in new information from this batch.
 - **Never drop an existing fact just because this batch doesn't mention it.** Absence in the current batch is not evidence of irrelevance.
-- **Merge, don't replace.** If the existing page says "Jon is the soccer team manager" and this batch reveals "Jon is organizing a tournament on April 20," the updated page should contain both.
+- **Merge, don't replace.** If the existing page says "Alex is the soccer team manager" and this batch reveals "Alex is organizing a tournament on April 20," the updated page should contain both.
 - If existing content seems contradicted by new evidence, prefer the new evidence *but* keep a note of the prior state rather than silently overwriting.
 - If you are unsure whether existing content still applies, **keep it.** Reflect will reconcile stale facts tonight.
 

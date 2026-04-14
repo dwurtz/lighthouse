@@ -10,10 +10,12 @@ and accepts ``POST /v1/generate`` with ``Authorization: Bearer <token>``.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import logging
 import os
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -180,11 +182,28 @@ class GeminiClient:
         Every call gets a request_id for end-to-end tracing. The ID is
         sent to the server as a header and logged in telemetry, so
         errors can be correlated between client and server logs.
+
+        httpx failures are translated into typed :class:`DejaError`
+        subclasses so upstream catch sites (command_routes, mic_routes,
+        analysis_cycle) can decide uniformly whether to surface the
+        error to the user.
         """
         import time as _time
-        from deja.telemetry import track_llm_call, new_request_id
+        from deja.telemetry import track_llm_call
+        from deja.observability import (
+            AuthError,
+            LLMError,
+            ProxyUnavailable,
+            RateLimitError,
+            current_request_id,
+            new_request_id,
+        )
 
-        request_id = new_request_id()
+        # Reuse an outer request_id if one is already bound (e.g. the
+        # request_scope opened by command_routes / analysis_cycle) so the
+        # whole call tree shares one id. Mint one only if we're called
+        # outside any scope — then every LLM call is still traceable.
+        request_id = current_request_id() or new_request_id()
         t0 = _time.time()
         try:
             if self._direct_client:
@@ -205,12 +224,53 @@ class GeminiClient:
             if token:
                 headers["Authorization"] = f"Bearer {token}"
             serialized = self._serialize_contents(contents)
-            resp = await self._http.post("/v1/generate", json={
-                "model": model,
-                "contents": serialized,
-                "config": config_dict,
-            }, headers=headers)
-            resp.raise_for_status()
+            try:
+                resp = await self._http.post("/v1/generate", json={
+                    "model": model,
+                    "contents": serialized,
+                    "config": config_dict,
+                }, headers=headers)
+            except (httpx.TimeoutException, httpx.ConnectError, httpx.NetworkError) as e:
+                raise ProxyUnavailable(
+                    f"proxy request failed: {type(e).__name__}: {e}",
+                    details={"url": f"{DEJA_API_URL}/v1/generate", "model": model},
+                ) from e
+
+            status = resp.status_code
+            if status >= 400:
+                detail_body = ""
+                try:
+                    detail_body = resp.text[:500]
+                except Exception:
+                    pass
+                details = {
+                    "http_status": status,
+                    "url": f"{DEJA_API_URL}/v1/generate",
+                    "model": model,
+                    "body": detail_body,
+                }
+                if status in (502, 503, 504):
+                    raise ProxyUnavailable(
+                        f"proxy returned {status}", details=details,
+                    )
+                if status in (401, 403):
+                    raise AuthError(
+                        f"proxy auth failed: {status}", details=details,
+                    )
+                if status == 429:
+                    raise RateLimitError(
+                        "proxy rate limited (429)", details=details,
+                    )
+                if 500 <= status < 600:
+                    raise LLMError(
+                        f"upstream llm returned {status}", details=details,
+                    )
+                # Other 4xx — surface as a generic LLMError so callers
+                # can still report it without leaking raw httpx errors.
+                raise LLMError(
+                    f"proxy returned {status}", details=details,
+                )
+
             duration = int((_time.time() - t0) * 1000)
             track_llm_call(model=model, duration_ms=duration, ok=True, request_id=request_id)
             return resp.json()["text"]
@@ -218,7 +278,10 @@ class GeminiClient:
             duration = int((_time.time() - t0) * 1000)
             track_llm_call(model=model, duration_ms=duration, ok=False, error=type(e).__name__, request_id=request_id)
             # Attach request_id to the exception so callers can show it
-            e.request_id = request_id  # type: ignore[attr-defined]
+            try:
+                e.request_id = request_id  # type: ignore[attr-defined]
+            except Exception:
+                pass
             raise
 
     @staticmethod
@@ -251,6 +314,7 @@ class GeminiClient:
         self,
         signals_text: str,
         wiki_text: str,
+        open_windows: str = "",
     ) -> dict:
         """Run one unified analysis cycle. Returns {reasoning, wiki_updates}."""
         now = datetime.now()
@@ -296,9 +360,56 @@ class GeminiClient:
             goals=goals_text or "(no goals.md)",
             wiki_text=wiki_text or "(empty)",
             signals_text=signals_text or "(no new signals)",
+            open_windows=open_windows or "(not available)",
             **user_fields,
         )
 
+        # Integrate shadow eval — when enabled, fires the same prompt
+        # through an alternate model in parallel with the production
+        # call. Only the production model's output drives the wiki;
+        # the shadow output is serialized to
+        # ``~/.deja/integrate_shadow/<ts>.json`` for offline comparison.
+        #
+        # The shadow model is the OTHER one — if production is Flash,
+        # shadow is Flash-Lite (watching for "did we miss anything?").
+        # If production is Flash-Lite, shadow is Flash (watching for
+        # "did Flash catch something FL hallucinated?"). Either way,
+        # we always have Flash-vs-Flash-Lite data.
+        try:
+            from deja.config import INTEGRATE_SHADOW_EVAL
+
+            shadow_on = bool(INTEGRATE_SHADOW_EVAL)
+        except Exception:
+            shadow_on = False
+
+        # Shadow set: the OTHER Flash variant (cheap A/B watchdog) plus
+        # Gemini 3.1 Pro (expensive, sees if a stronger model would make
+        # materially different calls). Order is preserved in the saved
+        # record as `shadows: [...]`.
+        shadow_models: list[str] = []
+        if shadow_on:
+            if INTEGRATE_MODEL == "gemini-2.5-flash":
+                shadow_models.append("gemini-2.5-flash-lite")
+            elif INTEGRATE_MODEL == "gemini-2.5-flash-lite":
+                shadow_models.append("gemini-2.5-flash")
+            shadow_models.append("gemini-3.1-pro-preview")
+
+        shadow_tasks: list[tuple[str, "asyncio.Task[str]"]] = []
+        for m in shadow_models:
+            t = asyncio.create_task(
+                self._generate(
+                    model=m,
+                    contents=prompt,
+                    config_dict={
+                        "response_mime_type": "application/json",
+                        "max_output_tokens": 16384,
+                        "temperature": 0.2,
+                    },
+                )
+            )
+            shadow_tasks.append((m, t))
+
+        t0 = time.time()
         resp_text = await self._generate(
             model=INTEGRATE_MODEL,
             contents=prompt,
@@ -308,6 +419,7 @@ class GeminiClient:
                 "temperature": 0.2,
             },
         )
+        prod_latency_ms = int((time.time() - t0) * 1000)
 
         try:
             result = json.loads(resp_text)
@@ -319,7 +431,120 @@ class GeminiClient:
 
         result.setdefault("reasoning", "")
         result.setdefault("wiki_updates", [])
+
+        # Save shadow comparison after the production call completes —
+        # never block the real cycle on the shadow. If the shadow task
+        # fails or times out we just skip serialization; the production
+        # path is unaffected.
+        if shadow_tasks:
+            try:
+                await self._save_integrate_shadow(
+                    prompt=prompt,
+                    signals_text=signals_text,
+                    prod_model=INTEGRATE_MODEL,
+                    prod_result=result,
+                    prod_latency_ms=prod_latency_ms,
+                    shadow_tasks=shadow_tasks,
+                )
+            except Exception:
+                log.debug("integrate shadow eval: save failed", exc_info=True)
+
         return result
+
+    async def _save_integrate_shadow(
+        self,
+        prompt: str,
+        signals_text: str,
+        prod_model: str,
+        prod_result: dict,
+        prod_latency_ms: int,
+        shadow_tasks: list,
+    ) -> None:
+        """Wait for all shadow calls and write a side-by-side JSON file.
+
+        Called after the production result is already returned to the
+        caller, so this runs in the tail of the cycle and never delays
+        the real work. Each shadow's failure/timeout is independent —
+        one slow model doesn't suppress the others.
+
+        Record shape:
+            production: {model, reasoning, wiki_updates, ...}
+            shadows: [{model, reasoning, ...}, ...]   # ordered
+        Legacy single-shadow readers can fall back to ``shadows[0]``.
+        """
+        async def _resolve(model: str, task) -> tuple[dict | None, int, str | None]:
+            start = time.time()
+            try:
+                text = await asyncio.wait_for(task, timeout=45.0)
+                latency = int((time.time() - start) * 1000)
+                try:
+                    parsed = json.loads(text)
+                except Exception:
+                    parsed = _parse_json(text)
+                if not isinstance(parsed, dict):
+                    parsed = {"reasoning": "(non-dict response)", "raw": str(text)[:500]}
+                parsed.setdefault("reasoning", "")
+                parsed.setdefault("wiki_updates", [])
+                return parsed, latency, None
+            except asyncio.TimeoutError:
+                return None, int((time.time() - start) * 1000), "timeout"
+            except Exception as e:
+                return None, int((time.time() - start) * 1000), f"{type(e).__name__}: {e}"[:200]
+
+        results = await asyncio.gather(
+            *[_resolve(m, t) for (m, t) in shadow_tasks],
+            return_exceptions=False,
+        )
+
+        shadow_records = []
+        for (model, _task), (parsed, latency, err) in zip(shadow_tasks, results):
+            if parsed is None:
+                shadow_records.append({"model": model, "error": err, "latency_ms": latency})
+            else:
+                shadow_records.append({
+                    "model": model,
+                    "reasoning": parsed.get("reasoning", ""),
+                    "wiki_updates": parsed.get("wiki_updates", []),
+                    "goal_actions": parsed.get("goal_actions", []),
+                    "tasks_update": parsed.get("tasks_update", {}),
+                    "latency_ms": latency,
+                })
+
+        from deja.config import DEJA_HOME
+        shadow_dir = DEJA_HOME / "integrate_shadow"
+        shadow_dir.mkdir(parents=True, exist_ok=True)
+        ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+        out_path = shadow_dir / f"{ts}.json"
+
+        record = {
+            "timestamp": datetime.now().isoformat(),
+            "signals_text": signals_text[:20000],
+            "prompt_tokens_approx": len(prompt) // 4,
+            "production": {
+                "model": prod_model,
+                "reasoning": prod_result.get("reasoning", ""),
+                "wiki_updates": prod_result.get("wiki_updates", []),
+                "goal_actions": prod_result.get("goal_actions", []),
+                "tasks_update": prod_result.get("tasks_update", {}),
+                "latency_ms": prod_latency_ms,
+            },
+            "shadows": shadow_records,
+        }
+        try:
+            out_path.write_text(json.dumps(record, indent=2, default=str))
+            summary = ", ".join(
+                f"{s['model']}→{len(s.get('wiki_updates', [])) if 'error' not in s else 'err'}"
+                for s in shadow_records
+            )
+            log.info(
+                "integrate shadow: saved %s (prod=%s→%d updates; shadows: %s)",
+                out_path.name,
+                prod_model,
+                len(prod_result.get("wiki_updates", [])),
+                summary,
+            )
+        except Exception:
+            log.debug("integrate shadow: write failed", exc_info=True)
 
     # ------------------------------------------------------------------
     # Onboarding — cold-start wiki generation from historical mail
@@ -398,102 +623,15 @@ class GeminiClient:
         result.setdefault("wiki_updates", [])
         return result
 
-    # ------------------------------------------------------------------
-    # Screenshot analysis
-    # ------------------------------------------------------------------
-
-    async def describe_screen(
-        self, image_path: str, goals_text: str = "", voice_context: str = ""
-    ) -> dict:
-        """Describe a screenshot via Gemini Flash vision.
-
-        The prompt is grounded in the current wiki `index.md` so the
-        model can name specific entities when they appear on screen
-        ("this Zillow listing relates to [[palo-alto-relocation]]")
-        instead of producing generic descriptions.
-
-        If voice_context is provided (e.g. recent dictation), it's
-        treated as the user's own commentary on what they're looking at
-        and given top priority for grounding the description.
-
-        Returns {summary, app, key_details}.
-        """
-        # Resize to reduce payload (max 800px wide, JPEG q75)
-        try:
-            from PIL import Image
-            import io
-
-            img = Image.open(image_path).convert("RGB")
-            if img.width > 800:
-                ratio = 800 / img.width
-                img = img.resize((800, int(img.height * ratio)), Image.LANCZOS)
-            buf = io.BytesIO()
-            img.save(buf, format="JPEG", quality=75)
-            image_bytes = buf.getvalue()
-            mime = "image/jpeg"
-        except Exception:
-            image_bytes = Path(image_path).read_bytes()
-            mime = "image/png"
-
-        # Load the vision prompt, injecting the current wiki index so the
-        # model can ground its description in the user's actual entities,
-        # plus the user's first name so it can address them correctly.
-        from deja.llm.prefilter import load_index_md
-        from deja.identity import load_user
-        index_md = load_index_md().strip() or "(no wiki entries yet)"
-        user_fields = load_user().as_prompt_fields()
-        template = load_prompt("describe_screen")
-        try:
-            prompt = template.format(index_md=index_md, **user_fields)
-        except KeyError:
-            # Prompt doesn't use one of the expected placeholders — render
-            # as-is rather than blowing up on a partial template.
-            prompt = template
-
-        # Voice dictation captured around this screenshot is the user's own
-        # commentary on what they're looking at — prepend it as top-priority
-        # context so the description matches their intent.
-        if voice_context:
-            prompt = (
-                f"# IMPORTANT: The user just said this while looking at the screen\n\n"
-                f'"{voice_context}"\n\n'
-                f"Use their words as the primary lens for interpreting the screen. "
-                f"What they said reveals their intent, what they're focused on, and "
-                f"how they want this moment understood. Ground your description in "
-                f"their commentary.\n\n"
-                f"---\n\n{prompt}"
-            )
-
-        # Vision uses its own model (VISION_MODEL) chosen by the
-        # tools/vision_eval.py harness — Flash in the default config
-        # because it produces ~4x more wiki-link grounding than Flash-Lite
-        # on real fixtures and outperforms Pro on every aggregate metric
-        # at 1/4 the cost. Max tokens bumped to 1024 because Flash is
-        # more verbose than Flash-Lite and 800 was truncating some frames.
-        if self._direct_client:
-            from google.genai import types
-            contents = [
-                types.Part.from_bytes(data=image_bytes, mime_type=mime),
-                prompt,
-            ]
-        else:
-            contents = [
-                {"type": "bytes", "data": base64.b64encode(image_bytes).decode(), "mime_type": mime},
-                prompt,
-            ]
-
-        resp_text = await self._generate(
-            model=VISION_MODEL,
-            contents=contents,
-            config_dict={
-                "max_output_tokens": 1024,
-                "temperature": 0.2,
-            },
+    # Screenshot analysis removed — OCR'd locally via the ``deja-ocr``
+    # Swift binary (no LLM round-trip). The former cloud describe_screen
+    # method and its shadow-eval harness were retired 2026-04-13 once
+    # OCR proved sufficient for downstream integrate quality.
+    _removed_describe_screen = True  # type: ignore[unused-ignore]
+    async def _describe_screen_deleted(self, *a, **kw):  # pragma: no cover
+        raise NotImplementedError(
+            "describe_screen was removed; screenshots are OCR'd by deja-ocr"
         )
-
-        if not resp_text:
-            log.warning("Vision returned empty response (model=%s)", VISION_MODEL)
-            return {"summary": "Screenshot analysis failed", "app": "", "key_details": ""}
 
         return {"summary": resp_text.strip()[:1000], "app": "", "key_details": ""}
 

@@ -51,6 +51,7 @@ EXPECTED_PLACEHOLDERS: dict[str, set[str]] = {
         "goals",
         "wiki_text",
         "signals_text",
+        "open_windows",
     },
     "onboard": {
         "user_first_name",
@@ -75,15 +76,6 @@ EXPECTED_PLACEHOLDERS: dict[str, set[str]] = {
         "user_profile",
         "question",
         "bundle",
-    },
-    "prefilter": {
-        "user_first_name",
-        "index_md",
-        "signals_block",
-    },
-    "describe_screen": {
-        "user_first_name",
-        "index_md",
     },
     "dedup_confirm": {
         "pairs",

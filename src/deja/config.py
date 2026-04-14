@@ -78,8 +78,13 @@ SCREENSHOT_HASH_THRESHOLD = _raw.get("screenshot_hash_threshold", 12)
 
 # LLM models — two, used for different cadences
 INTEGRATE_MODEL = _raw.get(
-    "integrate_model", "gemini-2.5-flash-lite"
-)  # prefilter + integration — text-only fast path, every few minutes
+    "integrate_model", "gemini-2.5-flash"
+)  # integrate cycle — upgraded from Flash-Lite 2026-04-12 after shadow
+# eval showed Flash-Lite was hallucinating "ambient" reminders from
+# unrelated signals (verification-code / Mercury / Chime patterns).
+# Flash caught none of these; correctly closed an existing reminder
+# instead of creating a new one. ~4.2× more expensive per cycle but
+# meaningfully more disciplined. See docs/integrate-model-eval-plan.md.
 VISION_MODEL = _raw.get(
     "vision_model", "gemini-2.5-flash"
 )  # screen description — tuned independently from integrate because the
@@ -121,43 +126,31 @@ USER_SLUG = _raw.get("user_slug", "")
 VISION_RETENTION = bool(_raw.get("vision_retention", False))
 VISION_RETENTION_DIR = DEJA_HOME / "vision_retention"
 
-# Vision shadow eval — when true, every screenshot runs through BOTH the
-# local vision model AND the cloud vision model. The local description is
-# still what flows downstream; the cloud description is saved alongside
-# in DEJA_HOME / "vision_shadow/" as paired (image, local, cloud) triples.
-# Used to collect a real-world dataset for prompt iteration on the local
-# model. Off by default — costs cloud API calls per screenshot.
-VISION_SHADOW_DIR = DEJA_HOME / "vision_shadow"
-
-
-def _vision_shadow_eval_enabled() -> bool:
-    """Vision shadow eval can be enabled by:
-    1. Local config.yaml (vision_shadow_eval: true)
-    2. Server feature flag for the user (cached in ~/.deja/feature_flags.json)
-    Either source enables it.
+def _integrate_shadow_eval_enabled() -> bool:
+    """Integrate shadow eval (Flash-Lite vs Flash A/B). Same config
+    precedence as vision_shadow_eval: local config.yaml OR
+    server-synced flags in ~/.deja/feature_flags.json.
     """
-    if _raw.get("vision_shadow_eval", False):
+    if _raw.get("integrate_shadow_eval", False):
         return True
     try:
         import json as _json
         flags_path = DEJA_HOME / "feature_flags.json"
         if flags_path.exists():
             flags = _json.loads(flags_path.read_text())
-            return bool(flags.get("vision_shadow_eval", False))
+            return bool(flags.get("integrate_shadow_eval", False))
     except Exception:
         pass
     return False
 
 
-# Re-evaluated each time so server-side flag updates take effect within
-# one process restart (the flags file is written at startup by sync_feature_flags()).
-class _LazyBool:
+class _IntegrateShadowLazy:
     def __bool__(self):
-        return _vision_shadow_eval_enabled()
+        return _integrate_shadow_eval_enabled()
     def __repr__(self):
         return repr(bool(self))
 
-VISION_SHADOW_EVAL = _LazyBool()
+INTEGRATE_SHADOW_EVAL = _IntegrateShadowLazy()
 
 # Kill switch for the screenshot collector. Set to false in config.yaml
 # if macOS Screen Recording permission is unstable or if you want to

@@ -10,15 +10,15 @@ Two pages are the SAME entity if:
 ## Rules for "different entities" — NEVER merge these
 
 - **Phonetically similar but distinct**: names that differ by one or two characters can refer to entirely different people. A contractor and a child with similar first names are different people. A company named "X.ai" and a person named "Xander" are different entities. Always verify via frontmatter, page body, and life context.
-- **Hierarchical relationships**: a project ON a property is NOT the same as the property (casita-roof is not the same as 5901-e-valley-vista). A meeting FOR a project is NOT the same as the project. A child IN a family is NOT the same as the parent. A subproject OF a larger effort is NOT the same as the larger effort. Part-of / belongs-to / contains relationships are never merges.
-- **Topically adjacent but distinct**: two pages about "kids at PCDS" might be two different kids. Two pages about "tru deployments" might be the deployment history and the Stripe integration — related but distinct projects.
+- **Hierarchical relationships**: a project ON a property is NOT the same as the property (roof-repair is not the same as 123-main-st). A meeting FOR a project is NOT the same as the project. A child IN a family is NOT the same as the parent. A subproject OF a larger effort is NOT the same as the larger effort. Part-of / belongs-to / contains relationships are never merges.
+- **Topically adjacent but distinct**: two pages about "kids at the same school" might be two different kids. Two pages about "alpha-project deployments" might be the deployment history and the payments integration — related but distinct projects.
 - **Same first name, different last name**: unless frontmatter, contact fields, or life context clearly prove they're the same person, treat them as different.
 
 ## Canonical selection (for confirmed merges)
 
 Pick the slug that most resembles the human-readable primary name:
 
-1. For people: longer wins when it's the real full name (`cruz-wurtz` > `cruz`), shorter wins when longer is a descriptor tail.
+1. For people: longer wins when it's the real full name (`sam-lee` > `sam`), shorter wins when longer is a descriptor tail.
 2. For projects: prefer the shortest form that unambiguously identifies the project. Strip `-app`, `-service`, `-project`, `-research`, `-management` tails, domain suffixes (`.com`, `-so`, `-io`, `-ai`), pluralization variants.
 3. Ties: alphabetical first.
 

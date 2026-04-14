@@ -130,41 +130,63 @@ def should_run_reflection(now: datetime | None = None) -> bool:
 
 
 async def run_reflection() -> dict:
-    """Run one dedup pass. Returns the DedupSummary dict.
+    """Run the 3x/day reflect phase — a pipeline of cluster-based
+    sweeps over the wiki corpus. Returns a merged summary dict.
+
+    "Reflect" is no longer one big LLM call (the original expensive
+    pass was retired). It's now a series of sweeps that reuse the
+    same QMD vector embeddings at different similarity thresholds
+    and filters, each producing a different kind of action:
+
+    1. **dedup** — similarity ≥0.82 on people/projects → merge pages
+       that describe the same entity. Writes directly to the wiki.
+    2. **contradictions** — similarity 0.65-0.82 on people/projects →
+       flag pages that reference the same subject but disagree on a
+       fact. Writes directly to the wiki.
+    3. **event themes** — similarity ≥0.55 on events with ``projects:
+       []`` and shared people → propose a new project page. Writes
+       a ``create_project`` observation; integrate creates the page.
+
+    All three run in sequence, share one concurrency lock, and share
+    one last-run marker. Per-sweep infra failures raise up to the
+    agent loop so the marker isn't updated and the next heartbeat
+    retries.
 
     Concurrent invocations are coalesced: the second caller sees the
-    lock held and returns an empty result immediately rather than
-    waiting or double-running the vector+LLM pipeline.
-
-    The name is kept as ``run_reflection`` because existing callers
-    (``agent/loop.py``) and tests import it under this name. The body
-    is now ``deja.dedup.run_dedup``.
+    lock held and returns ``{"skipped": "concurrent"}`` immediately
+    rather than double-running the full pipeline.
     """
     if _run_lock.locked():
-        log.info("Dedup already running — skipping concurrent invocation")
+        log.info("Reflect already running — skipping concurrent invocation")
         return {"skipped": "concurrent"}
 
     async with _run_lock:
         from deja.dedup import run_dedup
         from deja.contradictions import run_contradiction_sweep
-        # No silent fallback — dedup.run_dedup is expected to raise on
-        # any failure so the user sees the real problem. We deliberately
-        # do NOT catch-and-log here: if dedup raises, the exception
-        # propagates up to the caller (the agent loop) and the last-run
-        # marker is NOT updated, so the next heartbeat retries.
+        from deja.event_themes import run_event_theme_sweep
+
+        # 1. Dedup — merges same-entity pages.
         result = await run_dedup()
 
-        # Contradiction sweep piggybacks on the same 3x/day cadence.
-        # It reuses dedup's sqlite-vec embeddings at a lower similarity
-        # window to find pages that reference the same subject but
-        # disagree on a fact. Runs AFTER dedup so it works on the
-        # already-deduped corpus. Per-cluster failures are logged by
-        # the sweep itself; infra failures propagate and block the
-        # last-run marker just like dedup failures do.
+        # 2. Contradictions — flags same-subject-different-fact pairs.
         contra_result = await run_contradiction_sweep()
         if isinstance(result, dict) and isinstance(contra_result, dict):
             result = dict(result)
             result["contradictions"] = contra_result
+
+        # 3. Event themes — proposes projects for recurring themes.
+        themes_result = await run_event_theme_sweep()
+        if isinstance(result, dict) and isinstance(themes_result, dict):
+            result["event_themes"] = themes_result
+
+        # 4. Audit trim — keep audit.jsonl bounded to ~7 days.
+        try:
+            from deja.audit import trim_older_than
+            dropped = trim_older_than(days=7)
+            if isinstance(result, dict):
+                result["audit_trim"] = {"dropped": dropped}
+        except Exception:
+            log.exception("reflect: audit trim failed")
 
         _write_last_run()
         return result

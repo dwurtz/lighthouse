@@ -32,6 +32,14 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException
 
 from deja.config import DEJA_HOME
+from deja.observability import (
+    DejaError,
+    LLMError,
+    ProxyUnavailable,
+    ToolError,
+    report_error,
+    request_scope,
+)
 from deja.web.helpers import (
     load_conversation,
     save_conversation,
@@ -53,12 +61,34 @@ async def _transcribe_groq(wav_path: Path) -> str:
     headers = {"Authorization": f"Bearer {token}"} if token else {}
 
     async with httpx.AsyncClient(timeout=30) as client:
-        resp = await client.post(
-            f"{DEJA_API_URL}/v1/transcribe",
-            headers=headers,
-            files={"file": ("audio.wav", audio_bytes, "audio/wav")},
-        )
-        resp.raise_for_status()
+        try:
+            resp = await client.post(
+                f"{DEJA_API_URL}/v1/transcribe",
+                headers=headers,
+                files={"file": ("audio.wav", audio_bytes, "audio/wav")},
+            )
+        except (httpx.TimeoutException, httpx.ConnectError, httpx.NetworkError) as e:
+            raise ProxyUnavailable(
+                f"transcribe request failed: {type(e).__name__}: {e}",
+                details={"url": f"{DEJA_API_URL}/v1/transcribe"},
+            ) from e
+        if resp.status_code in (502, 503, 504):
+            raise ProxyUnavailable(
+                f"transcribe proxy returned {resp.status_code}",
+                details={
+                    "url": f"{DEJA_API_URL}/v1/transcribe",
+                    "http_status": resp.status_code,
+                },
+            )
+        if resp.status_code >= 400:
+            raise LLMError(
+                f"transcribe proxy returned {resp.status_code}",
+                details={
+                    "url": f"{DEJA_API_URL}/v1/transcribe",
+                    "http_status": resp.status_code,
+                    "body": resp.text[:500],
+                },
+            )
         result = resp.json()
 
     transcript = (result.get("text") or "").strip()
@@ -424,9 +454,23 @@ async def _mic_stop_inner(reason: str = "manual") -> dict:
     transcribe_error = None
     try:
         transcript = await _transcribe_groq(wav_path)
+    except DejaError as err:
+        # Typed proxy/upstream failure — report visibly so the pill
+        # shows a real error toast instead of silently dropping the
+        # user's dictation.
+        transcribe_error = err.user_message
+        err.details.setdefault("phase", "transcribe")
+        report_error(err, visible_to_user=True)
     except Exception as e:
         transcribe_error = str(e)
         log.exception("mic_stop: transcription failed")
+        report_error(
+            ToolError(
+                f"transcription failed: {type(e).__name__}: {e}",
+                details={"phase": "transcribe", "exception_type": type(e).__name__},
+            ),
+            visible_to_user=True,
+        )
 
     # Keep the WAV for debug whenever transcription is empty OR
     # flagged as a Whisper hallucination (filter below). On clean
@@ -542,8 +586,25 @@ async def _mic_stop_inner(reason: str = "manual") -> dict:
 
     try:
         parsed, cost, latency_ms = await _classify(transcript)
+    except DejaError as err:
+        err.details.setdefault("phase", "classify")
+        report_error(err, visible_to_user=True)
+        return {
+            "ok": False,
+            "recording": False,
+            "reason": "classifier_failed",
+            "detail": err.user_message,
+            "request_id": err.request_id,
+            "code": err.code,
+            "transcript": transcript,
+        }
     except Exception as e:
         log.exception("mic_stop: classifier failed")
+        wrapped = LLMError(
+            f"classifier failed: {type(e).__name__}: {e}",
+            details={"phase": "classify", "exception_type": type(e).__name__},
+        )
+        report_error(wrapped, visible_to_user=True)
         return {
             "ok": False,
             "recording": False,
@@ -676,7 +737,11 @@ async def mic_start() -> dict:
 
 @router.post("/api/mic/stop")
 async def mic_stop() -> dict:
-    return await _mic_stop_inner(reason="manual")
+    # Wrap in a request_scope so voice transcription + classification +
+    # audit writes all share one correlation id that any error report
+    # picks up automatically.
+    with request_scope():
+        return await _mic_stop_inner(reason="manual")
 
 
 @router.get("/api/mic/status")
