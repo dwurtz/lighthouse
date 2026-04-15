@@ -107,15 +107,28 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // errors (proxy 502, one failed LLM call) don't flip isBlocked
         // — they surface via the error toast + request id path and
         // never reach here.
+        //
+        // The blocked → open transition is debounced 1.5s so a brief
+        // startup flicker (permission probes haven't all reported back
+        // yet, default values transiently look blocked) doesn't flash
+        // the panel. The blocked → closed transition is immediate so
+        // the user sees recovery as soon as it happens.
+        monitor.$isBlocked
+            .removeDuplicates()
+            .debounce(for: .milliseconds(1500), scheduler: DispatchQueue.main)
+            .filter { $0 }   // only act on sustained-blocked transitions
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.showSetupPanel()
+            }
+            .store(in: &healthCancellables)
+
         monitor.$isBlocked
             .removeDuplicates()
             .receive(on: DispatchQueue.main)
             .sink { [weak self] blocked in
-                guard let self = self else { return }
-                if blocked {
-                    self.showSetupPanel()
-                } else {
-                    self.setupPanelWindow?.orderOut(nil)
+                if !blocked {
+                    self?.setupPanelWindow?.orderOut(nil)
                 }
             }
             .store(in: &healthCancellables)

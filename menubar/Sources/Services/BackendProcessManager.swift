@@ -219,6 +219,7 @@ class BackendProcessManager {
             // this display meaningfully (>50% of its area on-screen).
             var chosenApp: String? = nil
             var chosenTitle: String? = nil
+            var chosenBounds: CGRect? = nil
             for case let info as NSDictionary in windows {
                 guard let layer = info[kCGWindowLayer as String] as? Int,
                       layer == 0 else { continue }
@@ -238,12 +239,31 @@ class BackendProcessManager {
 
                 chosenApp = info[kCGWindowOwnerName as String] as? String
                 chosenTitle = info[kCGWindowName as String] as? String
+                chosenBounds = winBounds
                 break
             }
 
             var payload: [String: Any] = [:]
             if let app = chosenApp, !app.isEmpty { payload["app"] = app }
             if let title = chosenTitle, !title.isEmpty { payload["window_title"] = title }
+            // Focused-window crop region, normalized 0..1 within this
+            // display. Lets the OCR pipeline (deja-ocr --region) restrict
+            // recognition to just the focused window — eliminates sidebar
+            // / menu-bar / dock noise that was producing phantom entities.
+            // Computed against the visible portion of the window only;
+            // a window that's half off-screen yields a clamped rect.
+            if let raw = chosenBounds {
+                let visible = raw.intersection(cgFrame)
+                if visible.width > 0 && visible.height > 0 {
+                    let nx = (visible.origin.x - cgFrame.origin.x) / cgFrame.width
+                    let ny = (visible.origin.y - cgFrame.origin.y) / cgFrame.height
+                    let nw = visible.width / cgFrame.width
+                    let nh = visible.height / cgFrame.height
+                    payload["focused_frame_norm"] = [
+                        "x": nx, "y": ny, "w": nw, "h": nh,
+                    ]
+                }
+            }
 
             let sidecarPath = home + "/screen_\(displayNum)_ax.json"
             if payload.isEmpty {

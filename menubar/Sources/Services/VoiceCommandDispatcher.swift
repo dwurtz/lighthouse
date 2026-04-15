@@ -30,6 +30,12 @@ final class VoiceCommandDispatcher {
     private var currentWavPath: URL?
     private let onLevel: ((CGFloat) -> Void)?
 
+    // Commands authored before this instant are "stale" — they belong
+    // to a previous app session and must not auto-fire on cold start.
+    // Without this guard, a leftover {"action":"start"} from a prior
+    // session causes the mic to silently activate at every launch.
+    private var launchInstant: Date = .distantPast
+
     init(onLevel: ((CGFloat) -> Void)? = nil) {
         let home = FileManager.default.homeDirectoryForCurrentUser
         self.cmdPath = home.appendingPathComponent(".deja/voice_cmd.json")
@@ -38,6 +44,7 @@ final class VoiceCommandDispatcher {
     }
 
     func start() {
+        launchInstant = Date()
         // Poll every 150ms. Cheap — this file only gets touched at most
         // a couple times per minute during active voice use.
         pollTimer = Timer.scheduledTimer(withTimeInterval: 0.15, repeats: true) { [weak self] _ in
@@ -48,6 +55,18 @@ final class VoiceCommandDispatcher {
     func stop() {
         pollTimer?.invalidate()
         pollTimer = nil
+    }
+
+    // The Python writer emits timestamps with fractional seconds
+    // (e.g. "2026-04-14T19:32:36.581382+00:00"); the default
+    // ISO8601DateFormatter rejects those. Try with-fractional first,
+    // fall back to the standard form.
+    private func parseISO8601(_ s: String) -> Date? {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let d = f.date(from: s) { return d }
+        f.formatOptions = [.withInternetDateTime]
+        return f.date(from: s)
     }
 
     private func poll() {
@@ -62,6 +81,14 @@ final class VoiceCommandDispatcher {
         let key = "\(action):\(ts)"
         if key == lastStateKey { return }
         lastStateKey = key
+
+        // Drop stale commands authored before this app session began.
+        // Stop commands are still honored regardless — defensive cleanup
+        // of a leftover "recording" state is always safe.
+        if action == "start", let cmdDate = parseISO8601(ts), cmdDate < launchInstant {
+            NSLog("deja: ignoring stale voice cmd start (ts=\(ts) < launch=\(launchInstant))")
+            return
+        }
 
         if action == "start" {
             guard let pathStr = dict["wav_path"] as? String else {

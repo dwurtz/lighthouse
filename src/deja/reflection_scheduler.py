@@ -162,17 +162,21 @@ async def run_reflection() -> dict:
 
     async with _run_lock:
         from deja.dedup import run_dedup
-        from deja.contradictions import run_contradiction_sweep
         from deja.event_themes import run_event_theme_sweep
 
         # 1. Dedup — merges same-entity pages.
         result = await run_dedup()
 
-        # 2. Contradictions — flags same-subject-different-fact pairs.
-        contra_result = await run_contradiction_sweep()
-        if isinstance(result, dict) and isinstance(contra_result, dict):
-            result = dict(result)
-            result["contradictions"] = contra_result
+        # 2. Contradictions sweep DISABLED 2026-04-14.
+        # Both Flash-Lite and Flash produced too many false positives:
+        # complementary mentions of the same entity were being labeled as
+        # contradictions and real facts were being stripped from pages
+        # (Lei Yang interview, Archie Abrams Shopify role, Jonny irrigation
+        # confirmation, etc. — all true claims removed). Net signal-to-
+        # noise was negative across two days of audit data. Re-enable
+        # only after a redesign that gates more strictly (date-stamped
+        # claims required, higher similarity threshold, or a different
+        # detection approach altogether).
 
         # 3. Event themes — proposes projects for recurring themes.
         themes_result = await run_event_theme_sweep()

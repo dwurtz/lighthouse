@@ -149,8 +149,52 @@ def _find_ocr_binary() -> str | None:
     return found
 
 
+def _focused_region_from_sidecar(image_path: str) -> tuple[float, float, float, float] | None:
+    """Look for the screen_<N>_ax.json sidecar matching this screenshot
+    and return its focused_frame_norm as (x, y, w, h) with top-left
+    origin. Returns None when no sidecar exists, no focused frame is
+    recorded, or the values look implausible (e.g. covers the whole
+    display, in which case cropping is a no-op anyway).
+    """
+    import json
+    import os
+    import re
+
+    m = re.match(r"screen_(\d+)\.png$", os.path.basename(image_path))
+    if not m:
+        return None
+    sidecar = os.path.join(os.path.dirname(image_path), f"screen_{m.group(1)}_ax.json")
+    if not os.path.exists(sidecar):
+        return None
+    try:
+        with open(sidecar) as f:
+            data = json.load(f)
+    except Exception:
+        return None
+    frame = data.get("focused_frame_norm")
+    if not isinstance(frame, dict):
+        return None
+    try:
+        x, y, w, h = float(frame["x"]), float(frame["y"]), float(frame["w"]), float(frame["h"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    # Skip cropping when the focused window already covers ~the whole
+    # display; the crop adds no value and the region clamps in deja-ocr
+    # would just no-op.
+    if w * h > 0.95:
+        return None
+    if w <= 0 or h <= 0:
+        return None
+    return (x, y, w, h)
+
+
 def ocr_screen(image_path: str) -> str:
     """Extract text from a screenshot using macOS Vision OCR.
+
+    When a screen_<N>_ax.json sidecar with focused_frame_norm exists
+    next to the screenshot, OCR is restricted to the focused window's
+    bounds. Eliminates sidebar / menu-bar / dock noise that produces
+    phantom entities downstream.
 
     Returns the recognized text as a single string (one line per
     recognized text block). Returns an empty string on any failure —
@@ -163,9 +207,15 @@ def ocr_screen(image_path: str) -> str:
         log.debug("deja-ocr binary not found — skipping OCR")
         return ""
 
+    cmd = [binary, image_path]
+    region = _focused_region_from_sidecar(image_path)
+    if region is not None:
+        x, y, w, h = region
+        cmd += ["--region", f"{x:.4f}", f"{y:.4f}", f"{w:.4f}", f"{h:.4f}"]
+
     try:
         r = subprocess.run(
-            [binary, image_path],
+            cmd,
             capture_output=True,
             text=True,
             timeout=_OCR_TIMEOUT_S,
