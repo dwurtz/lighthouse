@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		01F1E11BB5E1FCCE3F93F542 /* ScreenCaptureScheduler.swift in Sources */ = {isa = PBXBuildFile; fileRef = BACE4FDB4014B4A7D3ABBCD9 /* ScreenCaptureScheduler.swift */; };
 		070169F7CFC7C96432745E16 /* MeetingPillView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E78982A7A76CA05C3EB71ABE /* MeetingPillView.swift */; };
 		095E6F27DEF16934B06AC1C7 /* TypedContentMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4454C278EB1B7F0CF033512 /* TypedContentMonitor.swift */; };
 		0C01FC2FFCC37AF1B2A160EB /* MeetingRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 546E703E0F803FFACC8456F1 /* MeetingRecorder.swift */; };
@@ -141,6 +142,7 @@
 		A4706308135587855A7DE9E3 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
 		AAC16F6D765A7DA5D67B53CC /* HealthReport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthReport.swift; sourceTree = "<group>"; };
 		B1F95702676613C975E92EE4 /* SignalHealthPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignalHealthPanel.swift; sourceTree = "<group>"; };
+		BACE4FDB4014B4A7D3ABBCD9 /* ScreenCaptureScheduler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenCaptureScheduler.swift; sourceTree = "<group>"; };
 		BC62B6B690ED57D0403A32A3 /* DejaApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DejaApp.swift; sourceTree = "<group>"; };
 		BCC51732D86F475138598563 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = System/Library/Frameworks/Foundation.framework; sourceTree = SDKROOT; };
 		C28EE339AA283B98EF4D7949 /* tray-icon.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "tray-icon.png"; sourceTree = "<group>"; };
@@ -289,6 +291,7 @@
 				129900B011818660B477E1AA /* MeetingCoordinator.swift */,
 				546E703E0F803FFACC8456F1 /* MeetingRecorder.swift */,
 				53B9C764CDEDAB4DC7902FAE /* MonitorState.swift */,
+				BACE4FDB4014B4A7D3ABBCD9 /* ScreenCaptureScheduler.swift */,
 				651D730D288689BC54939D75 /* SetupManager.swift */,
 				C4454C278EB1B7F0CF033512 /* TypedContentMonitor.swift */,
 				76FFD515F2B4CE855C9FB52D /* VoiceCommandDispatcher.swift */,
@@ -536,6 +539,7 @@
 				F5D1F9EDFD861854AD0E9D85 /* MonitorState.swift in Sources */,
 				C21BEA9674BCB5B70046B6C6 /* NotificationBubbleView.swift in Sources */,
 				7530B2F920F0FFCF1E2D3AA1 /* PopoverContentView.swift in Sources */,
+				01F1E11BB5E1FCCE3F93F542 /* ScreenCaptureScheduler.swift in Sources */,
 				42DCBCFE4FF56376DD425BA3 /* SettingsPanelWindow.swift in Sources */,
 				A3419BAB5DF619CFC302DDB9 /* SettingsView.swift in Sources */,
 				B8128765737EF8AE5BE141EE /* SetupManager.swift in Sources */,

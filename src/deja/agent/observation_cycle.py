@@ -227,6 +227,12 @@ async def run_collect_cycle(loop_ref) -> None:
                                 )
 
                             sig.text = header + "\n\n" + ocr_text
+                            # Stash app/window on the signal so the
+                            # downstream graphiti dispatch block can pass
+                            # them to the OCR preprocessor without
+                            # re-reading the AX sidecar.
+                            sig._app = app
+                            sig._window_title = title
                             log.info(
                                 "Vision (OCR+AX): %.1fs, %d chars, %s",
                                 ocr_elapsed, len(sig.text),
@@ -291,7 +297,31 @@ async def run_collect_cycle(loop_ref) -> None:
                 source = sig_dict.get("source", "")
                 should_ingest = False
                 if source == "screenshot":
-                    should_ingest = len(text) > 200
+                    if len(text) > 200:
+                        # Preprocess to strip UI chrome + extract a
+                        # compact structured signal. Cuts Graphiti's
+                        # per-screenshot cost ~10× and removes the
+                        # entity-extraction noise from menu bars,
+                        # sidebars, tab strips, etc.
+                        try:
+                            from deja.screenshot_preprocess import preprocess_screenshot
+                            app = getattr(sig, "_app", "") or ""
+                            window_title = getattr(sig, "_window_title", "") or ""
+                            cleaned = await preprocess_screenshot(text, app, window_title)
+                            if cleaned is None:
+                                # SKIP — pure chrome / empty screen.
+                                # Don't queue to Graphiti.
+                                continue
+                            sig_dict["text"] = cleaned
+                            should_ingest = True
+                        except Exception:
+                            log.warning(
+                                "screenshot preprocess failed, using raw OCR",
+                                exc_info=True,
+                            )
+                            should_ingest = True  # fall back to raw
+                    else:
+                        should_ingest = False
                 else:
                     try:
                         tier = classify_tier(sig_dict)

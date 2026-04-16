@@ -141,7 +141,12 @@ class MonitorState: ObservableObject {
 
     private var statsTimer: Timer?
     private var stateSnapshotTimer: Timer?
-    private var screenshotTimer: Timer?
+    /// Event-driven screenshot scheduler. Owns the debounced
+    /// DispatchWorkItem, the 60s passive-reading floor timer, the
+    /// NSWorkspace app-activation observer, and the AX observer on
+    /// the frontmost app. Replaces the old fixed 6s Timer.
+    private let captureScheduler = ScreenCaptureScheduler()
+    private var captureSchedulerStarted = false
     private let keystrokeMonitor = KeystrokeMonitor()
     /// Snapshots focused text-field contents via AX; emits "finished
     /// thought" records to ~/.deja/typed_content.jsonl. Reuses the
@@ -325,7 +330,8 @@ class MonitorState: ObservableObject {
     func stop() {
         statsTimer?.invalidate(); statsTimer = nil
         stateSnapshotTimer?.invalidate(); stateSnapshotTimer = nil
-        screenshotTimer?.invalidate(); screenshotTimer = nil
+        captureScheduler.stop()
+        captureSchedulerStarted = false
         keystrokeMonitor.stop()
         typedContentMonitor.stop()
         dbReaderTimer?.invalidate(); dbReaderTimer = nil
@@ -496,40 +502,16 @@ class MonitorState: ObservableObject {
 
     // MARK: - Screenshot Capture
 
+    /// Kick off event-driven screen capture. Replaces the old 6s
+    /// fixed-interval timer with three triggers (app focus change,
+    /// typing pause, AX window change) plus a 60s passive-reading
+    /// floor. Idempotent — calling twice is a no-op.
     func startScreenshotCapture() {
-        guard screenshotTimer == nil else { return }
+        guard !captureSchedulerStarted else { return }
+        captureSchedulerStarted = true
         keystrokeMonitor.start()
         typedContentMonitor.start()
-        captureScreenshot()
-        rescheduleScreenshotTimer()
-
-        // On app focus change, accelerate the next capture. Instead of
-        // adding a separate capture (which could double-fire), we
-        // reschedule the existing timer to fire in 0.5s — just enough
-        // for the new window to finish drawing. The 6s cadence resumes
-        // after that accelerated tick.
-        NSWorkspace.shared.notificationCenter.addObserver(
-            forName: NSWorkspace.didActivateApplicationNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            self?.rescheduleScreenshotTimer(delay: 0.5)
-        }
-    }
-
-    /// (Re)schedule the repeating screenshot timer. When called with a
-    /// short ``delay`` (e.g. 0.5s after a focus change), the NEXT tick
-    /// fires sooner than the normal 6s cadence. Subsequent ticks resume
-    /// at the standard interval.
-    private func rescheduleScreenshotTimer(delay: TimeInterval = 6.0) {
-        screenshotTimer?.invalidate()
-        screenshotTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
-            self?.captureScreenshot()
-            // Resume normal 6s cadence after the accelerated tick
-            self?.screenshotTimer = Timer.scheduledTimer(withTimeInterval: 6.0, repeats: true) { [weak self] _ in
-                self?.captureScreenshot()
-            }
-        }
+        captureScheduler.start(monitorState: self, keystrokeMonitor: keystrokeMonitor)
     }
 
     /// Capture a screenshot, but defer if the user is currently typing.
@@ -574,6 +556,11 @@ class MonitorState: ObservableObject {
         DispatchQueue.global(qos: .utility).async { [weak self] in
             self?.processManager.captureScreenshot()
         }
+        // Reset the 60s passive-reading floor — any successful
+        // capture (voice command, event-driven trigger, manual force)
+        // counts as "we saw the screen recently," so the floor
+        // fallback shouldn't pile on a redundant capture.
+        captureScheduler.noteCaptureLanded()
     }
 
     // MARK: - Database Reader Delegation

@@ -131,9 +131,44 @@ class BackendProcessManager {
         if !MonitorState.isBundledPython {
             proc.currentDirectoryURL = URL(fileURLWithPath: MonitorState.projectDir)
         }
-        proc.environment = makeEnv()
+        var env = makeEnv()
+        // Keep Python unbuffered so log lines flush promptly (the default
+        // line-buffered stdout can hide early crash output).
+        env["PYTHONUNBUFFERED"] = "1"
+        proc.environment = env
+
+        // Capture stderr to a dedicated log so silent crashes (import
+        // errors, unhandled exceptions that escape the logger) are
+        // visible. stdout still goes to /dev/null — the worker logs via
+        // Python logging which writes to ~/.deja/deja.log directly.
+        let stderrPath = MonitorState.home + "/graphiti_worker.err"
+        if !FileManager.default.fileExists(atPath: stderrPath) {
+            FileManager.default.createFile(atPath: stderrPath, contents: nil)
+        }
+        if let stderrHandle = FileHandle(forWritingAtPath: stderrPath) {
+            stderrHandle.seekToEndOfFile()
+            proc.standardError = stderrHandle
+        } else {
+            proc.standardError = FileHandle.nullDevice
+        }
         proc.standardOutput = FileHandle.nullDevice
-        proc.standardError = FileHandle.nullDevice
+
+        // Auto-restart on crash (except on clean termination).
+        // 5-second backoff to avoid crash loops.
+        proc.terminationHandler = { [weak self] terminated in
+            let status = terminated.terminationStatus
+            let reason = terminated.terminationReason
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) { [weak self] in
+                guard let self = self else { return }
+                // Don't restart if we deliberately stopped it (SIGTERM
+                // from stopAll, reason == .uncaughtSignal with status 15).
+                if self.graphitiProcess?.isRunning != true {
+                    print("Graphiti worker exited (status=\(status) reason=\(reason.rawValue)) — restarting")
+                    self.startGraphitiWorker()
+                }
+            }
+        }
+
         do {
             try proc.run()
             graphitiProcess = proc
