@@ -229,33 +229,17 @@ def _user_feature_flags(email: str | None) -> dict:
 
     Each flag env var is a comma-separated list of email addresses.
     Empty/unset = flag is off for everyone.
+
+    Currently empty — vision shadow eval was retired after the FastVLM
+    path was replaced with Apple Vision OCR, and integrate shadow eval
+    moved to a hardcoded-off client flag. Add new flags here when a
+    real A/B starts again.
     """
-    if not email:
-        return {}
-
-    def _enabled_for(env_var: str) -> bool:
-        allowed = os.environ.get(env_var, "")
-        if not allowed:
-            return False
-        emails = [e.strip().lower() for e in allowed.split(",") if e.strip()]
-        return email.lower() in emails
-
-    return {
-        "vision_shadow_eval": _enabled_for("VISION_SHADOW_EVAL_USERS"),
-    }
+    return {}
 
 
 @app.get("/v1/config")
 async def config(authorization: str | None = Header(None)):
-    flags: dict = {}
-    if authorization:
-        try:
-            token = authorization.removeprefix("Bearer ").strip()
-            user = await validate_token(token)
-            flags = _user_feature_flags(user.get("email"))
-        except Exception:
-            pass  # auth optional for /v1/config — anonymous users get defaults
-
     return {
         "integrate_model": "gemini-2.5-flash-lite",
         "vision_model": "gemini-2.5-flash",
@@ -263,7 +247,7 @@ async def config(authorization: str | None = Header(None)):
         "oauth_client_id": os.environ.get("GOOGLE_CLIENT_ID", ""),
         "oauth_client_secret": os.environ.get("GOOGLE_CLIENT_SECRET", ""),
         "oauth_project_id": "deja-ai-app",
-        "feature_flags": flags,
+        "feature_flags": _user_feature_flags(None),
     }
 
 

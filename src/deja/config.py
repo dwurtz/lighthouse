@@ -126,31 +126,12 @@ USER_SLUG = _raw.get("user_slug", "")
 VISION_RETENTION = bool(_raw.get("vision_retention", False))
 VISION_RETENTION_DIR = DEJA_HOME / "vision_retention"
 
-def _integrate_shadow_eval_enabled() -> bool:
-    """Integrate shadow eval (Flash-Lite vs Flash A/B). Same config
-    precedence as vision_shadow_eval: local config.yaml OR
-    server-synced flags in ~/.deja/feature_flags.json.
-    """
-    if _raw.get("integrate_shadow_eval", False):
-        return True
-    try:
-        import json as _json
-        flags_path = DEJA_HOME / "feature_flags.json"
-        if flags_path.exists():
-            flags = _json.loads(flags_path.read_text())
-            return bool(flags.get("integrate_shadow_eval", False))
-    except Exception:
-        pass
-    return False
-
-
-class _IntegrateShadowLazy:
-    def __bool__(self):
-        return _integrate_shadow_eval_enabled()
-    def __repr__(self):
-        return repr(bool(self))
-
-INTEGRATE_SHADOW_EVAL = _IntegrateShadowLazy()
+# Integrate shadow eval (Flash vs Flash-Lite vs Pro 3.1 A/B). OFF.
+# 303 recorded cycles were enough to confirm Flash is the right
+# production model — Flash-Lite under-disciplined, Pro 3.1 under-
+# attentive. The scaffolding in llm_client.py is kept for the next
+# model comparison; re-enable by flipping this flag to True.
+INTEGRATE_SHADOW_EVAL = False
 
 # Kill switch for the screenshot collector. Set to false in config.yaml
 # if macOS Screen Recording permission is unstable or if you want to
