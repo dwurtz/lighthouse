@@ -271,6 +271,18 @@ async def _run_analysis_cycle_body(
     # join writes to their real inputs instead of guessing by time window.
     audit.set_signals([i.get("id_key") for i in kept_items if i.get("id_key")])
 
+    # 1a-shadow. Feed kept signals to Graphiti in parallel (fire-and-forget).
+    # This is shadow mode — the existing wiki pipeline is the source of truth.
+    # All exceptions are caught inside ingest_signal(); create_task failures
+    # are caught here so a bad import never blocks the main cycle.
+    try:
+        from deja.graphiti_ingest import ingest_signal as _graphiti_ingest
+
+        for _sig in kept_items:
+            asyncio.create_task(_graphiti_ingest(_sig))
+    except Exception:
+        log.debug("graphiti shadow ingest dispatch failed", exc_info=True)
+
     # 1b. Capture the window list ONCE for the whole cycle — this goes
     #     into the integrate prompt as context, not into each signal.
     open_windows_text = ""
