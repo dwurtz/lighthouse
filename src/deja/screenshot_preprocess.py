@@ -70,10 +70,6 @@ STEP 2 — decide:
 STEP 3 — if extracting, output this structure (plain text, no JSON):
 
 TYPE: <one of the categories above>
-PROJECT: <if DEV_WORK or work-related WORK_CHAT/DOCUMENT, name the
-          project being worked on (e.g., "deja", "tru", "blade-and-rose",
-          "healthspan-research"). Use "personal" for non-work content.
-          Use "unknown" if you genuinely can't tell.>
 WHAT: <1-2 sentences describing what David is engaged with as a human
        would describe it. For DEV_WORK, describe the ACTIVITY and
        SUBJECT, not the text verbatim. E.g., "David is debugging the
