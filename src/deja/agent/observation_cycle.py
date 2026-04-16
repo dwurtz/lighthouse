@@ -289,18 +289,20 @@ async def run_collect_cycle(loop_ref) -> None:
                 if not text:
                     continue
                 source = sig_dict.get("source", "")
+                should_ingest = False
                 if source == "screenshot":
-                    if len(text) > 200:
-                        asyncio.create_task(_graphiti_ingest(sig_dict))
+                    should_ingest = len(text) > 200
                 else:
                     try:
                         tier = classify_tier(sig_dict)
                     except Exception:
                         tier = 3
-                    if tier <= 2:
-                        asyncio.create_task(_graphiti_ingest(sig_dict))
+                    should_ingest = tier <= 2
+                if should_ingest:
+                    from deja.graphiti_ingest import queue_signal
+                    queue_signal(sig_dict)
         except Exception:
-            log.debug("graphiti real-time ingest dispatch failed", exc_info=True)
+            log.warning("graphiti real-time ingest dispatch failed", exc_info=True)
 
         loop_ref._fire_stats_update()
 

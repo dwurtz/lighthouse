@@ -258,6 +258,14 @@ class MonitorState: ObservableObject {
 
         startWeb()
 
+        // Graphiti ingest worker — runs in its own process, tails
+        // ~/.deja/graphiti_queue.jsonl. Safe to start unconditionally:
+        // if the queue file doesn't exist yet, the worker just polls
+        // until it appears. Keeping it out of the main monitor process
+        // is intentional — Kuzu AsyncConnection was deadlocking when
+        // add_episode ran inside the agent loop.
+        startGraphitiWorker()
+
         // Always start database readers — even during setup.
         // The sqlite3 access to chat.db triggers macOS to add Deja
         // to the Full Disk Access list in System Settings.
@@ -477,6 +485,13 @@ class MonitorState: ObservableObject {
 
     func startWeb() {
         processManager.startWeb()
+    }
+
+    /// Launch the Graphiti ingest worker subprocess. Runs alongside the
+    /// monitor/web processes; tails the on-disk queue file. Out-of-process
+    /// to isolate Kuzu writes from the main agent loop.
+    func startGraphitiWorker() {
+        processManager.startGraphitiWorker()
     }
 
     // MARK: - Screenshot Capture

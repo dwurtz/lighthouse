@@ -5,25 +5,48 @@ that passes triage gets an ``add_episode()`` call into a local Kuzu-backed
 Graphiti instance.  All failures are caught and logged — this module must
 never crash or slow down the main analysis cycle.
 
-Initialization is lazy: the Graphiti instance, Kuzu driver, and OpenAI
-clients are created on the first ``ingest_signal()`` call and reused for
-the lifetime of the process.
+Architecture — process-isolated ingest:
+    1. Observation cycle calls ``queue_signal()``, which appends one JSON
+       line to ``~/.deja/graphiti_queue.jsonl`` (a few ms, fire-and-forget).
+    2. A dedicated subprocess (``python -m deja.graphiti_worker``) tails
+       that file and calls ``ingest_signal()`` for each new line.
+    3. The worker keeps a byte-offset cursor in
+       ``~/.deja/graphiti_queue.cursor`` so it can restart without
+       re-processing episodes.
+
+Why the subprocess: in-process ``asyncio.create_task`` + Kuzu's
+AsyncConnection was deadlocking (OpenAI calls completed but the Kuzu
+writes never committed). Running the ingest in a separate process
+eliminates whatever contention was happening. It also means bugs /
+slowness in graphiti_core can't impact the main agent loop.
+
+Initialization is lazy inside the worker: the Graphiti instance, Kuzu
+driver, and OpenAI clients are created on the first ``ingest_signal()``
+call and reused for the lifetime of the worker process.
 
 Requirements:
     pip install graphiti-core kuzu
-    OPENAI_API_KEY environment variable must be set.
+    OPENAI_API_KEY environment variable must be set (or
+    ``~/.deja/openai_key`` populated).
 
 DB location: ~/.deja/graphiti.db  (created on first use)
 """
 
 from __future__ import annotations
 
+import asyncio
+import fcntl
+import json
 import logging
 import os
 from datetime import datetime, timezone
 from pathlib import Path
 
 log = logging.getLogger(__name__)
+
+# Queue file shared between the observation cycle (producer) and the
+# graphiti_worker subprocess (consumer). One JSON object per line.
+QUEUE_PATH = Path.home() / ".deja" / "graphiti_queue.jsonl"
 
 # ---------------------------------------------------------------------------
 # Lazy singleton state
@@ -227,3 +250,56 @@ async def ingest_signal(signal: dict) -> None:
 
     except Exception:
         log.warning("graphiti_ingest: add_episode failed", exc_info=True)
+
+
+# ---------------------------------------------------------------------------
+# Queue-file producer — the observation cycle calls ``queue_signal`` to
+# append a JSON line to ~/.deja/graphiti_queue.jsonl. A separate subprocess
+# (graphiti_worker) tails the file and actually runs ``ingest_signal``.
+#
+# Why a file, not an in-process asyncio.Queue: the in-process worker
+# deadlocked on Kuzu writes. A separate process eliminates whatever
+# contention was happening and isolates graphiti failures from the agent
+# loop. File append with fcntl.flock() is atomic across processes.
+# ---------------------------------------------------------------------------
+
+
+def _json_safe(value):
+    """Coerce values that JSON can't serialize (datetime, Path, etc.)."""
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if value is None:
+        return ""
+    return value
+
+
+def queue_signal(signal: dict) -> None:
+    """Append a signal to the graphiti queue file. Non-blocking, ~1ms.
+
+    The subprocess (``python -m deja.graphiti_worker``) tails this file
+    and processes episodes one at a time. fire-and-forget: we never block
+    the caller, and failures here are logged but not raised.
+    """
+    try:
+        QUEUE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        # Only keep the fields the worker needs — drop anything else
+        # (e.g. private attributes) to keep lines small and JSON-safe.
+        record = {
+            "source": _json_safe(signal.get("source", "")),
+            "sender": _json_safe(signal.get("sender", "")),
+            "text": _json_safe(signal.get("text", "")),
+            "timestamp": _json_safe(signal.get("timestamp", "")),
+        }
+        line = json.dumps(record, ensure_ascii=False) + "\n"
+        # Open in append mode with an exclusive lock for the duration of
+        # the write. O_APPEND is atomic for writes smaller than PIPE_BUF
+        # on POSIX, but we lock anyway because our lines can exceed that.
+        with open(QUEUE_PATH, "a", encoding="utf-8") as f:
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+            try:
+                f.write(line)
+                f.flush()
+            finally:
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+    except Exception:
+        log.warning("graphiti_ingest: queue_signal failed", exc_info=True)

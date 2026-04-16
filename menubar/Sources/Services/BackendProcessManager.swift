@@ -8,6 +8,7 @@ class BackendProcessManager {
 
     private var monitorProcess: Process?
     private var webProcess: Process?
+    private var graphitiProcess: Process?
 
     /// Whether the monitor process is currently running.
     var isMonitorRunning: Bool {
@@ -110,6 +111,34 @@ class BackendProcessManager {
             webProcess = proc
         } catch {
             print("Web start failed: \(error)")
+        }
+    }
+
+    // MARK: - Graphiti Worker Process
+
+    /// Start the Graphiti ingest worker subprocess. This is a separate
+    /// Python process that tails ``~/.deja/graphiti_queue.jsonl`` and
+    /// runs ``graphiti.add_episode`` for each queued signal. Running it
+    /// out-of-process (instead of as an asyncio.Task inside `monitor`)
+    /// isolates Kuzu/OpenAI work — and any deadlocks therein — from the
+    /// main agent loop. Fire-and-forget from the observation cycle's
+    /// point of view.
+    func startGraphitiWorker() {
+        guard graphitiProcess == nil || !graphitiProcess!.isRunning else { return }
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: MonitorState.backendPath)
+        proc.arguments = ["-m", "deja.graphiti_worker"]
+        if !MonitorState.isBundledPython {
+            proc.currentDirectoryURL = URL(fileURLWithPath: MonitorState.projectDir)
+        }
+        proc.environment = makeEnv()
+        proc.standardOutput = FileHandle.nullDevice
+        proc.standardError = FileHandle.nullDevice
+        do {
+            try proc.run()
+            graphitiProcess = proc
+        } catch {
+            print("Graphiti worker start failed: \(error)")
         }
     }
 
@@ -284,6 +313,8 @@ class BackendProcessManager {
         monitorProcess = nil
         webProcess?.terminate()
         webProcess = nil
+        graphitiProcess?.terminate()
+        graphitiProcess = nil
 
         // Clean up socket file
         try? FileManager.default.removeItem(atPath: Self.socketPath)
@@ -294,9 +325,12 @@ class BackendProcessManager {
         monitorProcess = nil
         webProcess?.terminate()
         webProcess = nil
+        graphitiProcess?.terminate()
+        graphitiProcess = nil
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
             self?.startMonitor(onTermination: onMonitorTermination)
             self?.startWeb()
+            self?.startGraphitiWorker()
         }
     }
 }
