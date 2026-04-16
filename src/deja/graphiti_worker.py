@@ -101,8 +101,15 @@ async def _process_one_line(raw_line: str) -> None:
         log.warning("graphiti_worker: non-dict record, skipping: %r",
                     raw_line[:200])
         return
+    # Per-episode timeout — graphiti_core's add_episode has a known
+    # deadlock pattern (overlapping Kuzu writes during entity-update
+    # resolution). Without a timeout one bad episode freezes the worker
+    # forever. 180s is generous: normal episodes land in 10-60s.
     try:
-        await ingest_signal(signal)
+        await asyncio.wait_for(ingest_signal(signal), timeout=180)
+    except asyncio.TimeoutError:
+        ep_name = signal.get("source", "?") + ":" + str(signal.get("timestamp", ""))[:19]
+        log.warning("graphiti_worker: ingest_signal timed out after 180s, skipping (%s)", ep_name)
     except Exception:
         # ingest_signal itself catches + logs, but guard anyway so one
         # bad line can't crash the worker.
