@@ -362,6 +362,12 @@ def classify_tier(obs: dict) -> int:
         # string contains a recognizable email address.
         if text.startswith("[SENT]"):
             return 1
+        # [ENGAGED] prefix means: an incoming reply on a thread the user
+        # has already responded to. Engagement is a stronger signal than
+        # who's in the inner circle — if David hit Reply once, every
+        # subsequent message in that thread matters.
+        if text.startswith("[ENGAGED]"):
+            return 1
         if "→" in sender:
             user_emails = _get_user_emails()
             if not user_emails or _sender_email_is_user(sender, user_emails):

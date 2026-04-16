@@ -272,9 +272,16 @@ def _build_observation_from_thread(
     latest_to = ""
     latest_date = ""
     thread_lines: list[str] = []
+    # True iff ANY message in this thread was sent by the user (has the
+    # Gmail SENT label). An engaged thread — even an incoming-only reply
+    # to it — is Tier 1 because the user has explicitly committed to the
+    # conversation by responding before.
+    user_replied_to_thread = False
     for tm in thread_messages:
         hdrs = {h.get("name"): h.get("value", "")
                 for h in tm.get("payload", {}).get("headers", [])}
+        if "SENT" in (tm.get("labelIds") or []):
+            user_replied_to_thread = True
         if not subject:
             subject = hdrs.get("Subject", "")
         frm = hdrs.get("From", "")
@@ -309,6 +316,11 @@ def _build_observation_from_thread(
     else:
         sender_label = latest_from or "Unknown"
         id_key = f"email-{msg_id}"
+        # Stamp [ENGAGED] on incoming messages in threads the user has
+        # participated in — they're Tier 1 by the "you replied, you care"
+        # rule. The tier classifier keys off this prefix.
+        if user_replied_to_thread:
+            text = f"[ENGAGED] {text}"
 
     ts = datetime.now()
     if latest_date:
