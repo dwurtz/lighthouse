@@ -1,25 +1,30 @@
-"""Preprocess raw screen OCR into a compact signal for Graphiti.
+"""Preprocess raw screen OCR into a compact signal for integrate.
 
 Raw screenshots produce 3000-5000 chars of OCR including UI chrome,
 sidebars, menu bars — most of it noise. This module runs a cheap
-gpt-4.1-nano call to extract only the substantive content: what the
-user is doing, who's involved, and the key visible text.
+Gemini Flash-Lite call to extract only the substantive content: what
+the user is doing, who's involved, and the key visible text.
 
 Output is either:
-- A structured compact summary (~300-500 chars) ready for Graphiti
-- The sentinel "SKIP" when there's nothing substantive to remember
+- A structured compact summary (~500-2500 chars) ready for integrate
+- None when the content is pure chrome and should be dropped (SKIP)
 
-Cost: ~$0.0005 per screenshot, drops Graphiti's per-episode cost ~10x.
+Uses the same Gemini proxy as every other LLM path in Deja — no
+second billing surface, no OpenAI key to manage. Flash-Lite pricing:
+$0.10/M input, $0.40/M output (roughly $0.0003 per screenshot).
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
-import os
-from pathlib import Path
 
 log = logging.getLogger(__name__)
+
+# Model for the preprocess step. Flash-Lite is the cheap+fast tier —
+# used elsewhere for dedup confirmation and the command-center
+# classifier. If preprocess quality degrades, bump to gemini-2.5-flash.
+_PREPROCESS_MODEL = "gemini-2.5-flash-lite"
 
 # System prompt — classify the app/window by CATEGORY, extract the
 # substance, and label the work project if it's a dev/work session.
@@ -122,52 +127,26 @@ remembered. Only SKIP when it's truly ambient (lock screen, app
 switcher) or purely ephemeral (a single shell prompt, an empty Finder
 window)."""
 
-# Reuse the client across calls — building it is cheap but repeated
-# module-level construction is pointless.
+# Reuse the client across calls — building the httpx AsyncClient is
+# cheap but repeated module-level construction is pointless.
 _client = None
-_client_init_attempted = False
-
-
-def _get_api_key() -> str | None:
-    """Load OPENAI_API_KEY from env or ~/.deja/openai_key.
-
-    Same fallback graphiti_ingest uses: macOS `open` doesn't inherit shell
-    env vars, so the app process may not see OPENAI_API_KEY even when it
-    is set in the user's shell.
-    """
-    api_key = os.environ.get("OPENAI_API_KEY")
-    if api_key:
-        return api_key
-    key_file = Path.home() / ".deja" / "openai_key"
-    if key_file.is_file():
-        try:
-            return key_file.read_text().strip() or None
-        except OSError:
-            return None
-    return None
 
 
 def _get_client():
-    """Lazy-build an AsyncOpenAI client. Returns None when no key is set."""
-    global _client, _client_init_attempted
+    """Lazy-build a GeminiClient (proxy-routed)."""
+    global _client
     if _client is not None:
         return _client
-    if _client_init_attempted:
-        return None
-    _client_init_attempted = True
-    api_key = _get_api_key()
-    if not api_key:
-        log.warning(
-            "screenshot_preprocess: OPENAI_API_KEY not set and "
-            "~/.deja/openai_key not found — preprocessing disabled, raw OCR will flow through"
-        )
-        return None
     try:
-        from openai import AsyncOpenAI
-        _client = AsyncOpenAI(api_key=api_key)
+        from deja.llm_client import GeminiClient
+        _client = GeminiClient()
         return _client
     except Exception:
-        log.warning("screenshot_preprocess: failed to construct OpenAI client", exc_info=True)
+        log.warning(
+            "screenshot_preprocess: failed to construct GeminiClient — "
+            "preprocessing disabled, raw OCR will flow through",
+            exc_info=True,
+        )
         return None
 
 
@@ -190,48 +169,54 @@ async def preprocess_screenshot(
 
     client = _get_client()
     if client is None:
-        # No API key — degrade to raw OCR so the graphiti path still works.
+        # Proxy unavailable — degrade to raw OCR so integrate still gets
+        # something rather than dropping the signal entirely.
         return ocr_text
 
-    user_message = (
-        f"App: {app_name}\n"
-        f"Window: {window_title}\n\n"
-        f"OCR text:\n{ocr_text}"
+    # Gemini's _generate takes one `contents` blob — system and user
+    # text are concatenated into one prompt (same shape every other
+    # integrate/dedup call in this codebase uses).
+    full_prompt = (
+        _SYSTEM_PROMPT
+        + "\n\n"
+        + f"App: {app_name}\n"
+        + f"Window: {window_title}\n\n"
+        + f"OCR text:\n{ocr_text}"
     )
 
     try:
-        resp = await asyncio.wait_for(
-            client.chat.completions.create(
-                # gpt-4.1-mini (not nano) because the classification step
-                # needs reasoning — distinguishing "this is a Terminal
-                # showing logs → SKIP" from "this is Superhuman showing an
-                # email → extract" is worth ~$0.002 more per screenshot.
-                model="gpt-4.1-mini",
-                messages=[
-                    {"role": "system", "content": _SYSTEM_PROMPT},
-                    {"role": "user", "content": user_message},
-                ],
-                max_tokens=1500,
-                temperature=0.0,
+        content = await asyncio.wait_for(
+            client._generate(
+                model=_PREPROCESS_MODEL,
+                contents=full_prompt,
+                config_dict={
+                    "max_output_tokens": 1500,
+                    "temperature": 0.0,
+                },
             ),
-            timeout=10.0,
+            timeout=15.0,
         )
+        content = (content or "").strip()
     except asyncio.TimeoutError:
         log.warning("screenshot_preprocess: timeout, falling back to raw OCR")
         return ocr_text
     except Exception:
-        log.warning("screenshot_preprocess: API call failed, falling back to raw OCR", exc_info=True)
-        return ocr_text
-
-    try:
-        content = (resp.choices[0].message.content or "").strip()
-    except (AttributeError, IndexError):
-        log.warning("screenshot_preprocess: malformed response, falling back to raw OCR")
+        log.warning(
+            "screenshot_preprocess: API call failed, falling back to raw OCR",
+            exc_info=True,
+        )
         return ocr_text
 
     if not content:
         log.warning("screenshot_preprocess: empty content, falling back to raw OCR")
         return ocr_text
+
+    # Flash-Lite sometimes echoes the prompt's step numbering before
+    # emitting the schema. Strip anything above the first TYPE: line
+    # so integrate sees only the structured block. gpt-4.1-mini never
+    # did this; the extra defensiveness is cheap.
+    if "TYPE:" in content:
+        content = content[content.index("TYPE:") :].strip()
 
     # Treat any response that is exactly SKIP (or trivially so) as a skip
     # sentinel. Be tolerant: the model occasionally wraps it in quotes or
