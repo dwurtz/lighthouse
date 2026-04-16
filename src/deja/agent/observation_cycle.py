@@ -273,67 +273,6 @@ async def run_collect_cycle(loop_ref) -> None:
         loop_ref.last_signal_time = datetime.now(timezone.utc)
         log.info("Collected %d new signals", len(new_signals))
 
-        # Real-time Graphiti ingest — fire immediately per signal.
-        # Screenshots: send if OCR text is substantive (>200 chars), since
-        # classify_tier was designed for structured signals and marks most
-        # screenshots Tier 3 regardless of content. Already deduped by
-        # perceptual hash upstream, so redundant screenshots are filtered.
-        # Structured signals (email/imessage/whatsapp): use classify_tier,
-        # only Tier 1/2 pass (~$0.005/episode).
-        try:
-            from deja.signals.tiering import classify_tier
-            from deja.graphiti_ingest import ingest_signal as _graphiti_ingest
-
-            for sig in new_signals:
-                sig_dict = {
-                    "source": getattr(sig, "source", ""),
-                    "sender": getattr(sig, "sender", ""),
-                    "text": getattr(sig, "text", ""),
-                    "timestamp": getattr(sig, "timestamp", ""),
-                }
-                text = sig_dict.get("text", "").strip()
-                if not text:
-                    continue
-                source = sig_dict.get("source", "")
-                should_ingest = False
-                if source == "screenshot":
-                    if len(text) > 200:
-                        # Preprocess to strip UI chrome + extract a
-                        # compact structured signal. Cuts Graphiti's
-                        # per-screenshot cost ~10× and removes the
-                        # entity-extraction noise from menu bars,
-                        # sidebars, tab strips, etc.
-                        try:
-                            from deja.screenshot_preprocess import preprocess_screenshot
-                            app = getattr(sig, "_app", "") or ""
-                            window_title = getattr(sig, "_window_title", "") or ""
-                            cleaned = await preprocess_screenshot(text, app, window_title)
-                            if cleaned is None:
-                                # SKIP — pure chrome / empty screen.
-                                # Don't queue to Graphiti.
-                                continue
-                            sig_dict["text"] = cleaned
-                            should_ingest = True
-                        except Exception:
-                            log.warning(
-                                "screenshot preprocess failed, using raw OCR",
-                                exc_info=True,
-                            )
-                            should_ingest = True  # fall back to raw
-                    else:
-                        should_ingest = False
-                else:
-                    try:
-                        tier = classify_tier(sig_dict)
-                    except Exception:
-                        tier = 3
-                    should_ingest = tier <= 2
-                if should_ingest:
-                    from deja.graphiti_ingest import queue_signal
-                    queue_signal(sig_dict)
-        except Exception:
-            log.warning("graphiti real-time ingest dispatch failed", exc_info=True)
-
         loop_ref._fire_stats_update()
 
     loop_ref.phase = "IDLE"

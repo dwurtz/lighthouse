@@ -265,11 +265,12 @@ class MonitorState: ObservableObject {
 
         // Graphiti ingest worker — runs in its own process, tails
         // ~/.deja/graphiti_queue.jsonl. Safe to start unconditionally:
-        // if the queue file doesn't exist yet, the worker just polls
-        // until it appears. Keeping it out of the main monitor process
-        // is intentional — Kuzu AsyncConnection was deadlocking when
-        // add_episode ran inside the agent loop.
-        startGraphitiWorker()
+        // Graphiti shadow-ingest subprocess is NOT started. Reverted
+        // on 2026-04-16 back to wiki-Deja's integrate as the primary
+        // memory layer — integrate does session-level synthesis that
+        // per-signal Graphiti ingest threw away. Worker code + schema
+        // live in the tree (see graphiti_worker.py, graphiti_ingest.py)
+        // in case we revisit. Restore point: commit da70859.
 
         // Always start database readers — even during setup.
         // The sqlite3 access to chat.db triggers macOS to add Deja

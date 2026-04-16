@@ -148,21 +148,12 @@ async def run_analysis_cycle(
 ) -> None:
     """Wrap the cycle body in a request_scope so every downstream log,
     audit entry, and LLM call shares one correlation id.
-
-    2026-04-15: wiki-write pipeline PAUSED. Graphiti shadow ingest in
-    observation_cycle handles graph updates in real-time. The integrate
-    LLM + wiki-write step was blocking the event loop for minutes and
-    fighting with graphiti's async tasks. To re-enable: uncomment the
-    body below and restart.
     """
-    log.info("analysis cycle PAUSED — graphiti handles ingest in observation_cycle")
-    return
-    # --- Paused wiki-write pipeline (revert by uncommenting) ---
-    # with request_scope() as req_id:
-    #     log.debug("analysis cycle starting (req=%s)", req_id)
-    #     return await _run_analysis_cycle_body(
-    #         loop_ref, trigger_kind=trigger_kind, trigger_detail=trigger_detail
-    #     )
+    with request_scope() as req_id:
+        log.debug("analysis cycle starting (req=%s)", req_id)
+        return await _run_analysis_cycle_body(
+            loop_ref, trigger_kind=trigger_kind, trigger_detail=trigger_detail
+        )
 
 
 async def _run_analysis_cycle_body(
