@@ -150,25 +150,24 @@ def _make_episode_name(signal: dict) -> str:
     source = signal.get("source", "unknown")
     sender = signal.get("sender", "")
     ts = signal.get("timestamp", "")
-    # e.g. "email:david@example.com:2026-04-15T10:30:00"
     parts = [source]
     if sender:
-        parts.append(sender[:60])
+        parts.append(str(sender)[:60])
     if ts:
-        parts.append(ts[:19])
+        parts.append(str(ts)[:19])
     return ":".join(parts)
 
 
-def _parse_timestamp(ts_str: str | None) -> datetime:
-    """Parse an ISO timestamp string to a timezone-aware datetime."""
-    if not ts_str:
+def _parse_timestamp(ts) -> datetime:
+    """Coerce a timestamp (str, datetime, or None) to a timezone-aware datetime."""
+    if ts is None:
         return datetime.now(timezone.utc)
+    if isinstance(ts, datetime):
+        return ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc)
     try:
-        dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        return dt
-    except (ValueError, AttributeError):
+        dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    except (ValueError, AttributeError, TypeError):
         return datetime.now(timezone.utc)
 
 
@@ -227,4 +226,4 @@ async def ingest_signal(signal: dict) -> None:
         )
 
     except Exception:
-        log.debug("graphiti_ingest: add_episode failed", exc_info=True)
+        log.warning("graphiti_ingest: add_episode failed", exc_info=True)

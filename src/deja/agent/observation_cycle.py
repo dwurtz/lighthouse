@@ -266,6 +266,42 @@ async def run_collect_cycle(loop_ref) -> None:
         loop_ref.signals_collected += len(new_signals)
         loop_ref.last_signal_time = datetime.now(timezone.utc)
         log.info("Collected %d new signals", len(new_signals))
+
+        # Real-time Graphiti ingest — fire immediately per signal.
+        # Screenshots: send if OCR text is substantive (>200 chars), since
+        # classify_tier was designed for structured signals and marks most
+        # screenshots Tier 3 regardless of content. Already deduped by
+        # perceptual hash upstream, so redundant screenshots are filtered.
+        # Structured signals (email/imessage/whatsapp): use classify_tier,
+        # only Tier 1/2 pass (~$0.005/episode).
+        try:
+            from deja.signals.tiering import classify_tier
+            from deja.graphiti_ingest import ingest_signal as _graphiti_ingest
+
+            for sig in new_signals:
+                sig_dict = {
+                    "source": getattr(sig, "source", ""),
+                    "sender": getattr(sig, "sender", ""),
+                    "text": getattr(sig, "text", ""),
+                    "timestamp": getattr(sig, "timestamp", ""),
+                }
+                text = sig_dict.get("text", "").strip()
+                if not text:
+                    continue
+                source = sig_dict.get("source", "")
+                if source == "screenshot":
+                    if len(text) > 200:
+                        asyncio.create_task(_graphiti_ingest(sig_dict))
+                else:
+                    try:
+                        tier = classify_tier(sig_dict)
+                    except Exception:
+                        tier = 3
+                    if tier <= 2:
+                        asyncio.create_task(_graphiti_ingest(sig_dict))
+        except Exception:
+            log.debug("graphiti real-time ingest dispatch failed", exc_info=True)
+
         loop_ref._fire_stats_update()
 
     loop_ref.phase = "IDLE"
