@@ -49,8 +49,17 @@ async def _ensure_graphiti():
     try:
         api_key = os.environ.get("OPENAI_API_KEY")
         if not api_key:
+            # Fallback: read from ~/.deja/openai_key (macOS `open` doesn't
+            # inherit shell env vars, so the app process may not see them).
+            key_file = Path.home() / ".deja" / "openai_key"
+            if key_file.is_file():
+                api_key = key_file.read_text().strip()
+                if api_key:
+                    log.info("graphiti_ingest: loaded OPENAI_API_KEY from %s", key_file)
+        if not api_key:
             log.warning(
-                "graphiti_ingest: OPENAI_API_KEY not set — shadow ingest disabled"
+                "graphiti_ingest: OPENAI_API_KEY not set and ~/.deja/openai_key "
+                "not found — shadow ingest disabled"
             )
             return None
 
