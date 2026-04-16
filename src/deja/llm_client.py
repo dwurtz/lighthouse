@@ -98,7 +98,14 @@ def _truncate_goals_text(text: str) -> str:
 
 
 def _parse_json(raw: str) -> Any:
-    """Best-effort JSON extraction from LLM output."""
+    """Best-effort JSON extraction from LLM output.
+
+    All ``json.loads`` calls use ``strict=False`` so unescaped control
+    characters (bare ``\\n`` / ``\\t``) inside string values don't
+    crash the parse — Gemini occasionally emits these in narrative
+    fields and there's no value in failing a whole cycle over one
+    missing backslash.
+    """
     text = raw.strip()
     # Strip markdown fences
     if text.startswith("```"):
@@ -112,10 +119,10 @@ def _parse_json(raw: str) -> Any:
             start = text.index(open_ch)
             end = text.rindex(close_ch) + 1
             try:
-                return json.loads(text[start:end])
+                return json.loads(text[start:end], strict=False)
             except json.JSONDecodeError:
                 continue
-    return json.loads(text)
+    return json.loads(text, strict=False)
 
 
 class GeminiClient:
@@ -422,7 +429,7 @@ class GeminiClient:
         prod_latency_ms = int((time.time() - t0) * 1000)
 
         try:
-            result = json.loads(resp_text)
+            result = json.loads(resp_text, strict=False)
         except (json.JSONDecodeError, ValueError):
             result = _parse_json(resp_text)
 
@@ -479,7 +486,7 @@ class GeminiClient:
                 text = await asyncio.wait_for(task, timeout=45.0)
                 latency = int((time.time() - start) * 1000)
                 try:
-                    parsed = json.loads(text)
+                    parsed = json.loads(text, strict=False)
                 except Exception:
                     parsed = _parse_json(text)
                 if not isinstance(parsed, dict):
@@ -610,7 +617,7 @@ class GeminiClient:
         )
 
         try:
-            result = json.loads(resp_text)
+            result = json.loads(resp_text, strict=False)
         except (json.JSONDecodeError, ValueError):
             result = _parse_json(resp_text)
 
