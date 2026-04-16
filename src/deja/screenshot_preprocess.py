@@ -21,14 +21,19 @@ from pathlib import Path
 
 log = logging.getLogger(__name__)
 
-# System prompt — classify the app/window type first, then decide if the
-# content matters to David as a HUMAN (not as an engineer debugging his
-# own tools). Reject meta-content aggressively: Terminals, Claude Code,
-# log viewers, admin dashboards — all contaminate the personal graph.
+# System prompt — classify the app/window by CATEGORY, extract the
+# substance, and label the work project if it's a dev/work session.
+# The earlier "aggressively SKIP dev content" approach threw away
+# legitimate signal: David IS a developer, and screenshots of his dev
+# work are real signal about what he's doing. The right fix is to
+# categorize properly so dev content attaches to the DEJA / TRU / etc.
+# project entities and doesn't leak into his personal-life facts.
 _SYSTEM_PROMPT = """You preprocess screen OCR for David Wurtz's personal knowledge graph.
-David is a builder/entrepreneur in Phoenix. The graph remembers things
-that matter to his LIFE, RELATIONSHIPS, and WORK — not the plumbing of
-his tools or his own debugging sessions.
+David is a builder/entrepreneur in Phoenix working on Deja (this app),
+Tru, Blade & Rose, and other projects. He's also a husband, father,
+and recently-diagnosed heart-disease patient. The graph should remember
+everything that matters to his life AND his work — including coding,
+debugging, and terminal sessions, because building things IS his work.
 
 You are given the app name, window title, and OCR text. Reason carefully.
 
@@ -37,50 +42,62 @@ STEP 1 — classify what's on screen (one of):
   • EMAIL: Superhuman, Gmail, Mail.app, Outlook
   • DOCUMENT: Google Docs, Notion, Notes, Obsidian, Word, Pages
   • CALENDAR_PLANNING: Calendar, Linear, Things, Todoist, Asana
-  • WEB_CONTENT: Safari, Chrome, Arc showing an actual article, tweet,
-    video, or product page David is reading (NOT his own app's admin
-    panel or dev tools)
+  • WEB_CONTENT: Safari, Chrome, Arc — article, tweet, video, product page
   • WORK_CHAT: Slack, Discord, Teams — substantive work conversation
   • MEETING: Zoom, Meet, FaceTime active meeting
-  • DEV_TOOL: Terminal, iTerm, VS Code, Xcode, Claude Code, Console,
-    Activity Monitor, Docker Desktop, Redis CLI, logs, debug output,
-    Deja's own UI, or screenshots of any AI assistant interface
-  • ADMIN: System Settings, Finder browsing files, app switcher,
-    Spotlight, desktop, dock, lock screen, empty windows
+  • DEV_WORK: Terminal, iTerm, VS Code, Xcode, Claude Code, Console,
+    Docker, logs, debug output. Real engineering activity David is
+    doing on one of his projects.
+  • ADMIN_NOISE: System Settings, Spotlight, app switcher, desktop,
+    dock, lock screen, empty Finder, app-launcher sheets. Pure
+    ephemeral chrome with no meaning.
   • MEDIA: YouTube, Netflix, Spotify, Music, video players
   • OTHER: something that doesn't fit above
 
 STEP 2 — decide:
-  • DEV_TOOL, ADMIN → output exactly: SKIP
-  • MEDIA → SKIP unless it's something David would remember
-    (e.g., a specific YouTube video whose title clearly matters)
-  • OTHER → SKIP unless the content is obviously substantive
-  • Everything else → extract (see step 3)
+  • ADMIN_NOISE → output exactly: SKIP
+  • MEDIA → SKIP unless it's specific substantive media (a talk David
+    is watching for research, a song he'd want to remember). Background
+    playlists and algorithmic feeds → SKIP.
+  • OTHER without clear substance → SKIP
+  • Everything else (including DEV_WORK) → extract (see step 3)
 
 STEP 3 — if extracting, output this structure (plain text, no JSON):
 
 TYPE: <one of the categories above>
+PROJECT: <if DEV_WORK or work-related WORK_CHAT/DOCUMENT, name the
+          project being worked on (e.g., "deja", "tru", "blade-and-rose",
+          "healthspan-research"). Use "personal" for non-work content.
+          Use "unknown" if you genuinely can't tell.>
 WHAT: <1-2 sentences describing what David is engaged with as a human
-       would describe it. Not "Gmail showing email from Reid" — say
-       "David is reading an email from Reid about the Q3 board deck">
-WHY_IT_MATTERS: <1 sentence on relevance to David's life/work/people.
-                 If you can't articulate why it matters → return SKIP
-                 instead of this block>
-PEOPLE: <real humans involved, comma-separated; use "David" for himself.
-         Use "none" if nobody identifiable.>
+       would describe it. For DEV_WORK, describe the ACTIVITY and
+       SUBJECT, not the text verbatim. E.g., "David is debugging the
+       graphiti ingest worker in Deja — has just diagnosed an OpenAI
+       quota error and is about to add billing credits." NOT: "Terminal
+       shows 429 error, worker restart log, curl commands."
+WHY_IT_MATTERS: <1 sentence on relevance. For DEV_WORK: what problem
+                 is being solved or what progress is being made on which
+                 project. For PERSONAL/EMAIL: who it involves and why
+                 it's meaningful. If truly nothing matters → return SKIP.>
+PEOPLE: <real humans involved; use "David" for himself, "none" if
+         nobody else identifiable. For DEV_WORK it's fine if this is
+         just "David" or includes AI tools like "Claude".>
 CONTENT:
-<the substantive visible text — the actual email body, the actual
-message thread, the document paragraph, the meeting agenda. Drop all
-UI chrome (menus, sidebars, tabs, buttons, timestamps, unread counts,
-scrollbars, filters, folder lists, app headers).>
+<the substantive visible text — email body, message thread, document
+paragraph, meeting agenda, OR for DEV_WORK: the actual terminal output,
+error messages, code diffs, commands — the things that describe what
+happened technically. Drop ALL UI chrome: menus, sidebars, tabs,
+buttons, timestamps, unread counts, scrollbars, folder trees, app
+headers, tab strips.>
 
-Write as much CONTENT as needed to capture the substance (up to ~1500
-chars). Brevity is only valuable when there's nothing to say.
+Write as much CONTENT as needed (up to ~1500 chars). Rich content
+deserves a rich summary.
 
-Always write SKIP if you are unsure whether something matters.
-A false-negative (SKIP real content) is recoverable — David can see
-it in the source app. A false-positive (ingesting dev/admin noise)
-pollutes the graph permanently."""
+Bias toward extracting rather than SKIPping when DEV_WORK is involved
+— these sessions are how David's projects move forward and should be
+remembered. Only SKIP when it's truly ambient (lock screen, app
+switcher) or purely ephemeral (a single shell prompt, an empty Finder
+window)."""
 
 # Reuse the client across calls — building it is cheap but repeated
 # module-level construction is pointless.
