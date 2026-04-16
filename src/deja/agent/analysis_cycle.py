@@ -314,6 +314,7 @@ async def _run_analysis_cycle_body(
     all_reasoning: list[str] = []
     all_goal_actions: list[dict] = []
     all_tasks_updates: list[dict] = []
+    all_narratives: list[str] = []
 
     batches_to_run: list[tuple[str, list[dict]]] = [("combined", kept_items)]
 
@@ -365,6 +366,9 @@ async def _run_analysis_cycle_body(
             if reasoning:
                 all_reasoning.append(reasoning)
                 log.info("Reasoning (%s): %s", batch_name, reasoning[:200])
+            narrative = (result.get("observation_narrative") or "").strip()
+            if narrative:
+                all_narratives.append(narrative)
             # First successful batch resets the consecutive-failure counter
             # so a long run of transients is followed by a clean slate.
             global _consecutive_integrate_failures
@@ -400,6 +404,25 @@ async def _run_analysis_cycle_body(
     wiki_updates = all_wiki_updates
     reasoning = " | ".join(all_reasoning)
     log.info("Cycle: %d wiki updates total", len(wiki_updates))
+
+    # Append observation narratives to ~/Deja/observations/YYYY-MM-DD.md
+    # so the user can skim the quality of what Deja is noticing,
+    # independent of whether any wiki update fired this cycle.
+    if all_narratives:
+        try:
+            from deja.config import WIKI_DIR
+
+            now_local = datetime.now()
+            obs_dir = WIKI_DIR / "observations"
+            obs_dir.mkdir(parents=True, exist_ok=True)
+            obs_file = obs_dir / f"{now_local.strftime('%Y-%m-%d')}.md"
+            header = now_local.strftime("## %H:%M:%S")
+            body = "\n\n".join(all_narratives)
+            entry = f"{header}\n\n{body}\n\n---\n\n"
+            with obs_file.open("a", encoding="utf-8") as f:
+                f.write(entry)
+        except Exception:
+            log.debug("observation_narrative write failed", exc_info=True)
 
     # 4. Apply (guarded by the shared wiki lock so a concurrent
     #    first-run onboarding backfill can't stomp these writes).

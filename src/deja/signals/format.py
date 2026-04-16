@@ -1,19 +1,24 @@
-"""Tier-aware signal formatter for the integrate prompt.
+"""Chronological timeline formatter for the integrate prompt.
 
-The integrate LLM gets one big block of observations per cycle. The
-flat formatter that used to live in ``agent/analysis_cycle.py``
-rendered every observation as a peer, which meant the model had to
-rediscover priority from source strings every call. The tiered
-formatter here does that grouping up front: Tier 1 first, Tier 2
-second, Tier 3 last, each under a plain-text header so the model can
-anchor on them.
+The integrate LLM gets one batch of observations per cycle. Rather
+than grouping them by tier (which loses temporal adjacency — the
+cause-effect link between a sent email and a reply five minutes
+later), this formatter renders them as a single chronological
+timeline with per-line tier markers.
 
-No per-signal truncation — Flash-Lite has a 1M token context window
-and the signal text is whatever the collector captured.
+- [T1] = user-authored or inner-circle inbound (the anchors — every
+  wiki update must trace back to at least one of these).
+- [T2] = focused attention (a thread the user opened, a doc they
+  dwelled on).
+- [T3] = ambient (inbox views, notifications, passing screenshots) —
+  corroborate only.
 
-The headers and ordering are a **contract** between this formatter
-and the integrate prompt. If you rename a header here, update
+The markers are a **contract** between this formatter and the
+integrate prompt. If you change them here, update
 ``default_assets/prompts/integrate.md`` to match.
+
+No per-signal truncation — Flash has a 1M token context window and
+the signal text is whatever the collector captured.
 """
 
 from __future__ import annotations
@@ -21,44 +26,36 @@ from __future__ import annotations
 from deja.signals.tiering import classify_tier
 
 
-_TIER_HEADERS = {
-    1: "## Tier 1 — Voice (user-authored or inner-circle)",
-    2: "## Tier 2 — Attention (user engaged this view)",
-    3: "## Tier 3 — Ambient (background context)",
-}
+_TIER_MARKERS = {1: "[T1]", 2: "[T2]", 3: "[T3]"}
 
 
-def _render_line(obs: dict) -> str:
+def _render_line(obs: dict, marker: str) -> str:
     ts = obs.get("timestamp", "")
     source = obs.get("source", "?")
     sender = obs.get("sender", "?")
     text = obs.get("text", "") or ""
-    return f"[{ts}] [{source}] {sender}: {text}"
+    return f"{marker} [{ts}] [{source}] {sender}: {text}"
 
 
 def format_signals(signals: list[dict]) -> str:
-    """Render a batch of observation dicts grouped by tier.
+    """Render a batch of observation dicts as a chronological timeline.
 
-    Tiers with no signals are omitted — we don't want to mislead the
-    prompt with empty headers. Order within a tier is the caller's
-    order (typically chronological).
+    Each line carries its tier as a ``[T1]`` / ``[T2]`` / ``[T3]``
+    prefix. Order is by timestamp (ascending); ties fall back to
+    caller order.
     """
     if not signals:
         return ""
 
-    buckets: dict[int, list[dict]] = {1: [], 2: [], 3: []}
-    for obs in signals:
+    def _sort_key(obs: dict):
+        return obs.get("timestamp") or ""
+
+    ordered = sorted(signals, key=_sort_key)
+    lines = []
+    for obs in ordered:
         tier = classify_tier(obs)
-        if tier not in buckets:
-            tier = 3
-        buckets[tier].append(obs)
+        marker = _TIER_MARKERS.get(tier, _TIER_MARKERS[3])
+        lines.append(_render_line(obs, marker))
+    return "\n".join(lines)
 
-    sections: list[str] = []
-    for tier in (1, 2, 3):
-        items = buckets[tier]
-        if not items:
-            continue
-        body = "\n".join(_render_line(o) for o in items)
-        sections.append(f"{_TIER_HEADERS[tier]}\n{body}")
 
-    return "\n\n".join(sections)

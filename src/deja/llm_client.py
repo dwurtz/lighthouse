@@ -431,6 +431,7 @@ class GeminiClient:
 
         result.setdefault("reasoning", "")
         result.setdefault("wiki_updates", [])
+        result.setdefault("observation_narrative", "")
 
         # Save shadow comparison after the production call completes —
         # never block the real cycle on the shadow. If the shadow task
