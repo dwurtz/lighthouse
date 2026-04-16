@@ -14,6 +14,13 @@ from datetime import datetime, timezone
 
 log = logging.getLogger(__name__)
 
+# Screenshots with OCR shorter than this pass through raw — a quick
+# iMessage/WhatsApp/toast snapshot is already clean, and the preprocess
+# call overhead (~2-4s, one gpt-4.1-mini round-trip) isn't worth paying
+# for under ~400 chars of text. Anything above this threshold is where
+# UI chrome dominates and preprocessing reliably pays off.
+_PREPROCESS_MIN_CHARS = 400
+
 # ---------------------------------------------------------------------------
 # OCR signal cleanup — strip menu bar chrome and label signals clearly
 # ---------------------------------------------------------------------------
@@ -226,11 +233,50 @@ async def run_collect_cycle(loop_ref) -> None:
                                     + header
                                 )
 
-                            sig.text = header + "\n\n" + ocr_text
-                            # Stash app/window on the signal so the
-                            # downstream graphiti dispatch block can pass
-                            # them to the OCR preprocessor without
-                            # re-reading the AX sidecar.
+                            # Preprocess OCR into a compact structured
+                            # signal (TYPE / PROJECT / WHAT / SALIENT_FACTS
+                            # / CONTENT). Strips UI chrome that would
+                            # otherwise dominate integrate's prompt. Only
+                            # runs when OCR is long enough to benefit —
+                            # short iMessage/WhatsApp snippets pass raw.
+                            # Returns None when the screen is pure chrome
+                            # (ADMIN_NOISE / MEDIA noise) → drop the
+                            # signal entirely.
+                            sig_text = ocr_text
+                            if len(ocr_text) >= _PREPROCESS_MIN_CHARS:
+                                try:
+                                    from deja.screenshot_preprocess import (
+                                        preprocess_screenshot,
+                                    )
+
+                                    condensed = await preprocess_screenshot(
+                                        ocr_text,
+                                        app_name=app,
+                                        window_title=title,
+                                    )
+                                except Exception:
+                                    log.debug(
+                                        "preprocess_screenshot failed — using raw OCR",
+                                        exc_info=True,
+                                    )
+                                    condensed = ocr_text
+                                if condensed is None:
+                                    # SKIP sentinel: pure chrome, nothing
+                                    # worth remembering. Drop the signal
+                                    # so integrate never sees it.
+                                    log.info(
+                                        "Preprocess SKIPped screenshot %s (%s — %s)",
+                                        image_path.split("/")[-1], app, title,
+                                    )
+                                    sig.text = ""  # marker: skip persist
+                                    continue
+                                sig_text = condensed
+                                log.info(
+                                    "Preprocess: %d → %d chars",
+                                    len(ocr_text), len(condensed),
+                                )
+
+                            sig.text = header + "\n\n" + sig_text
                             sig._app = app
                             sig._window_title = title
                             log.info(

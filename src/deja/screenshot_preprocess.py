@@ -70,12 +70,11 @@ PROJECT: <if DEV_WORK or work-related WORK_CHAT/DOCUMENT, name the
           "healthspan-research"). Use "personal" for non-work content.
           Use "unknown" if you genuinely can't tell.>
 WHAT: <1-2 sentences describing what David is engaged with as a human
-       would describe it, with wiki-links where natural. For DEV_WORK,
-       describe the ACTIVITY and SUBJECT, not the text verbatim. E.g.,
-       "[[david-wurtz]] is debugging the graphiti ingest worker in
-       [[deja]] — has just diagnosed an OpenAI quota error and is
-       about to add billing credits." NOT: "Terminal shows 429 error,
-       worker restart log, curl commands."
+       would describe it. For DEV_WORK, describe the ACTIVITY and
+       SUBJECT, not the text verbatim. E.g., "David is debugging the
+       graphiti ingest worker in Deja — has just diagnosed an OpenAI
+       quota error and is about to add billing credits." NOT: "Terminal
+       shows 429 error, worker restart log, curl commands."
 WHY_IT_MATTERS: <1 sentence on relevance. For DEV_WORK: what problem
                  is being solved or what progress is being made on which
                  project. For PERSONAL/EMAIL: who it involves and why
@@ -112,25 +111,10 @@ happened technically. Drop ALL UI chrome: menus, sidebars, tabs,
 buttons, timestamps, unread counts, scrollbars, folder trees, app
 headers, tab strips.>
 
-Wiki-linking is IMPORTANT — do it aggressively and everywhere. For
-every person / project name you mention in WHAT, WHY_IT_MATTERS, or
-SALIENT_FACTS, scan the ``KNOWN WIKI SLUGS`` list in the user message
-and wrap the name as ``[[slug]]`` when a slug's title/summary matches
-the entity on screen.
-
-Example: if the slug block contains
-  - [[joan-levinson]] — Joan Levinson is a real estate agent...
-  - [[miles-wurtz]] — Miles is David's son...
-and the OCR says "Email from Joan Levinson" and mentions Miles's
-gymnastics pickup, emit "[[joan-levinson]] sent an email" and
-"[[miles-wurtz]]'s gymnastics pickup" — NOT "Joan Levinson" or "Miles".
-
-When no slug in the list matches, leave the raw name. Never invent a
-slug. Events (date-prefixed pages) are not in the list and should not
-be linked.
-
 Write as much CONTENT as needed (up to ~1500 chars). Rich content
-deserves a rich summary.
+deserves a rich summary. Do NOT wiki-link names yourself — integrate
+resolves `[[slug]]` references downstream with full wiki context. Use
+plain names here.
 
 Bias toward extracting rather than SKIPping when DEV_WORK is involved
 — these sessions are how David's projects move forward and should be
@@ -161,52 +145,6 @@ def _get_api_key() -> str | None:
         except OSError:
             return None
     return None
-
-
-# How many of index.md's top-of-file entries to surface to the
-# preprocess LLM. index.md is auto-generated, ordered most-recently-
-# touched first, and each line is "- [[slug]] — one-line summary". 50
-# lines ≈ 10KB ≈ 2.5K input tokens on gpt-4.1-mini — cheap enough to
-# pay per screenshot and rich enough that the slug list disambiguates
-# from the summary (e.g. "[[rob-hurst]] — New Patient Advisor at
-# HealthspanMD" vs "[[robert-toy]] — Coach Rob, gymnastics").
-_CANDIDATE_SLUG_LINES = 50
-
-
-def _candidate_slugs_block() -> str:
-    """Read the top N slug lines from ~/Deja/index.md.
-
-    index.md is an auto-rebuilt recency-ordered catalog of every
-    people/ + projects/ page; the header comment explicitly calls out
-    "LLM consumers (vision prompt, triage prefilter, integrate
-    retrieval) read this top-down" — preprocess joins that club.
-
-    Returns the raw slug-summary lines joined with newlines so the
-    prompt keeps the summaries (they disambiguate collisions like
-    the two "Rob"s). Empty string on any read failure — the prompt
-    degrades to "no known slugs" and leaves raw names intact.
-    """
-    try:
-        from deja.config import WIKI_DIR
-    except Exception:
-        return ""
-    index_path = WIKI_DIR / "index.md"
-    if not index_path.is_file():
-        return ""
-    try:
-        lines: list[str] = []
-        with index_path.open(encoding="utf-8") as f:
-            for line in f:
-                s = line.strip()
-                if not s.startswith("- [["):
-                    continue
-                lines.append(s)
-                if len(lines) >= _CANDIDATE_SLUG_LINES:
-                    break
-        return "\n".join(lines)
-    except OSError:
-        log.debug("candidate_slugs: failed to read %s", index_path, exc_info=True)
-        return ""
 
 
 def _get_client():
@@ -255,17 +193,9 @@ async def preprocess_screenshot(
         # No API key — degrade to raw OCR so the graphiti path still works.
         return ocr_text
 
-    slug_lines = _candidate_slugs_block()
-    known_slugs_block = (
-        "KNOWN WIKI SLUGS (most-recently-touched first — the ONLY valid "
-        "link targets; never invent a slug):\n" + slug_lines
-        if slug_lines
-        else "KNOWN WIKI SLUGS: (none — leave names as raw text)"
-    )
     user_message = (
         f"App: {app_name}\n"
         f"Window: {window_title}\n\n"
-        f"{known_slugs_block}\n\n"
         f"OCR text:\n{ocr_text}"
     )
 
