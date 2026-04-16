@@ -198,6 +198,9 @@ def _get_message_metadata(msg_id: str) -> dict | None:
                 "--params", json.dumps({
                     "userId": "me",
                     "id": msg_id,
+                    # metadataHeaders works on users.messages.get (unlike
+                    # threads.get), but we use full for consistency and
+                    # because bandwidth cost is negligible.
                     "format": "metadata",
                     "metadataHeaders": ["From", "To", "Subject", "Date"],
                 }),
@@ -215,7 +218,19 @@ def _get_message_metadata(msg_id: str) -> dict | None:
 
 
 def _get_thread(thread_id: str) -> list[dict]:
-    """Fetch a thread (metadata format)."""
+    """Fetch a thread.
+
+    Uses ``format=full`` because Gmail's ``users.threads.get`` does NOT
+    support the ``metadataHeaders`` parameter — it's a ``messages.get``
+    feature only. Passing metadata+metadataHeaders to threads.get made
+    Gmail silently ignore the filter and return a payload with zero
+    headers, which then cascaded into every email being attributed to
+    ``sender: "Unknown"`` and tier-3'd as noise.
+
+    We fetch full messages but only read the handful of headers we need
+    (From/To/Subject/Date) in _build_observation_from_thread. The body
+    is discarded.
+    """
     try:
         result = subprocess.run(
             [
@@ -223,8 +238,7 @@ def _get_thread(thread_id: str) -> list[dict]:
                 "--params", json.dumps({
                     "userId": "me",
                     "id": thread_id,
-                    "format": "metadata",
-                    "metadataHeaders": ["From", "To", "Subject", "Date"],
+                    "format": "full",
                 }),
                 "--format", "json",
             ],
