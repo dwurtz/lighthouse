@@ -135,6 +135,11 @@ class BackendProcessManager {
         // Keep Python unbuffered so log lines flush promptly (the default
         // line-buffered stdout can hide early crash output).
         env["PYTHONUNBUFFERED"] = "1"
+        // Use FalkorDB as the graph backend — Kuzu's driver kept crashing
+        // silently. Toggle to "kuzu" to switch back.
+        if env["DEJA_GRAPH_BACKEND"] == nil {
+            env["DEJA_GRAPH_BACKEND"] = "falkor"
+        }
         proc.environment = env
 
         // Capture stderr to a dedicated log so silent crashes (import

@@ -87,7 +87,6 @@ async def _ensure_graphiti():
             return None
 
         from graphiti_core import Graphiti
-        from graphiti_core.driver.kuzu_driver import KuzuDriver
         from graphiti_core.llm_client.openai_client import OpenAIClient
         from graphiti_core.llm_client.config import LLMConfig
         from graphiti_core.embedder.openai import OpenAIEmbedder, OpenAIEmbedderConfig
@@ -95,33 +94,43 @@ async def _ensure_graphiti():
             OpenAIRerankerClient,
         )
 
-        db_path = str(Path.home() / ".deja" / "graphiti.db")
-        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+        # Backend selection: env DEJA_GRAPH_BACKEND=falkor → FalkorDB,
+        # anything else (including unset) → Kuzu embedded.
+        backend = os.environ.get("DEJA_GRAPH_BACKEND", "kuzu").lower()
 
-        log.info("graphiti_ingest: initializing Kuzu at %s", db_path)
+        if backend == "falkor":
+            from graphiti_core.driver.falkordb_driver import FalkorDriver
+            host = os.environ.get("FALKORDB_HOST", "localhost")
+            port = int(os.environ.get("FALKORDB_PORT", "6379"))
+            log.info("graphiti_ingest: initializing FalkorDB at %s:%s", host, port)
+            driver = FalkorDriver(host=host, port=port, database="deja")
+        else:
+            from graphiti_core.driver.kuzu_driver import KuzuDriver
+            db_path = str(Path.home() / ".deja" / "graphiti.db")
+            Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+            log.info("graphiti_ingest: initializing Kuzu at %s", db_path)
+            driver = KuzuDriver(db=db_path)
 
-        driver = KuzuDriver(db=db_path)
+            # ---- Kuzu FTS index workaround ----
+            # KuzuDriver.setup_schema() doesn't install fts or create the
+            # fulltext indices that add_episode requires.
+            try:
+                import kuzu as _kuzu
+                from graphiti_core.graph_queries import get_fulltext_indices
+                from graphiti_core.driver.driver import GraphProvider as _GP
 
-        # ---- FTS index workaround ----
-        # KuzuDriver.setup_schema() doesn't install fts or create the
-        # fulltext indices that add_episode requires.
-        try:
-            import kuzu as _kuzu
-            from graphiti_core.graph_queries import get_fulltext_indices
-            from graphiti_core.driver.driver import GraphProvider as _GP
-
-            _conn = _kuzu.Connection(driver.db)
-            _conn.execute("INSTALL fts;")
-            _conn.execute("LOAD EXTENSION fts;")
-            for _q in get_fulltext_indices(_GP.KUZU):
-                try:
-                    _conn.execute(_q)
-                except RuntimeError as _e:
-                    if "already exists" not in str(_e).lower():
-                        raise
-            _conn.close()
-        except Exception:
-            log.debug("graphiti_ingest: FTS setup (may already exist)", exc_info=True)
+                _conn = _kuzu.Connection(driver.db)
+                _conn.execute("INSTALL fts;")
+                _conn.execute("LOAD EXTENSION fts;")
+                for _q in get_fulltext_indices(_GP.KUZU):
+                    try:
+                        _conn.execute(_q)
+                    except RuntimeError as _e:
+                        if "already exists" not in str(_e).lower():
+                            raise
+                _conn.close()
+            except Exception:
+                log.debug("graphiti_ingest: FTS setup (may already exist)", exc_info=True)
 
         # small_model bumped to gpt-4.1-mini to fix attribute cross-pollution.
         llm = OpenAIClient(
@@ -237,6 +246,7 @@ async def ingest_signal(signal: dict) -> None:
             source=ep_source,
             source_description=source_desc,
             reference_time=ref_time,
+            group_id="deja",  # workaround for graphiti #1319 (FalkorDB default)
             entity_types=ENTITY_TYPES,
             edge_types=EDGE_TYPES,
             edge_type_map=EDGE_TYPE_MAP,
