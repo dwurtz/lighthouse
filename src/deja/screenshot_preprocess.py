@@ -70,18 +70,40 @@ PROJECT: <if DEV_WORK or work-related WORK_CHAT/DOCUMENT, name the
           "healthspan-research"). Use "personal" for non-work content.
           Use "unknown" if you genuinely can't tell.>
 WHAT: <1-2 sentences describing what David is engaged with as a human
-       would describe it. For DEV_WORK, describe the ACTIVITY and
-       SUBJECT, not the text verbatim. E.g., "David is debugging the
-       graphiti ingest worker in Deja — has just diagnosed an OpenAI
-       quota error and is about to add billing credits." NOT: "Terminal
-       shows 429 error, worker restart log, curl commands."
+       would describe it, with wiki-links where natural. For DEV_WORK,
+       describe the ACTIVITY and SUBJECT, not the text verbatim. E.g.,
+       "[[david-wurtz]] is debugging the graphiti ingest worker in
+       [[deja]] — has just diagnosed an OpenAI quota error and is
+       about to add billing credits." NOT: "Terminal shows 429 error,
+       worker restart log, curl commands."
 WHY_IT_MATTERS: <1 sentence on relevance. For DEV_WORK: what problem
                  is being solved or what progress is being made on which
                  project. For PERSONAL/EMAIL: who it involves and why
                  it's meaningful. If truly nothing matters → return SKIP.>
+PANES: <only when the screen shows MULTIPLE distinct apps/windows/panes
+        side-by-side. One short sentence per pane. Skip this section
+        entirely when there's a single active view.>
 PEOPLE: <real humans involved; use "David" for himself, "none" if
          nobody else identifiable. For DEV_WORK it's fine if this is
          just "David" or includes AI tools like "Claude".>
+SALIENT_FACTS: <structured facts visible on screen that a good
+                assistant would jot down for later. One per line, in
+                "TYPE: value" form. Omit the section entirely when
+                nothing qualifies. Extract liberally — err toward
+                capturing facts, not toward filtering. Types:
+                  ROLE: <Person — Title at Company>
+                  CONTACT: <Person — email or phone>
+                  EMAIL: <address@domain — whose it is>
+                  PHONE: <+15551234 — whose it is>
+                  APPOINTMENT: <what — when — where>
+                  PRESCRIPTION: <drug — source / pharmacy / prescriber>
+                  DEADLINE: <what — by when>
+                  DECISION: <short summary of a commitment made>
+                  AMOUNT: <$N or qty — for / context>
+                  URL: <link — what it is>
+                Include a fact whenever its value is visible on this
+                screen and would be worth remembering, regardless of
+                whether you've seen it before.>
 CONTENT:
 <the substantive visible text — email body, message thread, document
 paragraph, meeting agenda, OR for DEV_WORK: the actual terminal output,
@@ -89,6 +111,12 @@ error messages, code diffs, commands — the things that describe what
 happened technically. Drop ALL UI chrome: menus, sidebars, tabs,
 buttons, timestamps, unread counts, scrollbars, folder trees, app
 headers, tab strips.>
+
+Wiki-link canonical names in WHAT/WHY_IT_MATTERS when the referent is
+obvious: David → [[david-wurtz]], Deja → [[deja]], Tru → [[tru]],
+Blade & Rose → [[blade-and-rose]], Dominique → [[dominique-wurtz]].
+Don't invent slugs for people you can't confidently identify — leave
+the raw name instead.
 
 Write as much CONTENT as needed (up to ~1500 chars). Rich content
 deserves a rich summary.
