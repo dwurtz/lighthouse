@@ -299,13 +299,36 @@ def _run_claude(payload: dict) -> tuple[int, str, str]:
         "--dangerously-skip-permissions",
         "--output-format", "text",
     ]
+    # The claude CLI is a Node wrapper that shells out for node/bash at
+    # runtime. When spawned from Deja.app the inherited PATH is minimal
+    # (often missing /usr/bin, /usr/local/bin, node install dirs) so
+    # claude itself reports "claude not found in PATH" even though OUR
+    # absolute path to the binary worked. Augment PATH with the
+    # locations claude's runtime typically needs.
+    env = {**os.environ}
+    path_extras = [
+        "/usr/local/bin",
+        "/usr/bin",
+        "/bin",
+        "/usr/sbin",
+        "/sbin",
+        "/opt/homebrew/bin",
+        str(Path.home() / ".local/bin"),
+        "/Applications/cmux.app/Contents/Resources/bin",
+    ]
+    existing = env.get("PATH", "")
+    combined = ":".join([*path_extras, existing]) if existing else ":".join(path_extras)
+    env["PATH"] = combined
+    # Ensure HOME is set — claude reads its auth config from ~/.claude.
+    env.setdefault("HOME", str(Path.home()))
+
     try:
         proc = subprocess.run(
             cmd,
             capture_output=True,
             text=True,
             timeout=_SUBPROCESS_TIMEOUT_SEC,
-            env={**os.environ},
+            env=env,
         )
         return proc.returncode, proc.stdout, proc.stderr
     except subprocess.TimeoutExpired:
