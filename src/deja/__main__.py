@@ -178,6 +178,22 @@ def main() -> None:
         default=None,
         help="Run only one step instead of all pending steps",
     )
+    trail_p = sub.add_parser(
+        "hermes-trail",
+        help="Show recent audit entries from Hermes (trigger.kind=mcp) — see what your chief-of-staff has been doing",
+    )
+    trail_p.add_argument(
+        "--hours",
+        type=int,
+        default=24,
+        help="How many hours of trail to show (default: 24)",
+    )
+    trail_p.add_argument(
+        "--limit",
+        type=int,
+        default=100,
+        help="Max entries to show (default: 100)",
+    )
 
     args = parser.parse_args()
     command = args.command or "monitor"
@@ -204,6 +220,8 @@ def main() -> None:
         _run_linkify(dry_run=args.dry_run)
     elif command == "onboard":
         asyncio.run(_run_onboard(days=args.days, force=args.force, only=args.only))
+    elif command == "hermes-trail":
+        _run_hermes_trail(hours=args.hours, limit=args.limit)
     else:
         parser.print_help()
         sys.exit(1)
@@ -325,6 +343,61 @@ def _run_health(indent: str = "") -> None:
         print()
         print("One or more checks failed. Address the fixes above, then re-run.")
         sys.exit(1)
+
+
+def _run_hermes_trail(hours: int, limit: int) -> None:
+    """Print Hermes (MCP) audit entries from the last N hours.
+
+    Tails ``~/.deja/audit.jsonl`` and shows only rows where
+    ``trigger.kind == "mcp"``. Gives David visibility into every write
+    Hermes has made without grepping JSON by hand.
+    """
+    import json as _json
+    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+    from deja.audit import AUDIT_LOG
+
+    if not AUDIT_LOG.exists():
+        print("(no audit log at %s — nothing yet)" % AUDIT_LOG)
+        return
+
+    cutoff = _dt.now(_tz.utc) - _td(hours=hours)
+    rows: list[dict] = []
+    try:
+        for line in AUDIT_LOG.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                entry = _json.loads(line)
+            except _json.JSONDecodeError:
+                continue
+            trig = entry.get("trigger") or {}
+            if trig.get("kind") != "mcp":
+                continue
+            try:
+                ts = _dt.fromisoformat(entry["ts"].replace("Z", "+00:00"))
+            except (KeyError, ValueError):
+                continue
+            if ts < cutoff:
+                continue
+            rows.append(entry)
+    except OSError as e:
+        print(f"(couldn't read audit log: {e})")
+        return
+
+    if not rows:
+        print(f"(no Hermes activity in the last {hours}h)")
+        return
+
+    rows = rows[-limit:]
+    print(f"Hermes activity — last {hours}h, showing {len(rows)} entries\n")
+    for e in rows:
+        ts_str = e.get("ts", "")[:19].replace("T", " ")
+        action = e.get("action", "")
+        target = e.get("target", "")
+        reason = e.get("reason", "")
+        print(f"  [{ts_str}] {action:<24}  {target}")
+        if reason:
+            print(f"                          └─ {reason}")
 
 
 def _run_mcp() -> None:

@@ -1,31 +1,36 @@
-"""Deja Context Engine — MCP server for Claude.
+"""Deja Context Engine — MCP server.
 
-Exposes the user's personal wiki, observation stream, and contact graph
-to any MCP client (Claude Desktop, Claude Code) as a persistent context
-layer. Claude calls ``get_context(topic)`` at the start of any
-conversation that touches people, projects, or commitments, and gets
-back a pre-synthesized bundle of everything Deja knows about that
-topic — no need to manually search, paginate, or assemble the picture.
+Exposes the user's personal wiki, observation stream, goals list, and
+action layer to any MCP client (Claude Desktop, Claude Code, Hermes) as
+a persistent context-and-action layer. The agent calls into Deja to
+read what's happening, write what it learns, and take action in the
+world on the user's behalf.
 
-Three tools, not eight:
+Two client profiles:
 
-    get_context(topic)                — one call, full picture
-    update_wiki(action, ...)          — write or delete a page
-    recent_activity(minutes, source)  — raw observation stream
+  * **Claude Desktop / Code** — the original three tools (``get_context``,
+    ``update_wiki``, ``recent_activity``) cover conversational Q&A.
+  * **Hermes** — the chief-of-staff surface: ``daily_briefing``,
+    ``search_deja``, goal-mutation tools, and ``execute_action``. Hermes
+    opens each loop with ``daily_briefing``, then reads, decides, writes.
+
+Every mutating call sets the audit context to
+``trigger=("mcp","hermes")`` (or the calling client) so each change is
+traceable via ``python -m deja hermes-trail`` or raw
+``~/.deja/audit.jsonl``.
 
 Start with:
     python -m deja mcp
 
+Configure in Hermes (``~/.hermes/config.yaml``):
+    mcp_servers:
+      deja:
+        command: /Users/wurtz/projects/deja/.venv/bin/python
+        args: ["-m", "deja", "mcp"]
+
 Configure in Claude Desktop:
     ~/Library/Application Support/Claude/claude_desktop_config.json
-    {
-      "mcpServers": {
-        "deja": {
-          "command": "/path/to/venv/bin/python",
-          "args": ["-m", "deja", "mcp"]
-        }
-      }
-    }
+    { "mcpServers": { "deja": { "command": "...", "args": ["-m","deja","mcp"] } } }
 """
 
 from __future__ import annotations
@@ -52,23 +57,48 @@ log = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 _INSTRUCTIONS = """\
-You have a personal context engine called Deja connected. It \
-maintains a living wiki about the user's people, projects, commitments, \
-and recent digital activity (messages, emails, calendar, screenshots, \
-browser history).
+Deja is the user's personal memory and action layer. It continuously \
+observes their digital activity (messages, emails, calendar, browser, \
+screenshots) and maintains a living wiki: **people** (who they know), \
+**projects** (ongoing arcs), **events** (timestamped record of what \
+happened), and a **goals.md** with their open tasks, who they're \
+waiting on, and scheduled reminders. Deja can also act in the world on \
+their behalf — drafting emails, creating calendar events and tasks.
 
-Before answering any question about a specific person, project, \
-commitment, or recent event, call get_context(topic) first. The user \
-has an extensive personal wiki that knows things you don't — their \
-contacts, their projects, their recent messages, their commitments. \
-Don't guess when you can look it up.
+You are the user's chief of staff. Your job is to serve their goals. \
+To do that well, start by knowing what's going on, then decide what \
+needs doing, then do it.
 
-When the user asks you to remember something, update their wiki, or \
-correct a fact about someone, use update_wiki to make the change \
-directly. Every change is git-committed and reversible.
+**How to work:**
 
-When the user asks "what have I been doing" or wants real-time context, \
-use recent_activity to see their observation stream.\
+1. Begin loops with `daily_briefing` — one call returns the user's \
+profile, today's open tasks, who owes them what (waiting-fors), due \
+reminders, active projects, and recent events. This is your context \
+foundation every time you wake up.
+
+2. For targeted questions, `search_deja(query)` searches across \
+people, projects, events, and goals in one pass. Use it before guessing \
+anything about someone or something. Follow up with `get_page` for the \
+full content of a specific hit.
+
+3. When you learn something worth remembering — someone committed to \
+something, a fact changed, an arc moved — write it. `update_wiki` for \
+people/projects/events. `add_task` / `add_waiting_for` / `add_reminder` \
+for goals. Always pass a concrete `reason` so the audit trail is \
+readable.
+
+4. When something needs doing in the real world, call `execute_action` \
+with the action type (`draft_email`, `calendar_create`, `create_task`, \
+etc.) and params. Drafts require the user's review before sending — \
+that's a feature, not a limit.
+
+5. Close loops as you discover evidence: `complete_task` when a task \
+got done, `resolve_waiting_for` when someone delivered, \
+`resolve_reminder` when you've answered the question you set for \
+yourself. Leaving stale items pending is a failure mode.
+
+Never guess when you can look up. Prefer tool calls over freeform \
+recall. Every write leaves an audit entry the user can review.\
 """
 
 
@@ -209,6 +239,257 @@ def create_server() -> Server:
                             ),
                         },
                     },
+                },
+            ),
+            # ---------------- Hermes chief-of-staff surface ----------------
+            types.Tool(
+                name="daily_briefing",
+                description=(
+                    "One call returns everything you need to start a loop: "
+                    "the user's profile, today's date, their open Tasks, "
+                    "who they're Waiting for, due + upcoming Reminders, "
+                    "projects with activity in the last 7 days, and recent "
+                    "events from the last 24 hours. Always begin a work "
+                    "loop with this."
+                ),
+                inputSchema={"type": "object", "properties": {}},
+            ),
+            types.Tool(
+                name="search_deja",
+                description=(
+                    "Universal search across the user's entire Deja memory — "
+                    "people, projects, events, AND their open tasks / "
+                    "waiting-fors / reminders in goals.md. Returns ranked "
+                    "hits with category labels. Use this whenever you need "
+                    "to find a person, a project, a past event, or an open "
+                    "commitment. When you already know a specific page "
+                    "slug, use get_page for the full content instead."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string"},
+                        "limit": {"type": "integer", "default": 10},
+                    },
+                    "required": ["query"],
+                },
+            ),
+            types.Tool(
+                name="get_page",
+                description=(
+                    "Read one wiki page in full by category + slug. Call "
+                    "this after search_deja when you need the complete "
+                    "content of a specific hit."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "category": {"type": "string", "enum": ["people", "projects", "events"]},
+                        "slug": {
+                            "type": "string",
+                            "description": (
+                                "For people/projects: the kebab slug "
+                                "('jon-sturos'). For events: 'YYYY-MM-DD/slug'."
+                            ),
+                        },
+                    },
+                    "required": ["category", "slug"],
+                },
+            ),
+            types.Tool(
+                name="list_goals",
+                description=(
+                    "Return the raw structured contents of goals.md grouped "
+                    "by section: Standing context, Automations, Tasks, "
+                    "Waiting for, Reminders. Use when you need the full "
+                    "goal state rather than a ranked search slice."
+                ),
+                inputSchema={"type": "object", "properties": {}},
+            ),
+            types.Tool(
+                name="search_events",
+                description=(
+                    "Search timestamped event pages only (events/YYYY-MM-DD/). "
+                    "Scoped to last N days with optional person/project "
+                    "filters. Use for questions like 'what happened with "
+                    "Jon this week' or 'activity on home-roof'."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string"},
+                        "days": {"type": "integer", "default": 7},
+                        "person": {
+                            "type": "string",
+                            "description": "Person slug to filter by (e.g. 'jon-sturos')",
+                        },
+                        "project": {
+                            "type": "string",
+                            "description": "Project slug to filter by (e.g. 'home-roof')",
+                        },
+                    },
+                },
+            ),
+            types.Tool(
+                name="add_task",
+                description=(
+                    "Add a new item to the user's Tasks list. Use when the "
+                    "user commits to something or when you decide a "
+                    "recurring check belongs in their attention."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "description": {"type": "string"},
+                        "reason": {"type": "string"},
+                    },
+                    "required": ["description", "reason"],
+                },
+            ),
+            types.Tool(
+                name="complete_task",
+                description=(
+                    "Mark a task done. Substring match against the task "
+                    "line. Call ONLY when evidence confirms it happened."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "needle": {"type": "string"},
+                        "reason": {"type": "string"},
+                    },
+                    "required": ["needle", "reason"],
+                },
+            ),
+            types.Tool(
+                name="archive_task",
+                description="Archive a task no longer relevant (not completed). Substring match.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "needle": {"type": "string"},
+                        "reason": {"type": "string"},
+                    },
+                    "required": ["needle", "reason"],
+                },
+            ),
+            types.Tool(
+                name="add_waiting_for",
+                description=(
+                    "Record that someone owes the user something. Rendered "
+                    "as '**[[person-slug|Person Name]]** — what they owe'. "
+                    "Auto-expires after 21 days; archive explicitly sooner "
+                    "if the thread dies."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "person_slug": {"type": "string"},
+                        "person_name": {"type": "string"},
+                        "what": {"type": "string"},
+                        "reason": {"type": "string"},
+                    },
+                    "required": ["person_name", "what", "reason"],
+                },
+            ),
+            types.Tool(
+                name="resolve_waiting_for",
+                description="Mark a waiting-for resolved (the person delivered). Substring match.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "needle": {"type": "string"},
+                        "reason": {"type": "string"},
+                    },
+                    "required": ["needle", "reason"],
+                },
+            ),
+            types.Tool(
+                name="archive_waiting_for",
+                description="Archive a waiting-for no longer relevant. Substring match.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "needle": {"type": "string"},
+                        "reason": {"type": "string"},
+                    },
+                    "required": ["needle", "reason"],
+                },
+            ),
+            types.Tool(
+                name="add_reminder",
+                description=(
+                    "Schedule a future check-in for yourself. 'date' is "
+                    "strict YYYY-MM-DD. 'topics' is a list of wiki slugs "
+                    "this reminder touches (used for retrieval)."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "date": {"type": "string"},
+                        "question": {"type": "string"},
+                        "topics": {"type": "array", "items": {"type": "string"}, "default": []},
+                        "reason": {"type": "string"},
+                    },
+                    "required": ["date", "question", "reason"],
+                },
+            ),
+            types.Tool(
+                name="resolve_reminder",
+                description="Mark a reminder answered. Substring match on question text.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "needle": {"type": "string"},
+                        "reason": {"type": "string"},
+                    },
+                    "required": ["needle", "reason"],
+                },
+            ),
+            types.Tool(
+                name="archive_reminder",
+                description="Archive a reminder no longer relevant (moot).",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "needle": {"type": "string"},
+                        "reason": {"type": "string"},
+                    },
+                    "required": ["needle", "reason"],
+                },
+            ),
+            types.Tool(
+                name="execute_action",
+                description=(
+                    "Take action in the real world via Deja's action layer. "
+                    "Types:\n"
+                    "  • draft_email — {to, subject, body}. Creates a Gmail "
+                    "draft for the user to review and send.\n"
+                    "  • calendar_create — {summary, start, end, attendees?, "
+                    "description?, location?}. ISO 8601 datetimes.\n"
+                    "  • calendar_update — {event_id, ...patch}.\n"
+                    "  • create_task — {title, notes?, due?}. Google Tasks.\n"
+                    "  • complete_task — {task_id} or {title}.\n"
+                    "  • notify — {title, body}. macOS banner."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "type": {
+                            "type": "string",
+                            "enum": [
+                                "draft_email",
+                                "calendar_create",
+                                "calendar_update",
+                                "create_task",
+                                "complete_task",
+                                "notify",
+                            ],
+                        },
+                        "params": {"type": "object"},
+                        "reason": {"type": "string"},
+                    },
+                    "required": ["type", "params", "reason"],
                 },
             ),
         ]
@@ -463,6 +744,301 @@ def _get_context(topic: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Hermes chief-of-staff handlers
+# ---------------------------------------------------------------------------
+
+
+def _mcp_audit_context() -> None:
+    """Stamp audit context so writes this turn are tagged trigger=mcp/hermes."""
+    from deja import audit
+    audit.set_context(cycle="", trigger_kind="mcp", trigger_detail="hermes")
+
+
+def _daily_briefing() -> str:
+    """Compose the one-call briefing Hermes opens every loop with."""
+    from deja.config import WIKI_DIR
+    from deja.identity import load_user
+    from deja.goals import GOALS_PATH, _parse_sections
+
+    today = datetime.now()
+    out: list[str] = []
+
+    user = load_user()
+    out.append(
+        f"## Date\n\n{today.strftime('%A, %B %-d, %Y')} ({today.strftime('%H:%M')})\n"
+    )
+    out.append(
+        f"## User\n\n**{user.name}** ({user.email})\n\n{user.profile_md.strip()}"
+    )
+
+    # Goals slice — Tasks, Waiting for, Reminders
+    if GOALS_PATH.exists():
+        _, sections = _parse_sections(GOALS_PATH.read_text(encoding="utf-8"))
+        for section_name in ("Tasks", "Waiting for", "Reminders"):
+            bullets = [
+                ln.rstrip()
+                for ln in sections.get(section_name, [])
+                if ln.lstrip().startswith("- ")
+            ]
+            if bullets:
+                out.append(f"## {section_name}\n\n" + "\n".join(bullets))
+            else:
+                out.append(f"## {section_name}\n\n(none)")
+
+    # Active projects — any project page modified in the last 7 days
+    week_ago = today.timestamp() - 7 * 86400
+    projects_dir = WIKI_DIR / "projects"
+    if projects_dir.is_dir():
+        active: list[tuple[float, str, str]] = []
+        for path in projects_dir.glob("*.md"):
+            try:
+                mtime = path.stat().st_mtime
+                if mtime < week_ago:
+                    continue
+                title = path.stem
+                try:
+                    body = path.read_text(encoding="utf-8")
+                    m = re.search(r"^# (.+)$", body, re.MULTILINE)
+                    if m:
+                        title = m.group(1).strip()
+                except OSError:
+                    pass
+                first_sentence = ""
+                try:
+                    body_after_h1 = re.sub(r"(?s)^---.*?---\s*", "", body)
+                    body_after_h1 = re.sub(r"(?m)^#.*\n", "", body_after_h1).strip()
+                    first_sentence = body_after_h1.split(".")[0][:200]
+                except Exception:
+                    pass
+                active.append((mtime, title, first_sentence))
+            except OSError:
+                continue
+        active.sort(reverse=True)
+        if active:
+            out.append(
+                "## Active projects (last 7 days)\n\n"
+                + "\n".join(f"- **{t}** — {s}" for _, t, s in active[:12])
+            )
+
+    # Recent events — last 24h
+    events_dir = WIKI_DIR / "events"
+    if events_dir.is_dir():
+        recent_events: list[tuple[float, str]] = []
+        cutoff_ts = today.timestamp() - 86400
+        for day_dir in sorted(events_dir.iterdir(), reverse=True)[:3]:
+            if not day_dir.is_dir():
+                continue
+            for path in day_dir.glob("*.md"):
+                try:
+                    mtime = path.stat().st_mtime
+                    if mtime < cutoff_ts:
+                        continue
+                    title = path.stem
+                    try:
+                        body = path.read_text(encoding="utf-8")
+                        m = re.search(r"^# (.+)$", body, re.MULTILINE)
+                        if m:
+                            title = m.group(1).strip()
+                    except OSError:
+                        pass
+                    recent_events.append(
+                        (mtime, f"{day_dir.name}/{path.stem}: {title}")
+                    )
+                except OSError:
+                    continue
+        recent_events.sort(reverse=True)
+        if recent_events:
+            out.append(
+                "## Events in the last 24 hours\n\n"
+                + "\n".join(f"- {line}" for _, line in recent_events[:15])
+            )
+
+    return "\n\n---\n\n".join(out)
+
+
+def _search_deja(query: str, limit: int = 10) -> str:
+    """Universal search — QMD across wiki + goals.md slice."""
+    if not query:
+        return "(empty query — what are you searching for?)"
+
+    from deja.config import QMD_COLLECTION
+
+    sections: list[str] = []
+
+    try:
+        wiki_hits = _qmd_query(query, collection=QMD_COLLECTION, limit=limit)
+        if wiki_hits.strip():
+            sections.append(f"## Wiki hits (people / projects / events)\n\n{wiki_hits}")
+    except Exception as e:
+        sections.append(f"## Wiki search error\n\n{e}")
+
+    goals_slice = _goals_for_topic(query)
+    if goals_slice:
+        sections.append(f"## Open commitments touching '{query}'\n\n{goals_slice}")
+
+    if not sections:
+        return f"(no hits for '{query}')"
+    return "\n\n---\n\n".join(sections)
+
+
+def _get_page(category: str, slug: str) -> str:
+    """Read one wiki page by category + slug."""
+    from deja.config import WIKI_DIR
+    if category not in ("people", "projects", "events"):
+        return f"(unknown category: {category})"
+    if category == "events" and "/" in slug:
+        path = WIKI_DIR / "events" / f"{slug}.md"
+    else:
+        path = WIKI_DIR / category / f"{slug}.md"
+    if not path.exists():
+        return f"(page not found: {category}/{slug})"
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError as e:
+        return f"(read failed: {e})"
+
+
+def _list_goals() -> str:
+    """Return goals.md sections as structured markdown."""
+    from deja.goals import GOALS_PATH, _parse_sections
+    if not GOALS_PATH.exists():
+        return "(goals.md not found)"
+    _, sections = _parse_sections(GOALS_PATH.read_text(encoding="utf-8"))
+    out: list[str] = []
+    for name in ("Standing context", "Automations", "Tasks", "Waiting for", "Reminders"):
+        lines = sections.get(name, [])
+        body = "\n".join(ln.rstrip() for ln in lines if ln.rstrip())
+        out.append(f"## {name}\n\n{body or '(none)'}")
+    return "\n\n".join(out)
+
+
+def _search_events(
+    query: str = "",
+    days: int = 7,
+    person: str | None = None,
+    project: str | None = None,
+) -> str:
+    """Event-only search with date + person/project filters."""
+    from deja.config import WIKI_DIR
+
+    events_dir = WIKI_DIR / "events"
+    if not events_dir.is_dir():
+        return "(no events directory)"
+
+    cutoff = datetime.now() - timedelta(days=max(1, days))
+    q = (query or "").lower().strip()
+
+    hits: list[tuple[str, str, str]] = []  # (date, slug, excerpt)
+    for day_dir in sorted(events_dir.iterdir(), reverse=True):
+        if not day_dir.is_dir():
+            continue
+        try:
+            day = datetime.strptime(day_dir.name, "%Y-%m-%d")
+        except ValueError:
+            continue
+        if day < cutoff:
+            break
+        for path in day_dir.glob("*.md"):
+            try:
+                body = path.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            body_low = body.lower()
+            if q and q not in body_low:
+                continue
+            if person and f"[[{person}" not in body and f"people: [{person}" not in body and f"{person}" not in body_low:
+                continue
+            if project and f"[[{project}" not in body and f"projects: [{project}" not in body:
+                continue
+            title = path.stem
+            m = re.search(r"^# (.+)$", body, re.MULTILINE)
+            if m:
+                title = m.group(1).strip()
+            excerpt_lines = [
+                ln for ln in body.splitlines()
+                if ln.strip() and not ln.startswith(("---", "#", "date:", "time:", "people:", "projects:"))
+            ]
+            excerpt = " ".join(excerpt_lines)[:300]
+            hits.append((day_dir.name, f"{day_dir.name}/{path.stem}", f"**{title}** — {excerpt}"))
+            if len(hits) >= 20:
+                break
+        if len(hits) >= 20:
+            break
+
+    if not hits:
+        crit = []
+        if q: crit.append(f"query='{q}'")
+        if person: crit.append(f"person={person}")
+        if project: crit.append(f"project={project}")
+        crit.append(f"days={days}")
+        return f"(no events — {', '.join(crit)})"
+
+    return "\n\n".join(f"### {slug}\n{excerpt}" for _, slug, excerpt in hits)
+
+
+def _goals_mutate(name: str, args: dict) -> str:
+    """Route a mutation tool to deja.goals.apply_tasks_update."""
+    _mcp_audit_context()
+    from deja.goals import apply_tasks_update
+
+    needle = args.get("needle", "")
+    reason = args.get("reason", "")
+    update: dict = {}
+
+    if name == "add_task":
+        update["add_tasks"] = [args.get("description", "")]
+    elif name == "complete_task":
+        update["complete_tasks"] = [needle]
+    elif name == "archive_task":
+        update["archive_tasks"] = [{"needle": needle, "reason": reason or "archived via MCP"}]
+    elif name == "add_waiting_for":
+        name_txt = args.get("person_name", "").strip()
+        slug = args.get("person_slug", "").strip()
+        what = args.get("what", "").strip()
+        if slug and name_txt:
+            formatted = f"**[[{slug}|{name_txt}]]** — {what}"
+        elif name_txt:
+            formatted = f"**{name_txt}** — {what}"
+        else:
+            return "(add_waiting_for requires person_name)"
+        update["add_waiting"] = [formatted]
+    elif name == "resolve_waiting_for":
+        update["resolve_waiting"] = [needle]
+    elif name == "archive_waiting_for":
+        update["archive_waiting"] = [{"needle": needle, "reason": reason or "archived via MCP"}]
+    elif name == "add_reminder":
+        update["add_reminders"] = [{
+            "date": args.get("date", ""),
+            "question": args.get("question", ""),
+            "topics": args.get("topics") or [],
+        }]
+    elif name == "resolve_reminder":
+        update["resolve_reminders"] = [needle]
+    elif name == "archive_reminder":
+        update["archive_reminders"] = [{"needle": needle, "reason": reason or "archived via MCP"}]
+    else:
+        return f"(unknown mutation: {name})"
+
+    changes = apply_tasks_update(update)
+
+    try:
+        from deja.wiki_git import commit_changes
+        commit_changes(f"hermes: {name} — {reason or '(no reason)'}")
+    except Exception:
+        pass
+
+    return f"ok — applied {changes} change(s) via {name}"
+
+
+def _execute_action(action_type: str, params: dict, reason: str) -> str:
+    """Route an action (email draft, calendar, task) through goal_actions."""
+    _mcp_audit_context()
+    from deja.goal_actions import execute_action
+    success = execute_action({"type": action_type, "params": params, "reason": reason})
+    return f"{'ok' if success else 'failed'} — {action_type}"
+
+
+# ---------------------------------------------------------------------------
 # Tool dispatch
 # ---------------------------------------------------------------------------
 
@@ -522,6 +1098,43 @@ def _dispatch(name: str, args: dict) -> str:
                 except (json.JSONDecodeError, KeyError, ValueError):
                     continue
         return "\n".join(lines[-100:]) or f"(no observations in the last {minutes} minutes)"
+
+    if name == "daily_briefing":
+        return _daily_briefing()
+
+    if name == "search_deja":
+        return _search_deja(args.get("query", ""), args.get("limit", 10))
+
+    if name == "get_page":
+        return _get_page(args.get("category", ""), args.get("slug", ""))
+
+    if name == "list_goals":
+        return _list_goals()
+
+    if name == "search_events":
+        return _search_events(
+            query=args.get("query", ""),
+            days=args.get("days", 7),
+            person=args.get("person"),
+            project=args.get("project"),
+        )
+
+    # Goal mutators — all route through deja.goals.apply_tasks_update,
+    # which handles audit.record internally. We set the trigger context
+    # so the entry shows trigger.kind=mcp / detail=hermes.
+    if name in (
+        "add_task", "complete_task", "archive_task",
+        "add_waiting_for", "resolve_waiting_for", "archive_waiting_for",
+        "add_reminder", "resolve_reminder", "archive_reminder",
+    ):
+        return _goals_mutate(name, args)
+
+    if name == "execute_action":
+        return _execute_action(
+            action_type=args.get("type", ""),
+            params=args.get("params") or {},
+            reason=args.get("reason", ""),
+        )
 
     return f"(unknown tool: {name})"
 
