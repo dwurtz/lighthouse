@@ -227,6 +227,17 @@ async def run_collect_cycle(loop_ref) -> None:
                         ocr_text = ocr_screen(image_path)
                         ocr_elapsed = time.time() - t_ocr
 
+                        # Persist the raw Apple Vision OCR to a sidecar
+                        # BEFORE preprocess runs — preprocess's VLM can
+                        # hallucinate structured extractions (fake
+                        # APPOINTMENT times on calendar views) and we want
+                        # a downstream path (Claude shadow, debugging) to
+                        # see the unadulterated pixel-to-text output. See
+                        # deja/raw_ocr_sidecar.py for the contract.
+                        if ocr_text:
+                            from deja.raw_ocr_sidecar import write as _sidecar_write
+                            _sidecar_write(sig.id_key, ocr_text)
+
                         if ocr_text:
                             # Label the signal clearly so integrate
                             # knows what kind of content to expect.
