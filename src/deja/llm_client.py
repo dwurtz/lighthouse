@@ -490,6 +490,24 @@ class GeminiClient:
             )
             shadow_tasks.append((m, t))
 
+        # Claude shadow — independent of the Gemini A/B flag. Spawns a
+        # `claude -p` subprocess with the SAME prompt the Gemini
+        # production model saw; the response JSON is parsed and saved
+        # into the same ~/.deja/integrate_shadow/<ts>.json record.
+        # Gated on INTEGRATE_CLAUDE_SHADOW so it stays off until the
+        # user opts in (runs against Max subscription, has higher
+        # latency than Flash). Never writes to the wiki.
+        try:
+            from deja.config import INTEGRATE_CLAUDE_SHADOW
+            if INTEGRATE_CLAUDE_SHADOW:
+                from deja.integrate_claude import invoke_claude_shadow
+                shadow_tasks.append((
+                    "claude-local",
+                    asyncio.create_task(invoke_claude_shadow(prompt)),
+                ))
+        except Exception:
+            log.debug("claude shadow hook failed to schedule", exc_info=True)
+
         t0 = time.time()
         resp_text = await self._generate(
             model=INTEGRATE_MODEL,

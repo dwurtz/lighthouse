@@ -133,6 +133,14 @@ VISION_RETENTION_DIR = DEJA_HOME / "vision_retention"
 # model comparison; re-enable by flipping this flag to True.
 INTEGRATE_SHADOW_EVAL = False
 
+# Integrate Claude shadow — when True, fires a parallel `claude -p`
+# subprocess with the exact same integrate prompt on every cycle, lands
+# in ~/.deja/integrate_shadow/<ts>.json alongside the Gemini production
+# result for offline diffing. Does NOT affect production: Gemini still
+# drives wiki writes. Toggle this after a day or so of shadow data to
+# decide whether Claude should become the production integrator.
+INTEGRATE_CLAUDE_SHADOW = bool(_raw.get("integrate_claude_shadow", False))
+
 # Kill switch for the screenshot collector. Set to false in config.yaml
 # if macOS Screen Recording permission is unstable or if you want to
 # run Deja without any visual observation (messaging-only mode).
