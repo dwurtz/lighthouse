@@ -416,7 +416,8 @@ def _run_cos(sub_command: str | None) -> None:
         if not cos.is_enabled():
             print("(cos is disabled — `deja cos enable` first)")
             return
-        cos.invoke(
+        print("invoking claude synchronously (30-60s) — this is the CLI test path; the agent loop uses async background invocation\n")
+        rc, stdout, stderr = cos.invoke_sync(
             cycle_id="test-cos-manual",
             narrative="Synthetic test invocation from `deja cos test`. "
                       "If Claude sees this, it should recognize it as a "
@@ -427,9 +428,11 @@ def _run_cos(sub_command: str | None) -> None:
             due_reminders=[],
             new_t1_signal_count=1,
         )
-        print("invocation fired in background — tail with `deja cos tail` or `deja trail --hours 1`")
-        import time as _time
-        _time.sleep(2)
+        print(f"rc: {rc}")
+        if stdout.strip():
+            print(f"\nclaude output:\n{stdout.strip()}")
+        if stderr.strip() and rc != 0:
+            print(f"\nstderr:\n{stderr.strip()[:1000]}")
         return
 
     if sub_command == "tail":
