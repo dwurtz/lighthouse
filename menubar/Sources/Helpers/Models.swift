@@ -70,10 +70,13 @@ struct ActivityEntry: Identifiable, Codable {
     let summary: String
 }
 
-/// Latest observation narrative for the notch "Now" tab. One paragraph
-/// lifted from the tail of ``~/Deja/observations/YYYY-MM-DD.md`` — the
-/// most recent ``## HH:MM:SS`` section. Fetched from ``GET /api/latest_observation``.
-struct LatestObservation: Codable {
+/// One observation narrative entry — a single ``## HH:MM:SS`` section
+/// from ``~/Deja/observations/YYYY-MM-DD.md``. The Now tab renders a
+/// stream of these (newest first) from ``GET /api/recent_observations``.
+/// ``LatestObservation`` is an alias kept for the legacy single-entry
+/// endpoint.
+struct LatestObservation: Codable, Identifiable {
+    var id: String { "\(date)-\(time)" }
     let text: String
     let time: String
     let date: String
@@ -81,6 +84,11 @@ struct LatestObservation: Codable {
     var isEmpty: Bool { text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
     static let empty = LatestObservation(text: "", time: "", date: "")
+}
+
+struct RecentObservations: Codable {
+    let entries: [LatestObservation]
+    static let empty = RecentObservations(entries: [])
 }
 
 /// One row in the notch "Now" tab's wiki-updates stream. Comes from

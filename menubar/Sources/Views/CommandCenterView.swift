@@ -155,9 +155,8 @@ private struct NowTabView: View {
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 14) {
-                narrativeSection
-                updatesSection
+            VStack(alignment: .leading, spacing: 12) {
+                observationsStream
                 Spacer(minLength: 6)
                 debugFooter
             }
@@ -168,10 +167,10 @@ private struct NowTabView: View {
         }
     }
 
-    // Top: latest observation narrative paragraph.
+    // The stream: every recent observation narrative, newest first.
     @ViewBuilder
-    private var narrativeSection: some View {
-        if monitor.latestObservation.isEmpty {
+    private var observationsStream: some View {
+        if monitor.recentObservations.isEmpty {
             HStack(spacing: 8) {
                 Image(systemName: "sparkles")
                     .font(.system(size: 11))
@@ -182,64 +181,9 @@ private struct NowTabView: View {
             }
             .padding(.vertical, 6)
         } else {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 5) {
-                    Image(systemName: "eye")
-                        .font(.system(size: 9))
-                        .foregroundColor(.white.opacity(0.4))
-                    Text("OBSERVING — \(monitor.latestObservation.time)")
-                        .font(.system(size: 9, weight: .semibold))
-                        .tracking(0.8)
-                        .foregroundColor(.white.opacity(0.4))
-                }
-                Text(monitor.latestObservation.text)
-                    .font(.system(size: 12))
-                    .foregroundColor(.white.opacity(0.85))
-                    .lineLimit(nil)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .textSelection(.enabled)
-            }
-            .padding(10)
-            .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(Color.white.opacity(0.04))
-            )
-        }
-    }
-
-    // Middle: today's wiki updates.
-    @ViewBuilder
-    private var updatesSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 5) {
-                Image(systemName: "pencil.line")
-                    .font(.system(size: 9))
-                    .foregroundColor(.white.opacity(0.4))
-                Text("TODAY'S WIKI UPDATES")
-                    .font(.system(size: 9, weight: .semibold))
-                    .tracking(0.8)
-                    .foregroundColor(.white.opacity(0.4))
-                Spacer()
-                if !monitor.wikiUpdates.isEmpty {
-                    Text("\(monitor.wikiUpdates.count)")
-                        .font(.system(size: 9))
-                        .foregroundColor(.white.opacity(0.3))
-                }
-            }
-
-            if monitor.wikiUpdates.isEmpty {
-                Text("No updates yet. Changes will appear here as Déjà writes.")
-                    .font(.system(size: 11))
-                    .foregroundColor(.white.opacity(0.35))
-                    .padding(.vertical, 4)
-            } else {
-                VStack(spacing: 0) {
-                    ForEach(monitor.wikiUpdates.prefix(10)) { update in
-                        WikiUpdateRow(update: update, monitor: monitor)
-                        if update.id != monitor.wikiUpdates.prefix(10).last?.id {
-                            Divider().background(Color.white.opacity(0.04))
-                        }
-                    }
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(monitor.recentObservations) { entry in
+                    ObservationCard(entry: entry)
                 }
             }
         }
@@ -264,6 +208,60 @@ private struct NowTabView: View {
             .buttonStyle(.plain)
             .help("Show the per-collector heartbeat panel (debug view)")
         }
+    }
+}
+
+/// One observation narrative entry, rendered as a card: a small timestamp
+/// strip above a selectable body paragraph. Stacked newest-first in the
+/// Now tab.
+private struct ObservationCard: View {
+    let entry: LatestObservation
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(Color.green.opacity(0.7))
+                    .frame(width: 5, height: 5)
+                Text(entry.time)
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .foregroundColor(.white.opacity(0.55))
+                if !isToday(entry.date) {
+                    Text("· \(shortDate(entry.date))")
+                        .font(.system(size: 10))
+                        .foregroundColor(.white.opacity(0.35))
+                }
+                Spacer()
+            }
+            Text(entry.text)
+                .font(.system(size: 12))
+                .foregroundColor(.white.opacity(0.85))
+                .lineLimit(nil)
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color.white.opacity(0.04))
+        )
+    }
+
+    private func isToday(_ iso: String) -> Bool {
+        let today = ISO8601DateFormatter().string(from: Date()).prefix(10)
+        return String(today) == iso
+    }
+
+    private func shortDate(_ iso: String) -> String {
+        // iso is "YYYY-MM-DD"; show "Apr 15" style for yesterday/earlier.
+        let parts = iso.split(separator: "-")
+        guard parts.count == 3 else { return iso }
+        let months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
+        if let m = Int(parts[1]), m >= 1, m <= 12 {
+            return "\(months[m-1]) \(parts[2])"
+        }
+        return iso
     }
 }
 

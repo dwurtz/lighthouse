@@ -27,12 +27,13 @@ class MonitorState: ObservableObject {
     @Published var commandToast: Toast? = nil
     private var activityTimer: Timer?
 
-    // Notch panel tabs — "Now" surfaces the latest observation
-    // narrative + real wiki updates; "Open loops" surfaces every
-    // un-checked task / waiting-for / reminder in goals.md. Both
-    // refresh on the same 10s cadence as the old activity feed.
-    @Published var latestObservation: LatestObservation = .empty
-    @Published var wikiUpdates: [WikiUpdate] = []
+    // Notch panel tabs — "Now" surfaces a stream of recent observation
+    // narratives; "Open loops" surfaces every un-checked task /
+    // waiting-for / reminder in goals.md. Both refresh on the same 10s
+    // cadence as the old activity feed.
+    @Published var recentObservations: [LatestObservation] = []
+    @Published var latestObservation: LatestObservation = .empty  // back-compat; derived from recentObservations.first
+    @Published var wikiUpdates: [WikiUpdate] = []  // retained for any debug view; not shown in Now
     @Published var openLoops: OpenLoops = .empty
     /// Selected tab in the command center. 0 = Now, 1 = Open loops.
     /// Persisted in UserDefaults so the panel opens to whatever the
@@ -1113,18 +1114,24 @@ class MonitorState: ObservableObject {
         }
     }
 
-    /// Fetch the latest observation narrative for the "Now" tab.
-    /// Single-section read — the backend picks the last ``## HH:MM:SS``
-    /// block from today's observations file (or yesterday's if today
-    /// is empty). Cheap, no LLM.
-    func fetchLatestObservation() {
-        localAPICall("/api/latest_observation", method: "GET", timeoutInterval: 5) { [weak self] data, _ in
+    /// Fetch recent observation narratives for the "Now" tab — N newest
+    /// ``## HH:MM:SS`` entries across the last few days of the
+    /// observations file, newest first.
+    func fetchRecentObservations(limit: Int = 30) {
+        localAPICall("/api/recent_observations?limit=\(limit)", method: "GET", timeoutInterval: 5) { [weak self] data, _ in
             guard let data = data,
-                  let decoded = try? JSONDecoder().decode(LatestObservation.self, from: data) else { return }
+                  let decoded = try? JSONDecoder().decode(RecentObservations.self, from: data) else { return }
             DispatchQueue.main.async {
-                self?.latestObservation = decoded
+                self?.recentObservations = decoded.entries
+                self?.latestObservation = decoded.entries.first ?? .empty
             }
         }
+    }
+
+    /// Back-compat wrapper — still pointed at by older call sites;
+    /// delegates to the stream fetch.
+    func fetchLatestObservation() {
+        fetchRecentObservations()
     }
 
     /// Fetch recent wiki updates (filtered — no collector heartbeats).

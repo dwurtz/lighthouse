@@ -224,6 +224,65 @@ _NOISE_ACTIONS = {
 }
 
 
+@router.get("/api/recent_observations")
+def get_recent_observations(limit: int = 30) -> dict:
+    """Return the N most recent observation narrative entries.
+
+    Reads ``~/Deja/observations/YYYY-MM-DD.md`` and prior days' files
+    (up to 3 days back) and collects every ``## HH:MM:SS`` section,
+    newest first. Returns ``{"entries": [{"time", "text", "date"},
+    ...]}``. Used by the Now tab to render a scrolling stream of
+    narratives instead of just the latest one.
+    """
+    from pathlib import Path
+    from datetime import date, timedelta
+
+    from deja.config import WIKI_DIR
+
+    obs_dir = WIKI_DIR / "observations"
+
+    def _parse_all_sections(path: Path, iso_date: str) -> list[dict]:
+        """Return every section in the file as {time, text, date}."""
+        if not path.exists():
+            return []
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return []
+        # Split on "\n## " — first part is preamble we skip.
+        parts = text.split("\n## ")
+        entries: list[dict] = []
+        for part in parts[1:]:
+            section = part.strip()
+            if not section:
+                continue
+            header, _, rest = section.partition("\n")
+            body = rest.strip()
+            while body.endswith("---"):
+                body = body[: -3].rstrip()
+            if not body:
+                continue
+            entries.append({
+                "time": header.strip(),
+                "text": body,
+                "date": iso_date,
+            })
+        return entries
+
+    today = date.today()
+    all_entries: list[dict] = []
+    for offset in range(3):
+        d = today - timedelta(days=offset)
+        candidate = obs_dir / f"{d.isoformat()}.md"
+        all_entries.extend(_parse_all_sections(candidate, d.isoformat()))
+        if len(all_entries) >= limit:
+            break
+
+    # Sort newest first (date desc, then time desc).
+    all_entries.sort(key=lambda e: (e["date"], e["time"]), reverse=True)
+    return {"entries": all_entries[:limit]}
+
+
 @router.get("/api/latest_observation")
 def get_latest_observation() -> dict:
     """Return the most recent observation narrative for the notch.
