@@ -57,43 +57,61 @@ _THREADED_SOURCES = {"imessage", "whatsapp"}
 _THREAD_CONTEXT_LIMIT = 30
 
 
-def _thread_key(obs: dict) -> tuple[str, str] | None:
-    """Return the canonical thread identifier for a message signal, or None.
+def _is_threaded_source(obs: dict) -> bool:
+    """True when ``obs`` comes from a source we apply thread-context
+    injection to (iMessage / WhatsApp)."""
+    return (obs.get("source") or "").lower() in _THREADED_SOURCES
 
-    For iMessage / WhatsApp, ``sender`` is the chat identifier — 1:1s
-    use the contact's name + handle, groups include every participant
-    phone in the sender string. Either way, two messages belong to the
-    same thread iff their (source, sender) pair matches exactly.
+
+def _thread_identifiers(obs: dict) -> set[str]:
+    """Collect every string that identifies this observation's thread.
+
+    We return a set so matching against historical rows works even when
+    the two sides of the comparison stored the identifier under
+    different shapes — new per-turn rows carry ``chat_id``, legacy
+    digests only have ``sender``, and during the Swift migration window
+    both may coexist in ``observations.jsonl``. Using a set means a row
+    matches if ANY of its identifiers overlap ANY of the current
+    observation's — no asymmetry between "current has chat_id, history
+    has sender" and the reverse.
     """
-    source = (obs.get("source") or "").lower()
-    if source not in _THREADED_SOURCES:
-        return None
-    sender = obs.get("sender") or ""
-    if not sender:
-        return None
-    return (source, sender)
+    idents: set[str] = set()
+    for field in ("chat_id", "chat_label", "sender"):
+        v = obs.get(field)
+        if isinstance(v, str) and v.strip():
+            idents.add(v.strip())
+    return idents
 
 
 def _load_thread_context(
-    key: tuple[str, str],
+    obs: dict,
     exclude_id: str,
     limit: int,
 ) -> list[dict]:
-    """Return up to ``limit`` prior messages in the thread identified by
-    ``key``, in chronological order (oldest first).
+    """Return up to ``limit`` prior messages in the same thread as
+    ``obs``, in chronological order (oldest first).
 
     Scans ``observations.jsonl`` from the end backward — file is
     append-only so recent messages are at the tail. Stops early once
     we've collected ``limit`` matches. Excludes any observation whose
     ``id_key`` matches ``exclude_id`` (usually the current signal
     itself).
+
+    Thread matching is shape-agnostic: we collect every identifier
+    field (``chat_id`` / ``chat_label`` / ``sender``) from BOTH the
+    current observation and each historical row, and accept the match
+    if the two sets overlap. This keeps the Swift-migration window
+    clean — new-shape current + legacy-shape history still threads,
+    and vice versa.
     """
     if not OBSERVATIONS_LOG.exists():
         return []
 
-    # Read the entire file once per call. At current sizes (~20MB)
-    # this is ~50-100ms; good enough while batches are small. If the
-    # file grows past ~100MB, switch to a tail-seeking reader.
+    source = (obs.get("source") or "").lower()
+    want_idents = _thread_identifiers(obs)
+    if not want_idents:
+        return []
+
     try:
         with OBSERVATIONS_LOG.open(encoding="utf-8") as f:
             lines = f.readlines()
@@ -102,22 +120,21 @@ def _load_thread_context(
         return []
 
     hits: list[dict] = []
-    want_source, want_sender = key
     for line in reversed(lines):
         if not line.strip():
             continue
-        # Cheap substring pre-filter — avoid JSON-parsing lines that
-        # obviously can't be relevant. The sender field is the most
-        # selective; bail if it's not present in the raw bytes.
-        if want_sender not in line:
+        # Cheap substring pre-filter: skip lines where NONE of our
+        # identifiers appear in the raw bytes. Avoids JSON-parsing the
+        # vast majority of lines that can't match.
+        if not any(ident in line for ident in want_idents):
             continue
         try:
             d = json.loads(line)
         except Exception:
             continue
-        if (d.get("source") or "").lower() != want_source:
+        if (d.get("source") or "").lower() != source:
             continue
-        if (d.get("sender") or "") != want_sender:
+        if not (want_idents & _thread_identifiers(d)):
             continue
         if d.get("id_key") == exclude_id:
             continue
@@ -138,23 +155,31 @@ _CONVERSATION_HEADER_RE = re.compile(
 
 
 def _extract_messages(obs: dict) -> list[tuple[str, str]]:
-    """Return a list of ``(sender, body)`` pairs from one observation.
+    """Return a list of ``(speaker, body)`` pairs from one observation.
 
-    iMessage / WhatsApp observations arrive in two shapes:
-    - Single-message rows from the live buffer: text is just the
-      message body; ``sender`` is the chat identifier.
-    - Cumulative CONVERSATION digests from some legacy paths: text
-      starts with ``CONVERSATION with <chat> (N messages, ...):``
-      followed by indented ``  <sender>: <body>`` lines.
+    Three shapes are supported:
 
-    We peel the digest into individual messages when present, so the
-    downstream context dedup can match on message content regardless
-    of which shape the observation stored.
+    1. **Per-turn (current)** — the observation carries a ``speaker``
+       field. One pair: ``(speaker, text)``.
+    2. **CONVERSATION digest (legacy)** — text starts with
+       ``CONVERSATION with <chat> (N messages, ...):`` and is followed
+       by indented ``  <sender>: <body>`` lines. We peel the digest.
+       This path exists for the ~20MB of historical observations.jsonl
+       entries that pre-date the per-turn migration.
+    3. **Single-message legacy** — neither of the above. We return a
+       single pair with empty speaker, letting the downstream dedup
+       match on body only.
     """
     text = (obs.get("text") or "").strip()
     if not text:
         return []
 
+    # Shape 1: per-turn row with explicit speaker.
+    speaker = obs.get("speaker")
+    if speaker:
+        return [(speaker, text)]
+
+    # Shape 2: legacy CONVERSATION digest.
     if _CONVERSATION_HEADER_RE.match(text):
         # Drop the header line and parse the indented message list.
         lines = text.split("\n")[1:]
@@ -167,10 +192,7 @@ def _extract_messages(obs: dict) -> list[tuple[str, str]]:
             pairs.append((who.strip(), body.strip()))
         return pairs
 
-    # Single-message row. Sender line carries the chat identifier;
-    # body attribution (who in a group) is baked into the text itself
-    # on the Swift side. Use a synthetic sender of empty string so the
-    # dedup key is body-only and cross-shape dedup still works.
+    # Shape 3: single-message legacy (no speaker, no digest header).
     return [("", text)]
 
 
@@ -181,12 +203,11 @@ def _inject_thread_context(obs: dict) -> dict:
     If the source isn't threaded, or no prior messages exist, returns
     the observation unchanged.
     """
-    key = _thread_key(obs)
-    if key is None:
+    if not _is_threaded_source(obs):
         return obs
 
     prior_obs = _load_thread_context(
-        key, exclude_id=obs.get("id_key") or "", limit=_THREAD_CONTEXT_LIMIT
+        obs, exclude_id=obs.get("id_key") or "", limit=_THREAD_CONTEXT_LIMIT
     )
     if not prior_obs:
         return obs
@@ -242,8 +263,22 @@ def _inject_thread_context(obs: dict) -> dict:
 def _render_line(obs: dict, marker: str) -> str:
     ts = obs.get("timestamp", "")
     source = obs.get("source", "?")
-    sender = obs.get("sender", "?")
     text = obs.get("text", "") or ""
+
+    # For threaded messaging: render "<chat_label> / <speaker>" so both
+    # "who's in the room" and "who actually said this" are in the line.
+    # Falls back to plain sender for every other source and for legacy
+    # observations missing speaker.
+    speaker = obs.get("speaker") or ""
+    chat_label = obs.get("chat_label") or ""
+    sender = obs.get("sender", "?")
+    if source in _THREADED_SOURCES and speaker:
+        label = chat_label or sender
+        if label and label != speaker:
+            who = f"{label} / {speaker}"
+        else:
+            who = speaker
+        return f"{marker} [{ts}] [{source}] {who}: {text}"
     return f"{marker} [{ts}] [{source}] {sender}: {text}"
 
 
