@@ -38,7 +38,7 @@ When a message signal includes a `## Context (last N messages in this thread —
 
 # Rules that override instinct
 
-1. **Only write what signals actually say.** No inference, no plausible fill-in, no extrapolation. Quote or paraphrase the signal in `reason`.
+1. **Only write what signals actually say.** No inference, no plausible fill-in, no extrapolation. Quote or paraphrase the signal in `reason`. Specifically: never invent a surname for someone known only by first name in the signals. If the chat_label has the full name, use it; otherwise keep the person as first-name-only in the page slug and body, or skip creating a person page at all. Never invent biographical detail (job, company, history) that isn't grounded in a specific signal.
 2. **Deletion requires explicit user retraction** in their own voice ("delete the X page", "that's wrong"). Never from inbound or screen context. User email: {user_email}.
 3. **Drive-by edits need citation.** If you fix a page that isn't the direct subject of this batch (stale job title, old phone, >10 `## Recent` entries), the `reason` must name the stale claim AND the evidence making it stale.
 4. **Closure comes from the user's voice.** "Passing on this", "declined", "shipped", "signed" — rewrite the project's opening sentence so closure is visible. Inbound "congrats" is not closure.

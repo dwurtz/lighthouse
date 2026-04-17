@@ -102,6 +102,23 @@ def _collect_imessages(since_minutes: int = 5, limit: int = 20) -> list[Observat
                 if chat_label is None:
                     chat_label = legacy_sender
 
+            # Resolve chat_label if it's a raw handle (phone/email).
+            # Swift writes chat_label as chat.display_name OR
+            # chat_identifier; for 1:1s, display_name is usually empty
+            # and chat_identifier is just a phone. Without this lookup,
+            # integrate sees the phone as the "other party" and has no
+            # grounding for who "Matt" is in "Hey Matt...". Fabrication
+            # follows. Resolve via macOS Contacts so the recipient's
+            # real name is in the signal.
+            if chat_label and (
+                chat_label.startswith("+")
+                or (chat_label.replace("-", "").replace(" ", "").replace("(", "").replace(")", "").isdigit())
+                or "@" in chat_label
+            ):
+                resolved_label = resolve_contact(chat_label)
+                if resolved_label:
+                    chat_label = name_with_handle(resolved_label, chat_label)
+
             # Resolve speaker's raw handle to a contact name when inbound.
             if raw_speaker == "me":
                 speaker = "You"

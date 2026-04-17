@@ -93,6 +93,20 @@ def _collect_whatsapp(since_minutes: int = 5, limit: int = 20) -> list[Observati
                 if chat_label is None:
                     chat_label = legacy_sender
 
+            # Resolve chat_label if it's a raw handle. WhatsApp usually
+            # populates ZPARTNERNAME with the user-set WhatsApp name,
+            # but business accounts, new contacts, and phone-only chats
+            # can leave it as a raw JID / phone. Resolve via Contacts so
+            # the recipient's real name is in the signal.
+            if chat_label and (
+                chat_label.startswith("+")
+                or (chat_label.replace("-", "").replace(" ", "").replace("(", "").replace(")", "").isdigit())
+                or "@" in chat_label
+            ):
+                resolved_label = resolve_contact(chat_label)
+                if resolved_label:
+                    chat_label = name_with_handle(resolved_label, chat_label)
+
             if raw_speaker == "me":
                 speaker = "You"
             else:
