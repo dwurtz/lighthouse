@@ -213,9 +213,34 @@ def disable() -> None:
         COS_ENABLED_FLAG.unlink()
 
 
+_CLAUDE_FALLBACK_PATHS = (
+    # Shipped by cmux — the terminal-multiplexed Claude Code wrapper.
+    "/Applications/cmux.app/Contents/Resources/bin/claude",
+    # Standard Claude Code install (npm / install script).
+    str(Path.home() / ".local/bin/claude"),
+    # Homebrew on Apple Silicon and Intel.
+    "/opt/homebrew/bin/claude",
+    "/usr/local/bin/claude",
+)
+
+
 def _claude_binary() -> str | None:
-    """Return the path to the ``claude`` CLI, or None if unavailable."""
-    return shutil.which("claude")
+    """Return the path to the ``claude`` CLI, or None if unavailable.
+
+    ``shutil.which`` alone isn't enough when we're running inside
+    Deja.app — the bundled Python subprocess inherits a minimal PATH
+    that usually doesn't include ``/Applications/cmux.app/.../bin``
+    or ``~/.local/bin``, so ``which`` returns None even when claude
+    is installed and callable via absolute path. Fall back to a list
+    of known install locations.
+    """
+    found = shutil.which("claude")
+    if found:
+        return found
+    for candidate in _CLAUDE_FALLBACK_PATHS:
+        if Path(candidate).exists() and os.access(candidate, os.X_OK):
+            return candidate
+    return None
 
 
 def _build_payload(
@@ -261,10 +286,15 @@ def _run_claude(payload: dict) -> tuple[int, str, str]:
     if not claude_bin:
         return (127, "", "claude CLI not found on PATH")
 
+    try:
+        system_prompt_text = COS_SYSTEM_PROMPT.read_text(encoding="utf-8")
+    except OSError as e:
+        return (1, "", f"read system prompt failed: {e}")
+
     cmd = [
         claude_bin,
         "-p", json.dumps(payload),
-        "--append-system-prompt-file", str(COS_SYSTEM_PROMPT),
+        "--append-system-prompt", system_prompt_text,
         "--mcp-config", str(COS_MCP_CONFIG),
         "--dangerously-skip-permissions",
         "--output-format", "text",
@@ -328,6 +358,45 @@ def _log_invocation(
         log.debug("cos audit record failed", exc_info=True)
 
 
+def invoke_sync(
+    *,
+    cycle_id: str,
+    narrative: str = "",
+    wiki_updates: Iterable[dict] | None = None,
+    tasks_update: dict | None = None,
+    due_reminders: list | None = None,
+    new_t1_signal_count: int = 0,
+) -> tuple[int, str, str]:
+    """Fire the loop and block until complete. Returns (rc, stdout, stderr).
+
+    Used by short-lived callers (CLI `deja cos test`) where the daemon
+    thread would die when the process exits. Production agent loop
+    should use ``invoke()`` so the subprocess doesn't block the cycle.
+    """
+    if not is_enabled():
+        return (0, "(cos disabled)", "")
+    if not COS_SYSTEM_PROMPT.exists() or not COS_MCP_CONFIG.exists():
+        _ensure_cos_dir()
+
+    payload = _build_payload(
+        cycle_id=cycle_id,
+        narrative=narrative,
+        wiki_updates=wiki_updates,
+        tasks_update=tasks_update,
+        due_reminders=due_reminders,
+        new_t1_signal_count=new_t1_signal_count,
+    )
+    rc, stdout, stderr = _run_claude(payload)
+    _log_invocation(
+        cycle_id=cycle_id,
+        payload=payload,
+        rc=rc,
+        stdout=stdout,
+        stderr=stderr,
+    )
+    return rc, stdout, stderr
+
+
 def invoke(
     *,
     cycle_id: str,
@@ -337,7 +406,12 @@ def invoke(
     due_reminders: list | None = None,
     new_t1_signal_count: int = 0,
 ) -> None:
-    """Fire the chief-of-staff loop if enabled. Non-blocking."""
+    """Fire the chief-of-staff loop if enabled. Non-blocking daemon thread.
+
+    Safe for long-running processes (the agent loop). Short-lived
+    callers should prefer ``invoke_sync`` — daemon threads die when
+    the parent process exits.
+    """
     if not is_enabled():
         return
     if not COS_SYSTEM_PROMPT.exists() or not COS_MCP_CONFIG.exists():
@@ -379,4 +453,5 @@ __all__ = [
     "enable",
     "disable",
     "invoke",
+    "invoke_sync",
 ]
