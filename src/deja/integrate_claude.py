@@ -87,9 +87,30 @@ def _run_claude_sync(prompt: str) -> str:
     if not claude_bin:
         raise RuntimeError("claude CLI not found on PATH or fallback locations")
 
+    # --system-prompt replaces Claude Code's default "you are Claude
+    # Code" persona with a neutral one, so Claude comes in expecting
+    # to integrate observations rather than edit code. Without this,
+    # the integrate prompt gets prepended with a coding-assistant
+    # system prompt and the comparison to Gemini (which has no such
+    # wrap) is asymmetric.
+    #
+    # --model pins the variant so shadow data is reproducible across
+    # days even if the user's CLI default changes. Opus 4.7 is the
+    # highest-tier Claude model available on Max; picks the ceiling
+    # to compare against Gemini Flash. Swap to claude-sonnet-4-6 if
+    # we want a cost-equivalent comparison instead.
     cmd = [
         claude_bin,
         "-p", prompt,
+        "--model", "claude-opus-4-7",
+        "--system-prompt",
+        (
+            "You are an observation integrator for a personal AI memory "
+            "system. Follow the instructions in the user message exactly. "
+            "Return ONLY the JSON object specified — no preamble, no "
+            "postscript, no code fences. Do not use any tools; answer "
+            "from the prompt text alone."
+        ),
         "--dangerously-skip-permissions",
         "--output-format", "text",
     ]
