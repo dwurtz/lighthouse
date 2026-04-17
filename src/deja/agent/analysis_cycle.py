@@ -36,6 +36,54 @@ log = logging.getLogger(__name__)
 MAX_SCREENSHOT_AGE_SECONDS = 1800  # 30 minutes — OCR text is verbatim
 # and doesn't degrade with age like FastVLM descriptions did
 
+
+def filter_stale_screenshots(
+    signal_items: list[dict],
+    max_age_seconds: int = MAX_SCREENSHOT_AGE_SECONDS,
+) -> list[dict]:
+    """Drop screenshot signals older than ``max_age_seconds``. Pure.
+
+    Observation timestamps are NAIVE LOCAL — every collector writes
+    ``datetime.now()`` or ``datetime.strptime(...)`` with no tzinfo.
+    Comparing against naive-local ``now`` keeps the arithmetic inside
+    a single timezone. A prior version stamped the naive timestamp
+    with ``tzinfo=timezone.utc`` before subtracting from an aware-UTC
+    ``now``, which is WRONG — it doesn't convert local to UTC, it
+    just declares the local wall clock to be UTC. On a system running
+    at UTC-7 that made a 30-second-old screenshot look 7h 0m 30s old
+    and silently dropped it. Integrate was flying blind on current
+    screen context for every non-UTC user.
+
+    Invariant: must keep a signal whose timestamp equals ``datetime.now()``
+    at call time. Regression-tested in
+    ``tests/test_stale_screenshot_filter.py``.
+    """
+    if not signal_items:
+        return []
+    now_naive = datetime.now()
+    kept: list[dict] = []
+    for item in signal_items:
+        if item.get("source") != "screenshot":
+            kept.append(item)
+            continue
+        ts_str = item.get("timestamp") or ""
+        try:
+            ts_dt = datetime.fromisoformat(ts_str)
+            if ts_dt.tzinfo is not None:
+                ts_dt = ts_dt.astimezone().replace(tzinfo=None)
+            age = (now_naive - ts_dt).total_seconds()
+        except Exception:
+            # Unparseable timestamp — keep the signal rather than
+            # silently dropping it; the integrator will surface any
+            # downstream failures.
+            kept.append(item)
+            continue
+        if age > max_age_seconds:
+            log.info("Dropped stale screenshot signal: %ds old", int(age))
+            continue
+        kept.append(item)
+    return kept
+
 # Module-level mutex + active-loop reference so user-initiated triggers
 # can fire run_analysis_cycle immediately without stomping the scheduler.
 # Set by AgentLoop.run() (in-process callers like the mic/command
@@ -208,45 +256,9 @@ async def _run_analysis_cycle_body(
     )
 
     # 1.0. Drop stale screenshot signals. Vision context is only
-    #      useful if it reflects the user's CURRENT screen — a 10
-    #      minute-old frame will mislead the integrator into reasoning
-    #      about "what the user is doing now" based on a stale view.
-    #      See MAX_SCREENSHOT_AGE_SECONDS at the top of this module.
-    #
-    #      Observation timestamps are NAIVE LOCAL (every collector
-    #      writes `datetime.now()` or `datetime.strptime(...)` with
-    #      no tzinfo). Compare against naive-local now to get correct
-    #      ages. A prior version here mixed aware-UTC `now` with the
-    #      naive-local observation time, which made every screenshot
-    #      look `UTC_offset` hours older than it actually was and
-    #      silently dropped all of them for any user not in UTC.
+    #      useful if it reflects the user's CURRENT screen.
     if signal_items:
-        now_naive = datetime.now()
-        filtered: list[dict] = []
-        for item in signal_items:
-            if item.get("source") != "screenshot":
-                filtered.append(item)
-                continue
-            ts_str = item.get("timestamp") or ""
-            try:
-                ts_dt = datetime.fromisoformat(ts_str)
-                # If a collector ever starts writing aware timestamps,
-                # normalize to naive local so the arithmetic stays in
-                # one timezone.
-                if ts_dt.tzinfo is not None:
-                    ts_dt = ts_dt.astimezone().replace(tzinfo=None)
-                age = (now_naive - ts_dt).total_seconds()
-            except Exception:
-                # Unparseable timestamp — keep the signal rather than
-                # silently dropping it; the integrator will surface any
-                # downstream failures.
-                filtered.append(item)
-                continue
-            if age > MAX_SCREENSHOT_AGE_SECONDS:
-                log.info("Dropped stale screenshot signal: %ds old", int(age))
-                continue
-            filtered.append(item)
-        signal_items = filtered
+        signal_items = filter_stale_screenshots(signal_items)
 
     if not signal_items:
         log.info("No recent signals for analysis")
