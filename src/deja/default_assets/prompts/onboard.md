@@ -100,7 +100,7 @@ The frontmatter block at the top of a page is separately preserved by the system
 
 ## Page shape
 
-- Every page starts with a YAML frontmatter block containing only fields the batch actually supports. For people: `emails`, `phones`, `aliases` (as a list), optionally `role` or `org` if the signature or thread context makes it clear. For projects: `status` (`active`, `watching`, `blocked`, `done`), `people` (list of slugs), optionally `domains` or `keywords`.
+- Every page starts with a YAML frontmatter block containing only fields the batch actually supports. For people: `emails`, `phones`, `aliases` (as a list), optionally `role` or `org` if the signature or thread context makes it clear. For projects: `status` (`active`, `watching`, `blocked`, `done`), `people` (list of slugs). Do NOT add `domains`, `keywords`, or `company` — those fields are not read by anything and were retired.
 - After the frontmatter, an H1 with the entity's display name.
 - Then a prose body — 2–8 sentences for most pages, longer only when the evidence actually warrants it. Focus on *what the user needs to remember*: current state, recent decisions, open questions, key dates, who's involved.
 
