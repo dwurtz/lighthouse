@@ -13,6 +13,12 @@ Dry-run by default; ``--apply`` rewrites pages + appends missing
 aliases.
 
 No LLM — pure deterministic reconciliation.
+
+TODO(gws-migration): this dev-only tool still shells out to ``gws``
+for the Google People lookup. Production code has moved to direct
+``googleapiclient`` calls via ``deja.google_api`` — migrate this
+script as a follow-up so ``gws`` isn't required on developer machines
+either. Tracked as part of the gws-subprocess removal effort.
 """
 from __future__ import annotations
 

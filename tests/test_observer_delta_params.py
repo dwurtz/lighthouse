@@ -1,22 +1,23 @@
-"""Regression tests for the gws CLI parameter shapes used by the
-Gmail / Calendar / Drive delta observers.
+"""Regression tests for the delta-polling call shapes used by the
+Gmail / Calendar / Drive observers.
 
-The gws CLI marshals certain params differently from the raw Google
-API specs. Every time we touch one of these observers it's tempting
-to pass an array where the CLI expects a string (or vice versa) and
-get a silent 400 error in production. These tests pin the exact
-shapes that were empirically verified to work.
+Gmail now uses direct ``googleapiclient`` calls (see
+``deja.google_api``); Calendar + Drive still use the gws CLI. Every
+time we touch one of these observers it's tempting to pass the wrong
+param form and get a silent 400 in production. These tests pin the
+exact shapes that were empirically verified to work.
 
-If any of these tests fail after a refactor, the observer is about
-to silently stop ingesting events. The log will show 400 / 404 errors
-from the gws subprocess but the agent loop keeps running.
+If any of these tests fail after a refactor, the observer is about to
+silently stop ingesting events. The log will show 400 / 404 errors
+but the agent loop keeps running.
 
 History of failures these tests prevent:
 
 - 2026-04-12: ``historyTypes=["messageAdded"]`` sent as a JSON array
-  returned 400 "Invalid value at 'history_types'". The gws CLI wants
-  the string form ``"messageAdded"``. Gmail delta polling silently
-  failed for multiple hours before the 502 log pattern exposed it.
+  to gws returned 400 "Invalid value at 'history_types'". gws wanted
+  the string form. After migration to direct googleapiclient calls
+  the native array form works again — but the ``history.list`` call
+  path must still exist (not a revert to ``messages.list`` scanning).
 """
 
 from __future__ import annotations
@@ -32,26 +33,21 @@ def _read(name: str) -> str:
     return (OBSERVATIONS_DIR / name).read_text(encoding="utf-8")
 
 
-def test_gmail_history_types_is_string_not_array():
-    """gws CLI expects ``historyTypes`` as a string, not a JSON array.
+def test_gmail_history_types_uses_messageAdded_filter():
+    """The history.list call must filter on ``messageAdded``.
 
-    The raw Gmail API accepts an array; gws marshals it differently.
-    Passing an array produces a 400 with a cryptic "Invalid value at
-    'history_types'" error and the observer silently returns no
-    messages.
+    Direct googleapiclient accepts either the native array form
+    (``["messageAdded"]``) or the repeated-query-param form. Both
+    reduce to the same HTTP request. What we MUST keep is the filter
+    itself — without it, every cycle pulls label changes, drafts,
+    and deletions too, which floods the pipeline with noise.
     """
     src = _read("email.py")
-    # The correct shape — string, not array
-    assert '"historyTypes": "messageAdded"' in src, (
-        "gws gmail users history list params must use historyTypes as a "
-        "STRING ('messageAdded'), not a JSON array. The array form 400s "
-        "with 'Invalid value at history_types' and silently breaks the "
-        "Gmail delta poller."
-    )
-    # And the array form must NOT be present
-    assert '"historyTypes": ["messageAdded"]' not in src, (
-        "Found array-form historyTypes in email.py — this WILL 400 at "
-        "runtime. Change to the string form."
+    assert "messageAdded" in src, (
+        "EmailObserver must filter history.list on messageAdded. "
+        "Without the filter the observer ingests label changes, draft "
+        "updates, and deletions — every cycle balloons to hundreds of "
+        "no-op records."
     )
 
 
@@ -59,18 +55,16 @@ def test_gmail_delta_uses_history_list_not_messages_list():
     """The delta poller must use history.list (cheap, cursor-based),
     not messages.list with a time-window query (expensive, full scan).
 
-    A refactor that reverts to ``messages list --params '...q=in:sent
-    newer_than:5m'`` would work functionally but waste API quota and
-    miss the whole point of the delta switch. Pin the cheaper path.
+    A refactor that reverts to ``messages.list q=... newer_than:5m``
+    would work functionally but waste API quota and miss the whole
+    point of the delta switch. Pin the cheaper path.
     """
     src = _read("email.py")
-    # The EmailObserver.collect path must call history list
-    assert "gws gmail users history list" in src or "gws\", \"gmail\", \"users\", \"history\", \"list\"" in src or (
-        '"users", "history", "list"' in src
-    ), (
-        "EmailObserver should call `gws gmail users history list` for "
-        "delta polling. If you're reading this after a revert to "
-        "`messages list`, that's a regression — the history API is "
+    # Direct googleapiclient call: svc.users().history().list(...)
+    assert ".users().history().list(" in src or "users.history.list" in src, (
+        "EmailObserver should call users.history.list for delta "
+        "polling. If you're reading this after a revert to "
+        "messages.list, that's a regression — the history API is "
         "cheaper and avoids missed messages on the boundary."
     )
 

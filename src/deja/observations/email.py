@@ -1,4 +1,4 @@
-"""Email signal collector using the gws CLI tool.
+"""Email signal collector using direct Gmail API calls.
 
 Uses Gmail's delta API (`users.history.list`) keyed off a persisted
 ``historyId`` cursor so we only fetch messages that appeared since the
@@ -17,21 +17,24 @@ backfill. That's onboarding's job, not the collector's.
 
 Per the user's rule: if a delta call fails we log.error and return []
 — no silent fallback to snapshot polling.
+
+Transport: direct ``googleapiclient`` calls against the user's OAuth
+token (collected by ``deja.auth`` at setup). Historically this module
+shelled out to the ``gws`` CLI; see ``deja.google_api`` for the thin
+helper that replaces it. The returned JSON shapes are identical —
+``gws`` was always a thin passthrough.
 """
 
 from __future__ import annotations
 
 import asyncio
 import base64
-import json
 import logging
 import os
 import re
-import subprocess
 import tempfile
 from datetime import datetime
 from email.utils import parsedate_to_datetime
-from pathlib import Path
 
 from deja.config import DEJA_HOME
 from deja.observations.base import BaseObserver
@@ -185,6 +188,28 @@ def _strip_quoted_reply(body: str) -> str:
     return result
 
 
+def _local_date_string(raw_date: str) -> str:
+    """Convert an RFC 2822 Date header to local ``YYYY-MM-DD HH:MM``.
+
+    Gmail returns dates in the sender's timezone (often UTC for server
+    relays). We render per-message thread lines to the integrate prompt;
+    if we leave the raw header in place, the LLM will copy e.g. a UTC
+    ``14:55`` into an event's ``time:`` field when the local time was
+    ``07:55``. Normalize to the user's local zone so the prompt shows
+    one consistent clock.
+    """
+    if not raw_date:
+        return ""
+    try:
+        parsed = parsedate_to_datetime(raw_date)
+        if parsed is None:
+            return raw_date[:25]
+        local = parsed.astimezone().replace(tzinfo=None)
+        return local.strftime("%Y-%m-%d %H:%M")
+    except (TypeError, ValueError):
+        return raw_date[:25]
+
+
 def _render_messages_verbatim(messages: list[dict]) -> list[str]:
     """Render a list of (headers, stripped_body) dicts to thread lines.
 
@@ -196,7 +221,7 @@ def _render_messages_verbatim(messages: list[dict]) -> list[str]:
     for m in messages:
         frm = m.get("frm", "")
         to = m.get("to", "")
-        date = (m.get("date") or "")[:25]
+        date = _local_date_string(m.get("date") or "")
         body = (m.get("body") or "").strip()
         if body:
             # Indent body under the header line for readability.
@@ -220,7 +245,7 @@ def _consolidate_older_history(older: list[dict]) -> str | None:
 
     # Build the text we're feeding the model.
     rendered = "\n\n".join(
-        f"From: {m.get('frm','')}\nTo: {m.get('to','')}\nDate: {m.get('date','')}\n\n{(m.get('body') or '').strip()}"
+        f"From: {m.get('frm','')}\nTo: {m.get('to','')}\nDate: {_local_date_string(m.get('date') or '')}\n\n{(m.get('body') or '').strip()}"
         for m in older
     )
 
@@ -319,36 +344,39 @@ def _write_cursor_atomic(history_id: str) -> None:
         log.exception("Failed to persist Gmail history cursor")
 
 
+def _gmail_service():
+    """Return the cached Gmail API service, or None on auth failure.
+
+    Wraps ``deja.google_api.get_service`` with a broad try/except so
+    the collector degrades the same way the old gws path did —
+    log.error + return [] rather than propagating an exception up
+    into the agent loop.
+    """
+    try:
+        from deja.google_api import get_service
+        return get_service("gmail", "v1")
+    except Exception:
+        log.error("Gmail service unavailable — is setup complete?", exc_info=True)
+        return None
+
+
 def _bootstrap_cursor() -> str | None:
     """Bootstrap cursor from users.getProfile — returns current historyId."""
+    svc = _gmail_service()
+    if svc is None:
+        return None
     try:
-        result = subprocess.run(
-            [
-                "gws", "gmail", "users", "getProfile",
-                "--params", json.dumps({"userId": "me"}),
-                "--format", "json",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-        if result.returncode != 0:
-            log.error("gws gmail getProfile failed: %s", result.stderr[:200])
-            return None
-        data = json.loads(result.stdout)
-        hid = str(data.get("historyId") or "")
-        if not hid:
-            log.error("gws gmail getProfile returned no historyId")
-            return None
-        _write_cursor_atomic(hid)
-        log.info("Gmail history cursor bootstrapped at %s", hid)
-        return hid
-    except subprocess.TimeoutExpired:
-        log.error("gws gmail getProfile timed out")
+        data = svc.users().getProfile(userId="me").execute()
+    except Exception as e:
+        log.error("Gmail getProfile failed: %s", type(e).__name__)
         return None
-    except (json.JSONDecodeError, FileNotFoundError) as e:
-        log.error("gws gmail getProfile failed: %s", e)
+    hid = str(data.get("historyId") or "")
+    if not hid:
+        log.error("Gmail getProfile returned no historyId")
         return None
+    _write_cursor_atomic(hid)
+    log.info("Gmail history cursor bootstrapped at %s", hid)
+    return hid
 
 
 # ---------------------------------------------------------------------------
@@ -362,55 +390,38 @@ def _list_history_since(start_history_id: str) -> tuple[list[dict], str | None]:
     Returns (history_records, new_history_id). ``new_history_id`` is the
     most recent historyId we've seen — caller persists it as the next
     cursor. On failure returns ([], None) and caller will NOT advance.
+
+    Note: direct Gmail API accepts ``historyTypes`` as a list —
+    unlike the gws CLI which required a string. The param shape is
+    the native one now.
     """
+    svc = _gmail_service()
+    if svc is None:
+        return [], None
+
     records: list[dict] = []
     new_history_id: str | None = None
     page_token: str | None = None
 
     for _ in range(20):  # hard cap on pagination
-        params: dict = {
-            "userId": "me",
-            "startHistoryId": start_history_id,
-            # gws marshals this param as a string, not a JSON array.
-            # Array form ("[messageAdded]") returns 400 "Invalid value
-            # at 'history_types'". Tested 2026-04-12 on gws CLI.
-            "historyTypes": "messageAdded",
-        }
-        if page_token:
-            params["pageToken"] = page_token
-
         try:
-            result = subprocess.run(
-                [
-                    "gws", "gmail", "users", "history", "list",
-                    "--params", json.dumps(params),
-                    "--format", "json",
-                ],
-                capture_output=True,
-                text=True,
-                timeout=30,
+            req = svc.users().history().list(
+                userId="me",
+                startHistoryId=start_history_id,
+                historyTypes=["messageAdded"],
+                pageToken=page_token,
             )
-        except subprocess.TimeoutExpired:
-            log.error("gws gmail history list timed out")
-            return [], None
-        except FileNotFoundError:
-            log.error("gws CLI not found on PATH")
-            return [], None
-
-        if result.returncode != 0:
-            stderr = result.stderr or ""
+            data = req.execute()
+        except Exception as e:
+            # googleapiclient.errors.HttpError has a ``resp.status`` attr.
+            status = getattr(getattr(e, "resp", None), "status", None)
             # 404 → historyId too old (purged). Re-bootstrap from current.
-            if "404" in stderr or "notFound" in stderr or "historyId" in stderr.lower():
+            if status == 404:
                 log.error("Gmail historyId expired; re-bootstrapping cursor")
                 new = _bootstrap_cursor()
                 return [], new
-            log.error("gws gmail history list failed: %s", stderr[:200])
-            return [], None
-
-        try:
-            data = json.loads(result.stdout)
-        except json.JSONDecodeError:
-            log.error("gws gmail history list returned invalid JSON")
+            log.error("Gmail history list failed: %s (status=%s)",
+                      type(e).__name__, status)
             return [], None
 
         batch = data.get("history", []) or []
@@ -427,29 +438,20 @@ def _list_history_since(start_history_id: str) -> tuple[list[dict], str | None]:
 
 def _get_message_metadata(msg_id: str) -> dict | None:
     """Fetch a single message (metadata format) for thread lookup."""
+    svc = _gmail_service()
+    if svc is None:
+        return None
     try:
-        result = subprocess.run(
-            [
-                "gws", "gmail", "users", "messages", "get",
-                "--params", json.dumps({
-                    "userId": "me",
-                    "id": msg_id,
-                    # metadataHeaders works on users.messages.get (unlike
-                    # threads.get), but we use full for consistency and
-                    # because bandwidth cost is negligible.
-                    "format": "metadata",
-                    "metadataHeaders": ["From", "To", "Subject", "Date"],
-                }),
-                "--format", "json",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=15,
-        )
-        if result.returncode != 0:
-            return None
-        return json.loads(result.stdout)
-    except (subprocess.TimeoutExpired, json.JSONDecodeError, FileNotFoundError):
+        return svc.users().messages().get(
+            userId="me",
+            id=msg_id,
+            # metadataHeaders works on users.messages.get (unlike
+            # threads.get), but we use full for consistency and
+            # because bandwidth cost is negligible.
+            format="metadata",
+            metadataHeaders=["From", "To", "Subject", "Date"],
+        ).execute()
+    except Exception:
         return None
 
 
@@ -467,27 +469,18 @@ def _get_thread(thread_id: str) -> list[dict]:
     the headers (From/To/Subject/Date) AND extract the plain-text body
     for quote-stripping + consolidation.
     """
-    try:
-        result = subprocess.run(
-            [
-                "gws", "gmail", "users", "threads", "get",
-                "--params", json.dumps({
-                    "userId": "me",
-                    "id": thread_id,
-                    "format": "full",
-                }),
-                "--format", "json",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=15,
-        )
-        if result.returncode != 0:
-            return []
-        data = json.loads(result.stdout)
-        return data.get("messages", []) or []
-    except (subprocess.TimeoutExpired, json.JSONDecodeError, FileNotFoundError):
+    svc = _gmail_service()
+    if svc is None:
         return []
+    try:
+        data = svc.users().threads().get(
+            userId="me",
+            id=thread_id,
+            format="full",
+        ).execute()
+    except Exception:
+        return []
+    return data.get("messages", []) or []
 
 
 def _build_observation_from_thread(
@@ -727,39 +720,21 @@ class EmailObserver(BaseObserver):
 
 
 def _list_messages(query: str, max_results: int, page_token: str | None = None) -> tuple[list[dict], str | None]:
-    """One page of gws gmail users messages list. Returns (messages, next_page_token)."""
-    params: dict = {
-        "userId": "me",
-        "q": query,
-        "maxResults": max_results,
-    }
-    if page_token:
-        params["pageToken"] = page_token
+    """One page of gmail users messages list. Returns (messages, next_page_token)."""
+    svc = _gmail_service()
+    if svc is None:
+        return [], None
     try:
-        result = subprocess.run(
-            [
-                "gws", "gmail", "users", "messages", "list",
-                "--params", json.dumps(params),
-                "--format", "json",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-        if result.returncode != 0:
-            log.warning("gws gmail list failed (%s): %s", query, result.stderr[:200])
-            return [], None
-        data = json.loads(result.stdout)
-        return data.get("messages", []) or [], data.get("nextPageToken")
-    except subprocess.TimeoutExpired:
-        log.warning("gws gmail list timed out (%s)", query)
+        data = svc.users().messages().list(
+            userId="me",
+            q=query,
+            maxResults=max_results,
+            pageToken=page_token,
+        ).execute()
+    except Exception as e:
+        log.warning("gmail messages.list failed (%s): %s", query, type(e).__name__)
         return [], None
-    except json.JSONDecodeError:
-        log.warning("gws gmail list returned invalid JSON (%s)", query)
-        return [], None
-    except FileNotFoundError:
-        log.warning("gws CLI not found on PATH")
-        return [], None
+    return data.get("messages", []) or [], data.get("nextPageToken")
 
 
 def _fetch_emails_backfill(

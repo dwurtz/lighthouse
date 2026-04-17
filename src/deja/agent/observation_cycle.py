@@ -156,6 +156,16 @@ async def run_collect_cycle(loop_ref) -> None:
     loop_ref.phase = "OBSERVING"
 
     loop = asyncio.get_running_loop()
+
+    # Refresh the Google Contacts buffer if it's gone stale. Runs off
+    # the executor so the one-a-day People API roundtrip never blocks
+    # signal collection; the mtime check it gates on is cheap.
+    try:
+        from deja.observations.google_contacts import sync_if_stale
+        await loop.run_in_executor(None, sync_if_stale)
+    except Exception:
+        log.exception("Google contacts sync_if_stale failed")
+
     new_signals = await loop.run_in_executor(None, loop_ref.collector.collect_all)
 
     if new_signals:

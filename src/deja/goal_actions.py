@@ -3,8 +3,7 @@
 When goals.md defines an automation ("When a TeamSnap email arrives,
 create a calendar event"), the integrate or reflect cycle can emit
 structured ``goal_actions`` alongside wiki updates. This module
-executes those actions via the appropriate tool (gws CLI, macOS
-notifications, etc.).
+executes those actions via the appropriate Google API.
 
 Safety model:
   - Actions only fire when goals.md explicitly defines the automation.
@@ -18,6 +17,10 @@ Safety model:
   - Every action is recorded via ``audit.record()`` so it's grep-able
     in ``~/.deja/audit.jsonl``.
 
+Transport: direct ``googleapiclient`` via ``deja.google_api.get_service``
+— the same OAuth token that powers observation collectors. No gws CLI
+dependency.
+
 Supported action types:
   - calendar_create   — create a Google Calendar event
   - calendar_update   — update an existing event by ID
@@ -29,11 +32,8 @@ Supported action types:
 
 from __future__ import annotations
 
-import json
 import logging
-import subprocess
 from datetime import datetime
-from typing import Any
 
 log = logging.getLogger(__name__)
 
@@ -73,17 +73,25 @@ def execute_all(actions: list[dict]) -> int:
 
 
 # ---------------------------------------------------------------------------
-# Individual action executors
+# Service helpers
 # ---------------------------------------------------------------------------
 
-def _gws_run(service_args: list[str], timeout: int = 15) -> subprocess.CompletedProcess:
-    """Run a gws CLI command. Raises on timeout."""
-    return subprocess.run(
-        ["gws"] + service_args,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-    )
+def _service(name: str, version: str):
+    """Return a cached Google API service, or None on auth failure.
+
+    Centralizes the "setup not complete / token unrecoverable" fallback
+    so each executor can log-and-skip rather than tracing the error up
+    into the agent loop.
+    """
+    try:
+        from deja.google_api import get_service
+        return get_service(name, version)
+    except Exception:
+        log.warning(
+            "goal_action: %s/%s service unavailable — is setup complete?",
+            name, version, exc_info=True,
+        )
+        return None
 
 
 def _log_action(action_type: str, summary: str, reason: str = "") -> None:
@@ -99,6 +107,10 @@ def _log_action(action_type: str, summary: str, reason: str = "") -> None:
         pass
 
 
+# ---------------------------------------------------------------------------
+# Individual action executors
+# ---------------------------------------------------------------------------
+
 def _calendar_create(params: dict, reason: str) -> None:
     """Create a Google Calendar event, skipping if a similar one already exists.
 
@@ -112,35 +124,35 @@ def _calendar_create(params: dict, reason: str) -> None:
         log.warning("calendar_create: missing summary/start/end")
         return
 
+    svc = _service("calendar", "v3")
+    if svc is None:
+        log.warning("calendar_create: skipped (no service)")
+        return
+
     # Dedup: check if an event with a similar title already exists near this time
     try:
-        from datetime import datetime, timedelta
+        from datetime import timedelta
         start_dt = datetime.fromisoformat(start)
         # Search window: 1 hour before to 1 hour after the start time
         search_min = (start_dt - timedelta(hours=1)).isoformat()
         search_max = (start_dt + timedelta(hours=1)).isoformat()
 
-        r_check = _gws_run([
-            "calendar", "events", "list",
-            "--params", json.dumps({
-                "calendarId": "primary",
-                "timeMin": search_min,
-                "timeMax": search_max,
-                "singleEvents": True,
-                "maxResults": 10,
-            }),
-        ])
-        if r_check.returncode == 0:
-            existing = json.loads(r_check.stdout)
-            for event in existing.get("items", []):
-                existing_title = (event.get("summary") or "").lower().strip()
-                new_title = summary.lower().strip()
-                if existing_title == new_title:
-                    log.info(
-                        "calendar_create: skipping duplicate — '%s' already exists at %s",
-                        summary, start,
-                    )
-                    return
+        existing = svc.events().list(
+            calendarId="primary",
+            timeMin=search_min,
+            timeMax=search_max,
+            singleEvents=True,
+            maxResults=10,
+        ).execute()
+        for event in existing.get("items", []):
+            existing_title = (event.get("summary") or "").lower().strip()
+            new_title = summary.lower().strip()
+            if existing_title == new_title:
+                log.info(
+                    "calendar_create: skipping duplicate — '%s' already exists at %s",
+                    summary, start,
+                )
+                return
     except Exception:
         log.debug("calendar_create dedup check failed, proceeding", exc_info=True)
 
@@ -154,16 +166,13 @@ def _calendar_create(params: dict, reason: str) -> None:
     if params.get("description"):
         event_body["description"] = params["description"]
 
-    r = _gws_run([
-        "calendar", "events", "insert",
-        "--params", json.dumps({"calendarId": "primary"}),
-        "--json", json.dumps(event_body),
-    ])
-    if r.returncode == 0:
-        log.info("calendar_create: '%s' at %s — %s", summary, start, reason)
-        _log_action("calendar_create", f"{summary} at {start}")
-    else:
-        log.warning("calendar_create failed: %s", r.stderr[:200])
+    try:
+        svc.events().insert(calendarId="primary", body=event_body).execute()
+    except Exception as e:
+        log.warning("calendar_create failed: %s", type(e).__name__)
+        return
+    log.info("calendar_create: '%s' at %s — %s", summary, start, reason)
+    _log_action("calendar_create", f"{summary} at {start}")
 
 
 def _calendar_update(params: dict, reason: str) -> None:
@@ -186,16 +195,22 @@ def _calendar_update(params: dict, reason: str) -> None:
         log.warning("calendar_update: nothing to update")
         return
 
-    r = _gws_run([
-        "calendar", "events", "patch",
-        "--params", json.dumps({"calendarId": "primary", "eventId": event_id}),
-        "--json", json.dumps(update_body),
-    ])
-    if r.returncode == 0:
-        log.info("calendar_update: %s — %s", event_id, reason)
-        _log_action("calendar_update", f"updated event {event_id}")
-    else:
-        log.warning("calendar_update failed: %s", r.stderr[:200])
+    svc = _service("calendar", "v3")
+    if svc is None:
+        log.warning("calendar_update: skipped (no service)")
+        return
+
+    try:
+        svc.events().patch(
+            calendarId="primary",
+            eventId=event_id,
+            body=update_body,
+        ).execute()
+    except Exception as e:
+        log.warning("calendar_update failed: %s", type(e).__name__)
+        return
+    log.info("calendar_update: %s — %s", event_id, reason)
+    _log_action("calendar_update", f"updated event {event_id}")
 
 
 def _draft_email(params: dict, reason: str) -> None:
@@ -216,16 +231,21 @@ def _draft_email(params: dict, reason: str) -> None:
     raw_msg = f"From: {from_addr}\nTo: {to}\nSubject: {subject}\n\n{body}"
     encoded = base64.urlsafe_b64encode(raw_msg.encode()).decode()
 
-    r = _gws_run([
-        "gmail", "users", "drafts", "create",
-        "--params", json.dumps({"userId": "me"}),
-        "--json", json.dumps({"message": {"raw": encoded}}),
-    ])
-    if r.returncode == 0:
-        log.info("draft_email: draft to %s re: '%s' — %s", to, subject, reason)
-        _log_action("draft_email", f"draft to {to}: {subject}")
-    else:
-        log.warning("draft_email failed: %s", r.stderr[:200])
+    svc = _service("gmail", "v1")
+    if svc is None:
+        log.warning("draft_email: skipped (no service)")
+        return
+
+    try:
+        svc.users().drafts().create(
+            userId="me",
+            body={"message": {"raw": encoded}},
+        ).execute()
+    except Exception as e:
+        log.warning("draft_email failed: %s", type(e).__name__)
+        return
+    log.info("draft_email: draft to %s re: '%s' — %s", to, subject, reason)
+    _log_action("draft_email", f"draft to {to}: {subject}")
 
 
 def _create_task(params: dict, reason: str) -> None:
@@ -243,16 +263,19 @@ def _create_task(params: dict, reason: str) -> None:
 
     # Use the default task list
     tasklist = params.get("tasklist", "@default")
-    r = _gws_run([
-        "tasks", "tasks", "insert",
-        "--params", json.dumps({"tasklist": tasklist}),
-        "--json", json.dumps(task_body),
-    ])
-    if r.returncode == 0:
-        log.info("create_task: '%s' — %s", title, reason)
-        _log_action("create_task", title)
-    else:
-        log.warning("create_task failed: %s", r.stderr[:200])
+
+    svc = _service("tasks", "v1")
+    if svc is None:
+        log.warning("create_task: skipped (no service)")
+        return
+
+    try:
+        svc.tasks().insert(tasklist=tasklist, body=task_body).execute()
+    except Exception as e:
+        log.warning("create_task failed: %s", type(e).__name__)
+        return
+    log.info("create_task: '%s' — %s", title, reason)
+    _log_action("create_task", title)
 
 
 def _complete_task(params: dict, reason: str) -> None:
@@ -263,16 +286,22 @@ def _complete_task(params: dict, reason: str) -> None:
         log.warning("complete_task: missing task_id")
         return
 
-    r = _gws_run([
-        "tasks", "tasks", "patch",
-        "--params", json.dumps({"tasklist": tasklist, "task": task_id}),
-        "--json", json.dumps({"status": "completed"}),
-    ])
-    if r.returncode == 0:
-        log.info("complete_task: %s — %s", task_id, reason)
-        _log_action("complete_task", f"completed task {task_id}")
-    else:
-        log.warning("complete_task failed: %s", r.stderr[:200])
+    svc = _service("tasks", "v1")
+    if svc is None:
+        log.warning("complete_task: skipped (no service)")
+        return
+
+    try:
+        svc.tasks().patch(
+            tasklist=tasklist,
+            task=task_id,
+            body={"status": "completed"},
+        ).execute()
+    except Exception as e:
+        log.warning("complete_task failed: %s", type(e).__name__)
+        return
+    log.info("complete_task: %s — %s", task_id, reason)
+    _log_action("complete_task", f"completed task {task_id}")
 
 
 def _notify(params: dict, reason: str) -> None:

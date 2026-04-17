@@ -11,6 +11,7 @@ requires-python = ">=3.10"
 dependencies = [
     "google-genai>=1.0.0",
     "google-auth-oauthlib>=1.0.0",
+    "google-api-python-client>=2.100",
     "Pillow>=10.0",
     "imagehash>=4.3",
     "fastapi>=0.100",
