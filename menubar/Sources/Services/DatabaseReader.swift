@@ -38,16 +38,29 @@ class DatabaseReader {
         let cutoffUnix = Date().timeIntervalSince1970 - 300
         let cutoffAppleNs = Int64((cutoffUnix - Self.appleEpochOffset) * 1_000_000_000)
 
-        // Read BOTH `text` and `attributedBody`. Modern macOS stores many
-        // rows (including ~every outbound message on this machine) with
-        // text = NULL and the content packed into the attributedBody
-        // typedstream blob. See AttributedBodyDecoder for format details.
+        // Per-turn emission: each message becomes one row with the stable
+        // chat.ROWID as chat_id so the Python side can thread group chats
+        // correctly without trying to derive the chat from the sender list.
+        // JOIN chat_message_join → chat so every row carries its chat
+        // session info (chat.ROWID, display_name, style). message.handle_id
+        // points only at the sender, not the room.
         let sql = """
-            SELECT m.text, m.date, m.is_from_me, h.id as handle_id, m.attributedBody
+            SELECT
+                m.text,
+                m.date,
+                m.is_from_me,
+                h.id AS handle_id,
+                m.attributedBody,
+                c.ROWID AS chat_id,
+                c.display_name AS chat_display_name,
+                c.chat_identifier AS chat_identifier,
+                c.style AS chat_style
             FROM message m
+            JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
+            JOIN chat c ON c.ROWID = cmj.chat_id
             LEFT JOIN handle h ON m.handle_id = h.ROWID
             WHERE m.date > ?1 AND (m.text IS NOT NULL OR m.attributedBody IS NOT NULL)
-            ORDER BY m.date DESC LIMIT 50
+            ORDER BY m.date DESC LIMIT 200
             """
 
         var stmt: OpaquePointer?
@@ -88,7 +101,45 @@ class DatabaseReader {
                 handleId = "unknown"
             }
 
-            let sender = isFromMe ? "me" : handleId
+            // chat_id comes from chat.ROWID — stable for the life of the
+            // session regardless of how group membership changes.
+            let chatId = sqlite3_column_int64(stmt, 5)
+            let chatIdStr = "imsg-chat-\(chatId)"
+
+            // chat_label: display_name for named groups, else chat_identifier
+            // (handle for 1:1s, ``chat<N>`` for unnamed groups). Python side
+            // does contact resolution on 1:1s.
+            var chatDisplayName: String = ""
+            if let cStr = sqlite3_column_text(stmt, 6) {
+                chatDisplayName = String(cString: cStr)
+            }
+            var chatIdentifier: String = ""
+            if let cStr = sqlite3_column_text(stmt, 7) {
+                chatIdentifier = String(cString: cStr)
+            }
+            let chatStyle = sqlite3_column_int(stmt, 8)
+            let isGroup = chatStyle == 43
+
+            let chatLabel: String
+            if isGroup {
+                if !chatDisplayName.isEmpty {
+                    chatLabel = chatDisplayName
+                } else {
+                    chatLabel = chatIdentifier.isEmpty ? "group" : chatIdentifier
+                }
+            } else {
+                // 1:1 — prefer chat_identifier (usually the handle); Python
+                // resolves the contact name. Fall back to the sender handle.
+                chatLabel = !chatIdentifier.isEmpty ? chatIdentifier : handleId
+            }
+
+            // speaker: "me" for outbound (Python rewrites to "You"),
+            // otherwise the sender's raw handle. Keep it unambiguous —
+            // exactly one participant, never a joined list.
+            let speaker = isFromMe ? "me" : handleId
+            // sender mirrors chat_label for back-compat with older Python
+            // collectors / the legacy format path.
+            let sender = chatLabel
 
             let date = Date(timeIntervalSince1970: unixTs)
             let fmt = DateFormatter()
@@ -101,6 +152,9 @@ class DatabaseReader {
                 "dt": dt,
                 "is_from_me": isFromMe,
                 "sender": sender,
+                "chat_id": chatIdStr,
+                "chat_label": chatLabel,
+                "speaker": speaker,
             ])
         }
 
@@ -120,13 +174,18 @@ class DatabaseReader {
         let cutoffUnix = Date().timeIntervalSince1970 - 300
         let cutoffApple = cutoffUnix - Self.appleEpochOffset
 
+        // Per-turn emission: chat_id = ZWACHATSESSION.Z_PK (stable session
+        // id). For groups, ZFROMJID on ZWAMESSAGE identifies the specific
+        // sender; for 1:1s the session's ZCONTACTJID is the peer.
         let sql = """
-            SELECT ZWAMESSAGE.ZTEXT, ZWAMESSAGE.ZMESSAGEDATE, ZWAMESSAGE.ZISFROMME,
-                   ZWACHATSESSION.ZCONTACTJID
-            FROM ZWAMESSAGE
-            LEFT JOIN ZWACHATSESSION ON ZWAMESSAGE.ZCHATSESSION = ZWACHATSESSION.Z_PK
-            WHERE ZWAMESSAGE.ZTEXT IS NOT NULL AND ZWAMESSAGE.ZTEXT != '' AND ZWAMESSAGE.ZMESSAGEDATE > ?1
-            ORDER BY ZWAMESSAGE.ZMESSAGEDATE DESC LIMIT 50
+            SELECT m.ZTEXT, m.ZMESSAGEDATE, m.ZISFROMME, m.ZFROMJID,
+                   s.Z_PK AS session_pk,
+                   s.ZCONTACTJID AS contact_jid,
+                   s.ZPARTNERNAME AS partner_name
+            FROM ZWAMESSAGE m
+            LEFT JOIN ZWACHATSESSION s ON m.ZCHATSESSION = s.Z_PK
+            WHERE m.ZTEXT IS NOT NULL AND m.ZTEXT != '' AND m.ZMESSAGEDATE > ?1
+            ORDER BY m.ZMESSAGEDATE DESC LIMIT 200
             """
 
         var stmt: OpaquePointer?
@@ -145,14 +204,49 @@ class DatabaseReader {
             let unixTs = appleSec + Self.appleEpochOffset
             let isFromMe = sqlite3_column_int(stmt, 2) == 1
 
-            let contactJid: String
+            var fromJid: String = ""
             if let cStr = sqlite3_column_text(stmt, 3) {
-                contactJid = String(cString: cStr)
-            } else {
-                contactJid = "unknown"
+                fromJid = String(cString: cStr)
             }
 
-            let sender = isFromMe ? "me" : contactJid
+            let sessionPk = sqlite3_column_int64(stmt, 4)
+
+            var contactJid: String = ""
+            if let cStr = sqlite3_column_text(stmt, 5) {
+                contactJid = String(cString: cStr)
+            }
+
+            var partnerName: String = ""
+            if let cStr = sqlite3_column_text(stmt, 6) {
+                partnerName = String(cString: cStr)
+            }
+
+            let chatIdStr = "wa-chat-\(sessionPk)"
+            let isGroup = contactJid.hasSuffix("@g.us")
+
+            // chat_label: partner name when present, else the JID. For 1:1s
+            // the Python collector resolves the raw phone against contacts.
+            let chatLabel = !partnerName.isEmpty ? partnerName : contactJid
+
+            // speaker resolution:
+            //  - outbound → "me" (Python rewrites to "You")
+            //  - group inbound → ZFROMJID gives the specific participant
+            //  - 1:1 inbound → the session's ZCONTACTJID (only other party)
+            let speaker: String
+            if isFromMe {
+                speaker = "me"
+            } else if isGroup {
+                // Strip "@g.us" / "@s.whatsapp.net" suffix so speaker is
+                // just the phone number (Python then maps to contact name).
+                let raw = fromJid.components(separatedBy: "@").first ?? fromJid
+                speaker = raw.isEmpty ? "unknown" : raw
+            } else {
+                let raw = contactJid.components(separatedBy: "@").first ?? contactJid
+                speaker = raw.isEmpty ? "unknown" : raw
+            }
+
+            // sender mirrors chat_label for back-compat.
+            let sender = chatLabel
 
             let date = Date(timeIntervalSince1970: unixTs)
             let fmt = DateFormatter()
@@ -165,6 +259,9 @@ class DatabaseReader {
                 "dt": dt,
                 "is_from_me": isFromMe,
                 "sender": sender,
+                "chat_id": chatIdStr,
+                "chat_label": chatLabel,
+                "speaker": speaker,
             ])
         }
 

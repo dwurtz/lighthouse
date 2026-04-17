@@ -4,13 +4,14 @@ Two entry points:
 
   * ``IMessageObserver.collect`` (aliased as ``collect_imessages``) —
     the steady-state live collector used by the monitor's 3-second
-    observation cycle. Returns one ``Observation`` per *recent message*.
+    observation cycle. Returns one ``Observation`` per speaker-turn,
+    reading the per-turn buffer written by the Swift app.
   * ``fetch_imessage_contacts_backfill`` — the onboarding path used
-    once per user. Returns one ``Observation`` per *conversation* over
-    the last N days, with each observation's text being a compact
-    digest of the last M messages in that chat. Used by the onboarding
-    runner to bootstrap the wiki with people/project pages built from
-    historical chat context.
+    once per user. Returns one ``Observation`` per *message* across
+    every qualifying chat in the last N days. All turns from the same
+    chat share a stable ``chat_id``, so format-time reconstruction
+    rebuilds the thread cleanly and per-turn ``speaker`` attribution
+    stops the integrator from fusing speakers in group chats.
 """
 
 from __future__ import annotations
@@ -64,22 +65,69 @@ def _collect_imessages(since_minutes: int = 5, limit: int = 20) -> list[Observat
     writes the results to ~/.deja/imessage_buffer.json. This function
     reads that buffer instead of accessing the database directly, so
     the Python process does not need Full Disk Access.
+
+    New contract (per the 2026-04 messaging unification): one Observation
+    per speaker-turn. Buffer rows carry ``chat_id`` (stable chat.ROWID),
+    ``chat_label`` (human name), and ``speaker`` (single participant for
+    this turn). Legacy buffer rows without those fields get synthesized
+    values from ``sender`` so mid-rollout the live app keeps working.
     """
+    from deja.observations.contacts import resolve_contact, name_with_handle
+
     results: list[Observation] = []
     try:
         if not _IMESSAGE_BUFFER.exists():
             return results
         data = json.loads(_IMESSAGE_BUFFER.read_text())
         for r in data[:limit]:
-            sender = "You" if r.get("sender") == "me" else r.get("sender", "unknown")
             text = (r.get("text") or "")[:500]
             dt = r.get("dt", "")
+            if not text:
+                continue
+
+            # --- new-shape fields (with legacy fallback) ---
+            chat_id = r.get("chat_id") or None
+            chat_label = r.get("chat_label") or None
+            raw_speaker = r.get("speaker")
+
+            # Legacy buffer: only `sender` is present. In that world the
+            # "sender" is a raw handle for inbound 1:1 messages or "me"
+            # for outbound. Synthesize chat_id from sender so thread
+            # context still groups; speaker == sender (rewritten "You").
+            if raw_speaker is None:
+                legacy_sender = r.get("sender", "unknown")
+                raw_speaker = legacy_sender
+                if chat_id is None:
+                    chat_id = f"imsg-legacy-{legacy_sender}"
+                if chat_label is None:
+                    chat_label = legacy_sender
+
+            # Resolve speaker's raw handle to a contact name when inbound.
+            if raw_speaker == "me":
+                speaker = "You"
+            else:
+                resolved = resolve_contact(raw_speaker) or raw_speaker
+                if "+" in (raw_speaker or "") or "@" in (raw_speaker or ""):
+                    speaker = name_with_handle(resolved, raw_speaker)
+                else:
+                    speaker = resolved
+
+            # sender (display string) — chat label for groups, or the
+            # speaker for 1:1 back-compat behavior. Downstream code that
+            # still reads `sender` sees a stable per-thread identifier.
+            sender = chat_label or speaker
+
+            # Build a speaker-scoped id_key so two speakers in the same
+            # chat at the same second hash distinctly.
+            speaker_hash = hashlib.md5((raw_speaker or "").encode()).hexdigest()[:6]
             text_hash = hashlib.md5(text.encode()).hexdigest()[:12]
-            id_key = f"imsg-{sender}-{dt}-{text_hash}"
+            id_key = f"imsg-{chat_id}-{speaker_hash}-{dt}-{text_hash}"
+
             try:
                 ts = datetime.strptime(dt, "%Y-%m-%d %H:%M:%S")
             except (ValueError, TypeError):
                 ts = datetime.now()
+
             results.append(
                 Observation(
                     source="imessage",
@@ -87,6 +135,9 @@ def _collect_imessages(since_minutes: int = 5, limit: int = 20) -> list[Observat
                     text=text,
                     timestamp=ts,
                     id_key=id_key,
+                    chat_id=chat_id,
+                    chat_label=chat_label,
+                    speaker=speaker,
                 )
             )
     except Exception:
@@ -179,12 +230,14 @@ def fetch_imessage_contacts_backfill(
         from deja.observations.contacts import resolve_contact, name_with_handle
 
         for chat in chat_rows:
-            chat_id = chat["chat_id"]
+            chat_rowid = chat["chat_id"]
+            stable_chat_id = f"imsg-chat-{chat_rowid}"
             is_group = (chat["style"] == 43)  # style 43 = group, 45 = 1:1
             display_name = (chat["display_name"] or "").strip()
 
             # Who's in this chat (excluding the user themselves — the
-            # user is implicit).
+            # user is implicit). We still need this to compute chat_label
+            # for groups without a display_name.
             handle_rows = conn.execute(
                 """
                 SELECT h.id
@@ -192,39 +245,31 @@ def fetch_imessage_contacts_backfill(
                 JOIN handle h ON h.ROWID = chj.handle_id
                 WHERE chj.chat_id = ?
                 """,
-                (chat_id,),
+                (chat_rowid,),
             ).fetchall()
             participant_handles = [h["id"] for h in handle_rows if h["id"]]
-
-            # Resolve each handle to a contact name when possible, and
-            # keep a (name, raw_handle) pair so we can surface the raw
-            # identifier in the digest — the LLM needs it to capture
-            # phone numbers and emails into people-page frontmatter.
             participant_pairs: list[tuple[str, str]] = []
             for handle in participant_handles:
                 resolved = resolve_contact(handle) or handle
                 participant_pairs.append((resolved, handle))
             participant_names = [name for name, _ in participant_pairs]
 
-            # Concise sender_label for the Observation row (100-char cap
-            # enforced downstream). The FULL participant list with handles
-            # goes in the digest text, where the 4KB cap gives plenty of
-            # room — that's where the LLM actually reads the identifiers.
             if is_group:
                 if display_name:
-                    chat_label_short = f"group '{display_name}' ({len(participant_pairs)} members)"
+                    chat_label = display_name
                 else:
                     short_names = ", ".join(participant_names[:3])
-                    extra = f" +{len(participant_names) - 3}" if len(participant_names) > 3 else ""
-                    chat_label_short = f"group ({short_names}{extra})"
-                sender_label = f"iMessage {chat_label_short}"
+                    extra = (
+                        f" +{len(participant_names) - 3}"
+                        if len(participant_names) > 3 else ""
+                    )
+                    chat_label = f"group ({short_names}{extra})"
             else:
                 if participant_pairs:
                     name, handle = participant_pairs[0]
-                    chat_label_short = name_with_handle(name, handle)
+                    chat_label = name_with_handle(name, handle)
                 else:
-                    chat_label_short = "unknown"
-                sender_label = chat_label_short
+                    chat_label = "unknown"
 
             # Step 3: Pull the last N messages in this chat. Join
             # handle so we can attribute each inbound message to a
@@ -247,7 +292,7 @@ def fetch_imessage_contacts_backfill(
                 ORDER BY m.date DESC
                 LIMIT ?
                 """,
-                (chat_id, cutoff_apple_ns, messages_per_contact),
+                (chat_rowid, cutoff_apple_ns, messages_per_contact),
             ).fetchall()
 
             # Reverse so oldest-first (the DB returned newest-first to
@@ -257,71 +302,47 @@ def fetch_imessage_contacts_backfill(
             if not msg_rows:
                 continue
 
-            # Build the digest text. The first line summarizes the chat;
-            # the second line explicitly lists every participant with
-            # their raw handle (phone or email) so the LLM can capture
-            # identifiers into people-page frontmatter. Individual
-            # messages follow, with each inbound sender shown as
-            # "Name (handle)" so the LLM can attribute per-message
-            # content in group chats correctly.
-            lines: list[str] = []
-            if is_group:
-                title_label = f"group '{display_name}'" if display_name else "group"
-                lines.append(
-                    f"iMessage {title_label} — "
-                    f"{chat['total_count']} msgs in last {days} days "
-                    f"({chat['outbound_count']} from user)"
-                )
-                participants_line = "; ".join(
-                    name_with_handle(n, h) for n, h in participant_pairs
-                )
-                lines.append(f"Participants: {participants_line}")
-            else:
-                # 1:1 — header already contains name + handle
-                if participant_pairs:
-                    name, handle = participant_pairs[0]
-                    header_name = name_with_handle(name, handle)
-                else:
-                    header_name = "unknown"
-                lines.append(
-                    f"iMessage with {header_name} — "
-                    f"{chat['total_count']} msgs in last {days} days "
-                    f"({chat['outbound_count']} from user)"
-                )
-
+            # Emit ONE observation per message. All share the same
+            # chat_id so format-time thread reconstruction rebuilds the
+            # conversation cleanly, and per-turn speaker attribution
+            # prevents the downstream integrator from fusing speakers.
             for m in msg_rows:
+                body = (m["text"] or "").replace("\n", " ").strip()
+                if not body:
+                    continue
+                body = body[:500]
+
                 if m["is_from_me"]:
-                    who = "You"
+                    speaker = "You"
+                    raw_speaker = "me"
                 else:
                     raw = m["sender_handle"] or "unknown"
                     resolved = resolve_contact(raw) or raw
-                    who = name_with_handle(resolved, raw)
-                text = (m["text"] or "").replace("\n", " ").strip()
-                # Per-message cap so a long rant can't eat the whole budget.
-                text = text[:300]
-                lines.append(f"  [{m['dt']}] {who}: {text}")
+                    speaker = name_with_handle(resolved, raw)
+                    raw_speaker = raw
 
-            # Hard cap the whole digest at ~4KB so batching stays predictable.
-            digest = "\n".join(lines)[:4000]
+                try:
+                    ts = datetime.strptime(m["dt"], "%Y-%m-%d %H:%M:%S")
+                except (ValueError, TypeError, KeyError):
+                    ts = datetime.now()
 
-            # Use the most recent message's timestamp as the Observation
-            # timestamp so the LLM sees when the conversation was actually
-            # active, not "now".
-            try:
-                last_dt_str = msg_rows[-1]["dt"]
-                ts = datetime.strptime(last_dt_str, "%Y-%m-%d %H:%M:%S")
-            except (ValueError, TypeError, KeyError):
-                ts = datetime.now()
+                speaker_hash = hashlib.md5(raw_speaker.encode()).hexdigest()[:6]
+                text_hash = hashlib.md5(body.encode()).hexdigest()[:12]
+                id_key = (
+                    f"imsg-backfill-{chat_rowid}-{speaker_hash}-"
+                    f"{m['date']}-{text_hash}"
+                )
 
-            id_key = f"imsg-backfill-{chat_id}-{chat['last_date']}"
-
-            results.append(Observation(
-                source="imessage",
-                sender=sender_label[:100],
-                text=digest,
-                timestamp=ts,
-                id_key=id_key,
-            ))
+                results.append(Observation(
+                    source="imessage",
+                    sender=chat_label[:100],
+                    text=body,
+                    timestamp=ts,
+                    id_key=id_key,
+                    chat_id=stable_chat_id,
+                    chat_label=chat_label,
+                    speaker=speaker,
+                ))
 
         conn.close()
     except sqlite3.Error as e:
@@ -336,5 +357,5 @@ def fetch_imessage_contacts_backfill(
 
     # Sort oldest → newest so batches show the timeline in order.
     results.sort(key=lambda o: o.timestamp)
-    log.info("iMessage backfill: returning %d conversation digests", len(results))
+    log.info("iMessage backfill: returning %d per-turn observations", len(results))
     return results

@@ -343,16 +343,29 @@ def classify_tier(obs: dict) -> int:
 
     Pure function modulo module-level caches (user emails, inner-circle
     slugs). See module docstring for tier definitions.
+
+    For threaded messaging (iMessage / WhatsApp) the classifier keys on
+    ``speaker`` — the single participant who authored the turn — not on
+    ``sender``, which is the joined chat label. In group chats this is
+    the difference between "Dominique sent this in the chat" (Tier 1,
+    inner-circle) and "some turn happened in a chat that also contains
+    Dominique" (not necessarily Tier 1). Legacy observations without a
+    ``speaker`` field fall back to ``sender`` for back-compat.
     """
     source = (obs.get("source") or "").lower()
     sender = obs.get("sender") or ""
+    speaker = obs.get("speaker") or ""
     text = obs.get("text") or ""
+
+    # For messaging, prefer `speaker` (per-turn identity); fall back to
+    # `sender` only for legacy observations that pre-date the migration.
+    messaging_identity = speaker if speaker else sender
 
     # ---- Tier 1: user-authored or inner-circle authored ----
     if source in _USER_AUTHORED_SOURCES:
         return 1
 
-    if source in _SELF_SENDER_SOURCES and sender == "You":
+    if source in _SELF_SENDER_SOURCES and messaging_identity == "You":
         return 1
 
     if source == "email":
@@ -376,12 +389,16 @@ def classify_tier(obs: dict) -> int:
     if source == "screenshot" and text.startswith("[SENT]"):
         return 1
 
-    # Inner-circle inbound: messages FROM a person flagged inner_circle.
-    # Outbound messages were already caught above (sender == "You").
-    # Match against aliases/first-name/preferred-name not just slug,
-    # because iMessage/WhatsApp senders arrive as the contact's display
-    # name (e.g. "Nie (+15169879840)") — never the wiki slug.
-    if source in ("imessage", "whatsapp", "email"):
+    # Inner-circle inbound: messages FROM an inner-circle person.
+    # For messaging this must be the SPEAKER of this specific turn —
+    # not just someone who happens to be in the chat. A group chat with
+    # Dominique gets Tier 1 only on Dominique's own turns, never on
+    # Laura's or anyone else's. Email keeps the sender-based match
+    # (email's "speaker" is already the sender).
+    if source in ("imessage", "whatsapp"):
+        if _sender_matches_inner_circle(messaging_identity):
+            return 1
+    elif source == "email":
         if _sender_matches_inner_circle(sender):
             return 1
 

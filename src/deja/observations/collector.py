@@ -147,21 +147,47 @@ class Observer:
                     self._screenshot_observer = ScreenshotObserver()
                 self._run_observer(self._screenshot_observer, raw)
 
-        # Resolve contact names for message signals
+        # Resolve contact names for message signals. The collectors now
+        # do this per-turn (they stamp chat_label and speaker with the
+        # resolved name), so this legacy pass only kicks in for older
+        # observations that still carry a raw phone in `sender`.
         try:
             from deja.observations.contacts import resolve_contact
             for sig in raw:
                 if sig.source in ("imessage", "whatsapp") and sig.sender != "You":
+                    # Skip if the collector already produced a new-shape
+                    # observation — sender has been set to chat_label and
+                    # speaker carries the resolved per-turn identity.
+                    if sig.speaker is not None:
+                        continue
                     resolved = resolve_contact(sig.sender)
                     if resolved:
                         sig.sender = f"{resolved} ({sig.sender})" if "+" in sig.sender else resolved
         except Exception:
             pass
 
-        # Thread conversations — group consecutive messages into threads
+        # Threading (CONVERSATION-digest collapse) was necessary when the
+        # live collectors emitted one observation per message *without* a
+        # stable chat_id — the downstream integrator needed explicit
+        # grouping to see a conversation. With per-turn observations that
+        # all share a chat_id (and signals/format.py reconstructs the
+        # thread at format time), the digest is actively harmful: it joins
+        # multiple speakers under one `sender` string and produces the
+        # attribution fabrications we saw in group chats. We only run the
+        # legacy threader for observations without chat_id (defensive —
+        # shouldn't happen in practice once the new Swift ships).
         try:
             from deja.observations.threads import thread_signals
-            raw = thread_signals(raw)
+            needs_threading = [
+                s for s in raw
+                if s.source in ("imessage", "whatsapp") and s.chat_id is None
+            ]
+            if needs_threading:
+                non_legacy = [
+                    s for s in raw
+                    if not (s.source in ("imessage", "whatsapp") and s.chat_id is None)
+                ]
+                raw = non_legacy + thread_signals(needs_threading)
         except Exception:
             log.exception("Threading failed")
 
@@ -237,6 +263,9 @@ class Observer:
                             text=d["text"],
                             timestamp=datetime.fromisoformat(d["timestamp"]),
                             id_key=d["id_key"],
+                            chat_id=d.get("chat_id"),
+                            chat_label=d.get("chat_label"),
+                            speaker=d.get("speaker"),
                         )
                         self.recent_history.append(sig)
                         self._seen_ids.add(sig.id_key)
@@ -250,14 +279,23 @@ class Observer:
         """Append a signal to the on-disk log."""
         try:
             DEJA_HOME.mkdir(parents=True, exist_ok=True)
+            payload: dict[str, Any] = {
+                "source": sig.source,
+                "sender": sig.sender,
+                "text": sig.text,
+                "timestamp": sig.timestamp.isoformat(),
+                "id_key": sig.id_key,
+            }
+            # Only write the threaded-messaging fields when present so
+            # non-messaging rows don't carry redundant nulls.
+            if sig.chat_id is not None:
+                payload["chat_id"] = sig.chat_id
+            if sig.chat_label is not None:
+                payload["chat_label"] = sig.chat_label
+            if sig.speaker is not None:
+                payload["speaker"] = sig.speaker
             with open(self._signal_log_path, "a") as f:
-                f.write(json.dumps({
-                    "source": sig.source,
-                    "sender": sig.sender,
-                    "text": sig.text,
-                    "timestamp": sig.timestamp.isoformat(),
-                    "id_key": sig.id_key,
-                }) + "\n")
+                f.write(json.dumps(payload) + "\n")
         except Exception:
             log.exception("Failed to persist signal")
 

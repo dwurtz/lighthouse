@@ -3,10 +3,12 @@
 Two entry points:
 
   * ``WhatsAppObserver.collect`` (aliased as ``collect_whatsapp``) —
-    steady-state live collector; one ``Observation`` per recent message.
+    steady-state live collector; one ``Observation`` per speaker-turn,
+    reading the per-turn buffer written by the Swift app.
   * ``fetch_whatsapp_contacts_backfill`` — onboarding path; one
-    ``Observation`` per active chat (1:1 or group) over the last N
-    days, with a digest of the last M messages in each.
+    ``Observation`` per historical message in every qualifying chat,
+    each tagged with a stable ``chat_id`` so the thread reconstructs
+    at format time.
 """
 
 from __future__ import annotations
@@ -60,22 +62,57 @@ def _collect_whatsapp(since_minutes: int = 5, limit: int = 20) -> list[Observati
     the results to ~/.deja/whatsapp_buffer.json. This function reads
     that buffer instead of accessing the database directly, so the
     Python process does not need Full Disk Access.
+
+    New per-turn contract: one Observation per speaker-turn, with
+    ``chat_id`` (stable ZWACHATSESSION.Z_PK), ``chat_label``, and
+    ``speaker``. Legacy buffer rows without those fields fall back to
+    synthesized values from ``sender``.
     """
+    from deja.observations.contacts import resolve_contact, name_with_handle
+
     results: list[Observation] = []
     try:
         if not _WHATSAPP_BUFFER.exists():
             return results
         data = json.loads(_WHATSAPP_BUFFER.read_text())
         for r in data[:limit]:
-            sender = "You" if r.get("sender") == "me" else r.get("sender", "unknown")
             text = (r.get("text") or "")[:500]
             dt = r.get("dt", "")
+            if not text:
+                continue
+
+            chat_id = r.get("chat_id") or None
+            chat_label = r.get("chat_label") or None
+            raw_speaker = r.get("speaker")
+
+            if raw_speaker is None:
+                legacy_sender = r.get("sender", "unknown")
+                raw_speaker = legacy_sender
+                if chat_id is None:
+                    chat_id = f"wa-legacy-{legacy_sender}"
+                if chat_label is None:
+                    chat_label = legacy_sender
+
+            if raw_speaker == "me":
+                speaker = "You"
+            else:
+                resolved = resolve_contact(raw_speaker) or raw_speaker
+                if raw_speaker and ("+" in raw_speaker or raw_speaker.isdigit()):
+                    speaker = name_with_handle(resolved, raw_speaker)
+                else:
+                    speaker = resolved
+
+            sender = chat_label or speaker
+
+            speaker_hash = hashlib.md5((raw_speaker or "").encode()).hexdigest()[:6]
             text_hash = hashlib.md5(text.encode()).hexdigest()[:12]
-            id_key = f"wa-{sender}-{dt}-{text_hash}"
+            id_key = f"wa-{chat_id}-{speaker_hash}-{dt}-{text_hash}"
+
             try:
                 ts = datetime.strptime(dt, "%Y-%m-%d %H:%M:%S")
             except (ValueError, TypeError):
                 ts = datetime.now()
+
             results.append(
                 Observation(
                     source="whatsapp",
@@ -83,6 +120,9 @@ def _collect_whatsapp(since_minutes: int = 5, limit: int = 20) -> list[Observati
                     text=text,
                     timestamp=ts,
                     id_key=id_key,
+                    chat_id=chat_id,
+                    chat_label=chat_label,
+                    speaker=speaker,
                 )
             )
     except Exception:
@@ -155,25 +195,18 @@ def fetch_whatsapp_contacts_backfill(
 
         for session in session_rows:
             session_id = session["session_id"]
+            stable_chat_id = f"wa-chat-{session_id}"
             jid = (session["jid"] or "").strip()
             partner_name = (session["partner_name"] or "").strip()
             is_group = jid.endswith("@g.us")
 
             if is_group:
-                # Group chats — session gives us only the group name.
-                # Per-sender handles come in via ZFROMJID on each message.
-                group_title = partner_name or jid
-                chat_label = f"WhatsApp group '{group_title}'"
-                sender_label = chat_label
-                # 1:1 handle not applicable for groups
+                chat_label = partner_name or jid
                 one_to_one_handle: str | None = None
             else:
-                # 1:1 — jid contains the raw phone (or email for business
-                # accounts). Strip the @s.whatsapp.net suffix.
                 raw_phone = jid.split("@", 1)[0] if "@" in jid else jid
                 resolved = resolve_contact(raw_phone) or partner_name or raw_phone
                 chat_label = name_with_handle(resolved, raw_phone)
-                sender_label = chat_label
                 one_to_one_handle = raw_phone
 
             # Step 2: Last N messages in this session.
@@ -200,70 +233,60 @@ def fetch_whatsapp_contacts_backfill(
             if not msg_rows:
                 continue
 
-            lines: list[str] = []
-            lines.append(
-                f"WhatsApp with {chat_label} — "
-                f"{session['total_count']} msgs in last {days} days "
-                f"({session['outbound_count']} from user)"
-            )
-
-            # For groups, pre-walk messages to collect the unique set of
-            # participant handles that appear in the window, then emit a
-            # Participants: line so the LLM sees every phone number that
-            # belongs to this group in one place (same as iMessage).
-            if is_group:
-                seen_handles: dict[str, str] = {}
-                for m in msg_rows:
-                    if m["is_from_me"] or not m["from_jid"]:
-                        continue
-                    raw = m["from_jid"].split("@", 1)[0]
-                    if raw and raw not in seen_handles:
-                        seen_handles[raw] = resolve_contact(raw) or raw
-                if seen_handles:
-                    participants_line = "; ".join(
-                        name_with_handle(name, raw)
-                        for raw, name in seen_handles.items()
-                    )
-                    lines.append(f"Participants: {participants_line}")
-
+            # Emit one Observation per message. Shared chat_id keeps the
+            # thread reconstructable at format time; per-turn speaker
+            # prevents cross-speaker attribution drift in groups.
             for m in msg_rows:
+                body = (m["text"] or "").replace("\n", " ").strip()
+                if not body:
+                    continue
+                body = body[:500]
+
                 if m["is_from_me"]:
-                    who = "You"
+                    speaker = "You"
+                    raw_speaker = "me"
                 elif is_group:
-                    # In group chats ZFROMJID identifies the specific sender.
                     raw = (m["from_jid"] or "").split("@", 1)[0] if m["from_jid"] else ""
                     if raw:
-                        resolved = resolve_contact(raw) or raw
-                        who = name_with_handle(resolved, raw)
+                        resolved_name = resolve_contact(raw) or raw
+                        speaker = name_with_handle(resolved_name, raw)
                     else:
-                        who = "unknown"
+                        speaker = "unknown"
+                    raw_speaker = raw or "unknown"
                 else:
-                    # 1:1 — we already know the sender; show with handle.
+                    # 1:1 — sender is always the other party.
                     name_only = (
                         resolve_contact(one_to_one_handle)
                         if one_to_one_handle else None
                     ) or partner_name or (one_to_one_handle or "unknown")
-                    who = name_with_handle(name_only, one_to_one_handle or "")
-                text = (m["text"] or "").replace("\n", " ").strip()[:300]
-                lines.append(f"  [{m['dt']}] {who}: {text}")
+                    speaker = name_with_handle(name_only, one_to_one_handle or "")
+                    raw_speaker = one_to_one_handle or "unknown"
 
-            digest = "\n".join(lines)[:4000]
+                try:
+                    ts = datetime.strptime(m["dt"], "%Y-%m-%d %H:%M:%S")
+                except (ValueError, TypeError, KeyError):
+                    ts = datetime.now()
 
-            try:
-                last_dt_str = msg_rows[-1]["dt"]
-                ts = datetime.strptime(last_dt_str, "%Y-%m-%d %H:%M:%S")
-            except (ValueError, TypeError, KeyError):
-                ts = datetime.now()
+                speaker_hash = hashlib.md5(raw_speaker.encode()).hexdigest()[:6]
+                text_hash = hashlib.md5(body.encode()).hexdigest()[:12]
+                # ZMESSAGEDATE is a float; format with fixed precision so
+                # the id_key stays stable across runs.
+                date_key = f"{m['msg_date']:.3f}" if m["msg_date"] is not None else "0"
+                id_key = (
+                    f"wa-backfill-{session_id}-{speaker_hash}-"
+                    f"{date_key}-{text_hash}"
+                )
 
-            id_key = f"wa-backfill-{session_id}-{session['last_date']}"
-
-            results.append(Observation(
-                source="whatsapp",
-                sender=sender_label[:100],
-                text=digest,
-                timestamp=ts,
-                id_key=id_key,
-            ))
+                results.append(Observation(
+                    source="whatsapp",
+                    sender=chat_label[:100],
+                    text=body,
+                    timestamp=ts,
+                    id_key=id_key,
+                    chat_id=stable_chat_id,
+                    chat_label=chat_label,
+                    speaker=speaker,
+                ))
 
         conn.close()
     except sqlite3.Error as e:
@@ -277,5 +300,5 @@ def fetch_whatsapp_contacts_backfill(
         return []
 
     results.sort(key=lambda o: o.timestamp)
-    log.info("WhatsApp backfill: returning %d conversation digests", len(results))
+    log.info("WhatsApp backfill: returning %d per-turn observations", len(results))
     return results

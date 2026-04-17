@@ -16,13 +16,32 @@ from typing import Mapping
 
 @dataclass
 class Observation:
-    """A single piece of context collected from the user's digital life."""
+    """A single piece of context collected from the user's digital life.
+
+    The base (source, sender, text, timestamp, id_key) is shared by every
+    collector. The optional ``chat_id`` / ``chat_label`` / ``speaker``
+    fields are populated only by threaded messaging sources (iMessage,
+    WhatsApp) where we need a stable per-chat-session identifier and
+    unambiguous per-turn attribution — see the per-turn contract in
+    ``observations/imessage.py`` and ``observations/whatsapp.py``.
+    Other sources leave them ``None`` and downstream code falls back to
+    ``sender``.
+    """
 
     source: str  # "imessage", "whatsapp", "chrome", "clipboard", "screenshot", "calendar", "active_app", "email", "drive", "tasks", "microphone", "conversation"
-    sender: str  # person name, app name, or URL
+    sender: str  # person name, app name, or URL (for messaging: chat label for back-compat)
     text: str  # content (truncated for storage)
     timestamp: datetime
     id_key: str  # dedup identifier
+    # Threaded-messaging extensions. Populated by iMessage + WhatsApp
+    # collectors; ``None`` for every other source. ``chat_id`` is the
+    # platform's stable session id (chat.ROWID, ZWACHATSESSION.Z_PK);
+    # ``chat_label`` is a human-readable thread name; ``speaker`` is the
+    # SINGLE participant who authored this turn ("You" for outbound, else
+    # ``"<Name> (<handle>)"`` / raw handle).
+    chat_id: str | None = None
+    chat_label: str | None = None
+    speaker: str | None = None
 
 
 # Legacy alias — some internal code and old persisted data used `Signal`.
@@ -60,12 +79,18 @@ def is_outbound(obs: "Observation | Mapping") -> bool:
         source = obs.source
         sender = obs.sender or ""
         text = obs.text or ""
+        speaker = obs.speaker or ""
     else:
         source = obs.get("source", "") or ""
         sender = obs.get("sender", "") or ""
         text = obs.get("text", "") or ""
+        speaker = obs.get("speaker", "") or ""
 
     if source in ("imessage", "whatsapp"):
+        # New per-turn shape: `speaker` is authoritative. Fall back to
+        # `sender` for legacy observations that pre-date the migration.
+        if speaker:
+            return speaker == "You"
         return sender == "You"
     if source == "email":
         # Any "<name> → recipient" pattern is outbound (avoids hardcoding
