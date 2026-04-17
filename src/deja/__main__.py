@@ -178,6 +178,10 @@ def main() -> None:
         default=None,
         help="Run only one step instead of all pending steps",
     )
+    sub.add_parser(
+        "briefing",
+        help="Print the same daily-briefing view the MCP agent sees (profile + goals + active projects + recent narratives)",
+    )
     trail_p = sub.add_parser(
         "hermes-trail",
         help="Show recent audit entries from Hermes (trigger.kind=mcp) — see what your chief-of-staff has been doing",
@@ -220,6 +224,9 @@ def main() -> None:
         _run_linkify(dry_run=args.dry_run)
     elif command == "onboard":
         asyncio.run(_run_onboard(days=args.days, force=args.force, only=args.only))
+    elif command == "briefing":
+        from deja.mcp_server import _daily_briefing
+        print(_daily_briefing())
     elif command == "hermes-trail":
         _run_hermes_trail(hours=args.hours, limit=args.limit)
     else:

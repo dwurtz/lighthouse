@@ -754,8 +754,59 @@ def _mcp_audit_context() -> None:
     audit.set_context(cycle="", trigger_kind="mcp", trigger_detail="hermes")
 
 
+def _profile_headline(profile_md: str) -> str:
+    """Trim the user profile to its first paragraph.
+
+    The full david-wurtz.md body is ~1.5K words and shows up on every
+    briefing call. Most of it is stable state the agent already knows.
+    The first paragraph carries who-they-are + current-affiliation,
+    which is what changes rarely but matters most for framing.
+    """
+    text = profile_md.strip()
+    if not text:
+        return ""
+    # First paragraph = up to the first blank line
+    for i, line in enumerate(text.splitlines()):
+        if not line.strip() and i > 0:
+            return "\n".join(text.splitlines()[:i]).strip()
+    return text
+
+
+def _recent_narratives(limit: int = 5) -> list[str]:
+    """Return the last N observation narrative entries from today's file.
+
+    Narratives live in ``~/Deja/observations/YYYY-MM-DD.md``, one block
+    per integrate cycle, separated by ``\\n\\n---\\n\\n``. Each block
+    leads with ``## HH:MM:SS`` then prose. We return the most recent
+    ``limit`` blocks as-is so the agent sees prose summaries of what
+    just happened, not raw slug lists.
+    """
+    from deja.config import WIKI_DIR
+
+    obs_file = WIKI_DIR / "observations" / f"{datetime.now().strftime('%Y-%m-%d')}.md"
+    if not obs_file.exists():
+        return []
+    try:
+        text = obs_file.read_text(encoding="utf-8")
+    except OSError:
+        return []
+    blocks = [b.strip() for b in text.split("\n\n---\n\n") if b.strip()]
+    return blocks[-limit:]
+
+
 def _daily_briefing() -> str:
-    """Compose the one-call briefing Hermes opens every loop with."""
+    """Compose the one-call briefing an agent opens every loop with.
+
+    Five sections:
+      1. Date — today's weekday/date + wall time
+      2. User — first paragraph of the user's wiki page (headline only)
+      3. Tasks / Waiting for / Reminders — raw bullets from goals.md
+      4. Active projects — pages modified in last 7 days
+      5. Recent activity — last ~5 observation narratives (prose)
+
+    Narratives replace the old "Events in last 24h" slug list — prose
+    from the integrate loop is denser than bare filenames.
+    """
     from deja.config import WIKI_DIR
     from deja.identity import load_user
     from deja.goals import GOALS_PATH, _parse_sections
@@ -768,7 +819,7 @@ def _daily_briefing() -> str:
         f"## Date\n\n{today.strftime('%A, %B %-d, %Y')} ({today.strftime('%H:%M')})\n"
     )
     out.append(
-        f"## User\n\n**{user.name}** ({user.email})\n\n{user.profile_md.strip()}"
+        f"## User\n\n**{user.name}** ({user.email})\n\n{_profile_headline(user.profile_md)}"
     )
 
     # Goals slice — Tasks, Waiting for, Reminders
@@ -820,38 +871,15 @@ def _daily_briefing() -> str:
                 + "\n".join(f"- **{t}** — {s}" for _, t, s in active[:12])
             )
 
-    # Recent events — last 24h
-    events_dir = WIKI_DIR / "events"
-    if events_dir.is_dir():
-        recent_events: list[tuple[float, str]] = []
-        cutoff_ts = today.timestamp() - 86400
-        for day_dir in sorted(events_dir.iterdir(), reverse=True)[:3]:
-            if not day_dir.is_dir():
-                continue
-            for path in day_dir.glob("*.md"):
-                try:
-                    mtime = path.stat().st_mtime
-                    if mtime < cutoff_ts:
-                        continue
-                    title = path.stem
-                    try:
-                        body = path.read_text(encoding="utf-8")
-                        m = re.search(r"^# (.+)$", body, re.MULTILINE)
-                        if m:
-                            title = m.group(1).strip()
-                    except OSError:
-                        pass
-                    recent_events.append(
-                        (mtime, f"{day_dir.name}/{path.stem}: {title}")
-                    )
-                except OSError:
-                    continue
-        recent_events.sort(reverse=True)
-        if recent_events:
-            out.append(
-                "## Events in the last 24 hours\n\n"
-                + "\n".join(f"- {line}" for _, line in recent_events[:15])
-            )
+    # Recent activity — prose narratives from today's observations file.
+    # Denser than the legacy event-slug list: the integrate loop already
+    # summarizes "what happened" each cycle, so we just surface its
+    # voice to the agent instead of re-inventing the wheel.
+    narratives = _recent_narratives(limit=5)
+    if narratives:
+        out.append(
+            "## Recent activity (last cycles)\n\n" + "\n\n".join(narratives)
+        )
 
     return "\n\n---\n\n".join(out)
 
