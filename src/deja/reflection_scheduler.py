@@ -162,7 +162,7 @@ async def run_reflection() -> dict:
 
     async with _run_lock:
         from deja.dedup import run_dedup
-        from deja.event_themes import run_event_theme_sweep
+        from deja.events_to_projects import run_events_to_projects
 
         # 1. Dedup — merges same-entity pages.
         result = await run_dedup()
@@ -178,10 +178,11 @@ async def run_reflection() -> dict:
         # claims required, higher similarity threshold, or a different
         # detection approach altogether).
 
-        # 3. Event themes — proposes projects for recurring themes.
-        themes_result = await run_event_theme_sweep()
-        if isinstance(result, dict) and isinstance(themes_result, dict):
-            result["event_themes"] = themes_result
+        # 3. Events → projects — materializes project pages for
+        #    dangling slugs + recurring event themes.
+        etp_result = await run_events_to_projects()
+        if isinstance(result, dict) and isinstance(etp_result, dict):
+            result["events_to_projects"] = etp_result
 
         # 4. Audit trim — keep audit.jsonl bounded to ~7 days.
         try:
