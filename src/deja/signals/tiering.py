@@ -35,16 +35,20 @@ from deja.config import WIKI_DIR
 log = logging.getLogger(__name__)
 
 
-# Sources whose TEXT is authored by the user regardless of sender string.
-# Voice, typed content, and chat turns never come from anyone else; treat
-# them as Tier 1 by source alone. Browser visits count too — the user
-# chose to navigate there, which is a form of authored attention. That
-# choice is strong enough grounding for integrate to create a project
-# stub for a previously-unknown domain (e.g. visiting a new vendor's
-# site); integrate's existing "lean toward creating" rule on T1 does
-# the rest. Before this rule change, browser visits were T3 ambient and
-# a one-time visit to a new product page died in the raw log.
-_USER_AUTHORED_SOURCES = {"microphone", "voice", "typed", "chat", "browser"}
+# T1 = "things the user did, sent, or said" — anchor signals grounded
+# in the user's own actions. This set covers sources where the observation
+# is, by definition, the user acting:
+#
+#   microphone / voice — words the user spoke
+#   typed             — text the user typed
+#   chat              — prompts the user sent to an assistant
+#   browser           — pages the user navigated to (a thing they did)
+#
+# Other T1 paths are handled per-source in classify_tier (the "sent by
+# me" rules for email [SENT], imessage/whatsapp speaker=="You",
+# screenshot [SENT], and the "inner-circle did/sent/said" rules for
+# inbound from trusted contacts).
+_USER_ACTION_SOURCES = {"microphone", "voice", "typed", "chat", "browser"}
 
 # Sources where the "sender" string literally being "You" means outbound.
 # (Matches the convention in observations/imessage.py + whatsapp.py.)
@@ -368,7 +372,7 @@ def classify_tier(obs: dict) -> int:
     messaging_identity = speaker if speaker else sender
 
     # ---- Tier 1: user-authored or inner-circle authored ----
-    if source in _USER_AUTHORED_SOURCES:
+    if source in _USER_ACTION_SOURCES:
         return 1
 
     if source in _SELF_SENDER_SOURCES and messaging_identity == "You":
