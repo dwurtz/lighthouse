@@ -21,9 +21,12 @@ Per the user's rule: if a delta call fails we log.error and return []
 
 from __future__ import annotations
 
+import asyncio
+import base64
 import json
 import logging
 import os
+import re
 import subprocess
 import tempfile
 from datetime import datetime
@@ -35,6 +38,239 @@ from deja.observations.base import BaseObserver
 from deja.observations.types import Observation
 
 log = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Body extraction, quote stripping, consolidation
+# ---------------------------------------------------------------------------
+
+# Hard ceiling on a single extracted message body before quote-stripping.
+# Marketing newsletters can be 50k+ chars of HTML-entity-encoded fluff; we
+# don't want to feed those to integrate verbatim. If the body is obviously
+# huge we trust snippet + truncation to handle it.
+_BODY_CHAR_CAP = 6000
+
+# Cap on the final rendered thread text stored on the Observation. Bumped
+# up from the old 2000 (snippet-era) since full bodies legitimately need
+# more room. Consolidation kicks in well before this, so most threads
+# land well under the cap.
+_RENDERED_THREAD_CAP = 12000
+
+# Consolidation triggers. Either condition flips it on.
+_CONSOLIDATE_MIN_MESSAGES = 10
+_CONSOLIDATE_MIN_CHARS = 8000
+# When consolidating, keep this many most-recent messages verbatim.
+_CONSOLIDATE_KEEP_RECENT = 4
+
+# Model for consolidation — same cheap tier used for screenshot preprocess.
+_CONSOLIDATE_MODEL = "gemini-2.5-flash-lite"
+
+# Quote-reply divider patterns. First line matching any of these (or the
+# start of a contiguous ">"-prefixed block) cuts off quoted history.
+_QUOTE_DIVIDER_RES = [
+    re.compile(r"^On .+ wrote:\s*$"),
+    re.compile(r"^On .+,\s*$"),  # multi-line "On <date>,\n<name> wrote:"
+    re.compile(r"^-+\s*Original Message\s*-+\s*$", re.IGNORECASE),
+    re.compile(r"^-+\s*Forwarded message\s*-+\s*$", re.IGNORECASE),
+    re.compile(r"^Begin forwarded message:\s*$", re.IGNORECASE),
+    re.compile(r"^_{5,}\s*$"),  # Outlook's underscore divider
+    re.compile(r"^From:\s.+<.+@.+>\s*$"),  # Outlook inline quote header
+]
+
+
+def _decode_body_data(data: str) -> str:
+    """Base64url-decode a Gmail payload body.data blob into UTF-8 text."""
+    try:
+        raw = base64.urlsafe_b64decode(data + "==")  # padding tolerance
+        return raw.decode("utf-8", errors="replace")
+    except Exception:
+        return ""
+
+
+def _extract_plain_text_body(payload: dict) -> str:
+    """Walk a Gmail message payload and return the best plain-text body.
+
+    Preference order:
+      1. First ``text/plain`` part anywhere in the tree
+      2. Top-level body.data if the message is itself text/plain
+      3. Empty string — caller should fall back to snippet
+
+    HTML-only emails return "" here; that's fine — we fall back to the
+    250-char snippet via the caller, which is the same quality as the
+    pre-change behavior for that (rare, marketing-heavy) case.
+    """
+    if not payload:
+        return ""
+
+    # Walk breadth-first so we prefer shallower text/plain parts.
+    stack: list[dict] = [payload]
+    while stack:
+        node = stack.pop(0)
+        mime = node.get("mimeType", "") or ""
+        body = node.get("body") or {}
+        data = body.get("data")
+        if mime == "text/plain" and data:
+            text = _decode_body_data(data)
+            if text.strip():
+                return text
+        for child in node.get("parts", []) or []:
+            stack.append(child)
+
+    # No text/plain anywhere — last chance: maybe the top-level payload is
+    # text/plain with its body stored directly.
+    top_mime = payload.get("mimeType", "") or ""
+    top_data = (payload.get("body") or {}).get("data")
+    if top_mime.startswith("text/") and top_data:
+        return _decode_body_data(top_data)
+
+    return ""
+
+
+def _strip_quoted_reply(body: str) -> str:
+    """Cut the quoted-history tail off a reply body.
+
+    Pragmatic: scan top-to-bottom for the first divider line. Everything
+    from that line onward is quoted history. If nothing matches, return
+    the body as-is (rather than over-aggressively trimming).
+
+    Also strips the standard ``-- \\n`` signature delimiter when present,
+    and collapses trailing whitespace.
+    """
+    if not body:
+        return body
+
+    lines = body.splitlines()
+    cut_at: int | None = None
+
+    for i, ln in enumerate(lines):
+        stripped = ln.rstrip()
+
+        # Contiguous ">"-prefixed block: mark first such line as the cut.
+        if stripped.startswith(">"):
+            # Only cut if the PREVIOUS line was blank or the start of
+            # message — otherwise an inline quote inside the author's
+            # own text would eat their response. Gmail-style replies put
+            # a blank line + "On <date>..." header before the ">" block.
+            if i == 0 or not lines[i - 1].strip():
+                cut_at = i
+                break
+            # else: leave it and keep scanning — might hit a divider below.
+
+        for pat in _QUOTE_DIVIDER_RES:
+            if pat.match(stripped):
+                cut_at = i
+                break
+        if cut_at is not None:
+            break
+
+    if cut_at is not None:
+        lines = lines[:cut_at]
+
+    # Drop trailing blank lines.
+    while lines and not lines[-1].strip():
+        lines.pop()
+
+    # Strip standard signature delimiter ("-- " on its own line).
+    for i, ln in enumerate(lines):
+        if ln.rstrip() == "--" or ln == "-- ":
+            lines = lines[:i]
+            break
+
+    result = "\n".join(lines).rstrip()
+    # Guard against degenerate results — if stripping leaves us with
+    # almost nothing, prefer the original body (rare bottom-posted reply
+    # or a malformed divider match). Trigger on threshold ratio: if <10%
+    # of the original body survived, assume the cut was wrong.
+    if cut_at is not None and len(result) < 20 and len(body.strip()) > 40:
+        return body.rstrip()
+    return result
+
+
+def _render_messages_verbatim(messages: list[dict]) -> list[str]:
+    """Render a list of (headers, stripped_body) dicts to thread lines.
+
+    Each input element is the shape ``{"frm", "to", "date", "body"}``.
+    Output lines match the legacy indent/format used by downstream
+    integrate prompts.
+    """
+    lines: list[str] = []
+    for m in messages:
+        frm = m.get("frm", "")
+        to = m.get("to", "")
+        date = (m.get("date") or "")[:25]
+        body = (m.get("body") or "").strip()
+        if body:
+            # Indent body under the header line for readability.
+            body_block = "\n    ".join(body.splitlines())
+            lines.append(f"  {frm} → {to} ({date}):\n    {body_block}")
+        else:
+            # Body empty (e.g. HTML-only) — fall back to the snippet
+            # supplied by the caller.
+            snip = m.get("snippet", "")
+            lines.append(f"  {frm} → {to} ({date}): {snip}")
+    return lines
+
+
+def _consolidate_older_history(older: list[dict]) -> str | None:
+    """One-paragraph Gemini Flash-Lite summary of older thread messages.
+
+    Returns None on any failure — caller falls back to verbatim rendering.
+    """
+    if not older:
+        return None
+
+    # Build the text we're feeding the model.
+    rendered = "\n\n".join(
+        f"From: {m.get('frm','')}\nTo: {m.get('to','')}\nDate: {m.get('date','')}\n\n{(m.get('body') or '').strip()}"
+        for m in older
+    )
+
+    prompt = (
+        "Summarize this email thread history in ONE paragraph. Focus on "
+        "commitments, decisions, people, and dates. Omit pleasantries, "
+        "greetings, and signatures. Keep it terse — under 300 tokens.\n\n"
+        "Thread messages (oldest first):\n\n"
+        + rendered
+    )
+
+    try:
+        from deja.llm_client import GeminiClient
+    except Exception:
+        log.warning("email consolidate: GeminiClient import failed", exc_info=True)
+        return None
+
+    async def _run() -> str:
+        client = GeminiClient()
+        return await asyncio.wait_for(
+            client._generate(
+                model=_CONSOLIDATE_MODEL,
+                contents=prompt,
+                config_dict={
+                    "max_output_tokens": 400,
+                    "temperature": 0.0,
+                },
+            ),
+            timeout=15.0,
+        )
+
+    try:
+        summary = asyncio.run(_run())
+    except RuntimeError as e:
+        # asyncio.run blew up because we're already in a loop. That
+        # shouldn't happen from the sync collector, but log and bail
+        # rather than crashing the cycle.
+        log.warning("email consolidate: asyncio.run failed: %s", e)
+        return None
+    except asyncio.TimeoutError:
+        log.warning("email consolidate: timed out after 15s")
+        return None
+    except Exception:
+        log.warning("email consolidate: LLM call failed", exc_info=True)
+        return None
+
+    summary = (summary or "").strip()
+    if not summary:
+        return None
+    return summary
 
 
 # Subject substrings that mean system-generated noise (not the user's real mail)
@@ -227,9 +463,9 @@ def _get_thread(thread_id: str) -> list[dict]:
     headers, which then cascaded into every email being attributed to
     ``sender: "Unknown"`` and tier-3'd as noise.
 
-    We fetch full messages but only read the handful of headers we need
-    (From/To/Subject/Date) in _build_observation_from_thread. The body
-    is discarded.
+    We fetch full messages so _build_observation_from_thread can read
+    the headers (From/To/Subject/Date) AND extract the plain-text body
+    for quote-stripping + consolidation.
     """
     try:
         result = subprocess.run(
@@ -271,15 +507,19 @@ def _build_observation_from_thread(
     latest_from = ""
     latest_to = ""
     latest_date = ""
-    thread_lines: list[str] = []
+    # Per-message structured records — used for rendering and (when the
+    # thread is long) consolidation. Each record keeps the full stripped
+    # body so the consolidator has the real content, not just the snippet.
+    per_msg: list[dict] = []
     # True iff ANY message in this thread was sent by the user (has the
     # Gmail SENT label). An engaged thread — even an incoming-only reply
     # to it — is Tier 1 because the user has explicitly committed to the
     # conversation by responding before.
     user_replied_to_thread = False
     for tm in thread_messages:
+        payload = tm.get("payload", {}) or {}
         hdrs = {h.get("name"): h.get("value", "")
-                for h in tm.get("payload", {}).get("headers", [])}
+                for h in payload.get("headers", [])}
         if "SENT" in (tm.get("labelIds") or []):
             user_replied_to_thread = True
         if not subject:
@@ -288,19 +528,75 @@ def _build_observation_from_thread(
         to = hdrs.get("To", "")
         date = hdrs.get("Date", "")
         snip = (tm.get("snippet") or "").replace("&#39;", "'").replace("&amp;", "&").replace("&quot;", '"')
+
+        # Full plain-text body, stripped of quoted history. Fall back to
+        # the snippet only when extraction yields nothing.
+        body_raw = _extract_plain_text_body(payload)
+        if len(body_raw) > _BODY_CHAR_CAP:
+            body_raw = body_raw[:_BODY_CHAR_CAP]
+        body_clean = _strip_quoted_reply(body_raw).strip() if body_raw else ""
+        if not body_clean:
+            body_clean = snip[:250]
+
         latest_from = frm or latest_from
         latest_to = to or latest_to
         latest_date = date or latest_date
-        thread_lines.append(f"  {frm} → {to} ({date[:25]}): {snip[:250]}")
+        per_msg.append({
+            "frm": frm,
+            "to": to,
+            "date": date,
+            "body": body_clean,
+            "snippet": snip[:250],
+        })
 
     if any(n.lower() in subject.lower() for n in _SYSTEM_NOISE):
         return None
 
     n = len(thread_messages)
+
     if n == 1:
-        text = f"{subject} — {thread_lines[0].strip()}"
+        # Single message path — just render body under a header line.
+        m = per_msg[0]
+        body = (m.get("body") or "").strip()
+        header = f"{m['frm']} → {m['to']} ({(m.get('date') or '')[:25]})"
+        if body:
+            text = f"{subject} — {header}\n    " + "\n    ".join(body.splitlines())
+        else:
+            text = f"{subject} — {header}: {m.get('snippet','')}"
     else:
-        text = f"EMAIL THREAD ({n} messages) — {subject}\n" + "\n".join(thread_lines)
+        # Multi-message thread. Decide whether to consolidate.
+        total_body_chars = sum(len((m.get("body") or "")) for m in per_msg)
+        should_consolidate = (
+            n >= _CONSOLIDATE_MIN_MESSAGES
+            or total_body_chars >= _CONSOLIDATE_MIN_CHARS
+        )
+
+        if should_consolidate:
+            keep = min(_CONSOLIDATE_KEEP_RECENT, max(1, n - 1))
+            older = per_msg[:-keep]
+            recent = per_msg[-keep:]
+            summary = _consolidate_older_history(older)
+            if summary:
+                recent_lines = _render_messages_verbatim(recent)
+                text = (
+                    f"EMAIL THREAD ({n} messages) — {subject}\n"
+                    f"## Earlier in this thread ({len(older)} messages summarized)\n"
+                    f"{summary}\n\n"
+                    f"## Recent messages ({len(recent)} verbatim)\n"
+                    + "\n".join(recent_lines)
+                )
+            else:
+                # Consolidation failed — fall back to full verbatim render
+                # rather than dropping the signal.
+                log.info(
+                    "email: consolidation unavailable for %d-msg thread, rendering verbatim",
+                    n,
+                )
+                thread_lines = _render_messages_verbatim(per_msg)
+                text = f"EMAIL THREAD ({n} messages) — {subject}\n" + "\n".join(thread_lines)
+        else:
+            thread_lines = _render_messages_verbatim(per_msg)
+            text = f"EMAIL THREAD ({n} messages) — {subject}\n" + "\n".join(thread_lines)
 
     if direction == "outgoing":
         # Direction comes from Gmail's SENT label on the message — that's
@@ -334,7 +630,7 @@ def _build_observation_from_thread(
     return Observation(
         source="email",
         sender=sender_label[:100],
-        text=text[:2000],
+        text=text[:_RENDERED_THREAD_CAP],
         timestamp=ts,
         id_key=id_key,
     )
