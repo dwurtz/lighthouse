@@ -98,6 +98,8 @@ The narrative is for {user_first_name} to read back and judge whether you're not
 
 **No filler.** Never append "no other substantive activity was observed", "nothing else of note", or similar negations after describing what happened. If you've named the activity, the reader already knows the rest was noise. Either describe the activity and stop, or say "Nothing substantive this window" and stop. Not both.
 
+**Surface the specifics.** When a signal contains a concrete fact — a time, date, address, amount, person's role, pickup window, deadline, price, room number — the narrative must include it. "Confirmed Saturday's practice time" is failure if the signal said "4-7 PM with 6:30 conditioning." Write "Coach Rob confirmed Saturday practice at 4-7 PM, conditioning at 6:30". "Joan sent the quote" is failure if the quote was $1,000. Write "Joan sent the $1K quote." The narrative is useless without the specifics the user is tracking; abstracted summaries are what made the vague email `snippet[:250]` era fail.
+
 # Output
 
 Return JSON. Nothing outside.
