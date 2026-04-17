@@ -66,21 +66,25 @@ Schedule new reminders only on genuine deferral (task with deadline, new waiting
 
 # Event pages
 
-Path: `events/YYYY-MM-DD/<slug>.md`. Frontmatter:
+Path: `events/YYYY-MM-DD/<slug>.md`. For each event update, emit `event_metadata`:
 
-    ---
-    date: 2026-04-16
-    time: "14:00"
-    people: [sam-lee]
-    projects: [q2-roadmap]
-    ---
+    "event_metadata": {{
+      "date": "2026-04-16",
+      "time": "14:00",
+      "people": ["sam-lee"],
+      "projects": ["q2-roadmap"]
+    }}
 
-- `time:` always double-quoted. Empty: `time: ""`.
-- `people:` / `projects:` are flat slug lists. `[self]` for solo, `[]` when no project fits. Never link a weak project just to avoid `[]`.
+- `event_metadata` is REQUIRED for every event update/create. The write path builds the YAML block from these fields — you do not write `---` yourself.
+- `time:` is always a string. Empty: `""`.
+- `people` / `projects` are flat slug lists. `["self"]` for solo, `[]` when no project fits. Never link a weak project just to avoid `[]`.
+- Omit `event_metadata` entirely for people and projects updates.
 
-# Frontmatter discipline
+# Frontmatter ownership
 
-Every page starts with a `---` YAML block. When updating: **preserve every existing key verbatim** — `self`, `preferred_name`, `emails`, `phones`, `aliases`, `inner_circle`. Add keys; never drop them. Drop empty fields only when creating a page for the first time. Do NOT add `company`, `domains`, or `keywords` — those fields are not read by anything and were retired.
+You do NOT emit frontmatter for people or projects. The write path preserves existing YAML verbatim and synthesizes minimal frontmatter on creation — `emails`, `phones`, `aliases`, `self`, `preferred_name`, `inner_circle` are owned by contact enrichment, onboarding, and the user's manual edits, not by you. Your `body_markdown` must start at the first `#` heading (or prose) — no leading `---` YAML block.
+
+Event pages are different: you own them. Emit their metadata as the structured `event_metadata` field on the update (see Output). The write path will serialize it into YAML.
 
 # Observation narrative
 
@@ -100,7 +104,14 @@ Return JSON. Nothing outside.
   "observation_narrative": "2–5 sentences describing what you're observing this cycle, written in concrete prose.",
   "reasoning": "One paragraph — the threads you saw and what you decided about wiki updates.",
   "wiki_updates": [
-    {{"category": "people|projects|events", "slug": "kebab-slug or YYYY-MM-DD/slug", "action": "update|create|delete", "content": "full markdown body", "reason": "one sentence — quote the triggering signal"}}
+    {{
+      "category": "people|projects|events",
+      "slug": "kebab-slug or YYYY-MM-DD/slug",
+      "action": "update|create|delete",
+      "body_markdown": "# Title\n\nProse body and ## Recent list — NO leading YAML block.",
+      "event_metadata": {{"date": "2026-04-16", "time": "14:30", "people": ["slug"], "projects": ["slug"]}},
+      "reason": "one sentence — quote the triggering signal"
+    }}
   ],
   "goal_actions": [
     {{"type": "calendar_create|calendar_update|draft_email|create_task|complete_task|notify", "params": {{}}, "reason": "which automation rule + which signal"}}

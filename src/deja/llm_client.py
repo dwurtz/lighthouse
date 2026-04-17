@@ -97,6 +97,80 @@ def _truncate_goals_text(text: str) -> str:
     return rendered
 
 
+def _normalize_wiki_update(upd: dict) -> dict:
+    """Bring one wiki_update dict into the new schema.
+
+    The new integrate contract (2026-04-16) is:
+
+        {category, slug, action, body_markdown, event_metadata?, reason}
+
+    Old integrate responses (bundled apps, onboarding, contradictions)
+    emit ``content`` instead — a full markdown blob that may start with
+    a YAML frontmatter block. Translate those here so downstream sees
+    one shape, while leaving the original keys intact as a fallback.
+
+    Rules:
+      * If ``body_markdown`` is already set, leave the dict alone
+        (already new-shape) but opportunistically drop a leading
+        frontmatter block the model slipped in.
+      * Else read ``content``. For events, pull the YAML block into
+        ``event_metadata`` (best-effort) and put the remainder into
+        ``body_markdown``. For people/projects, strip any leading YAML
+        block — frontmatter ownership moved to the write path.
+
+    Never raises on malformed shapes. Unknown categories pass through
+    unchanged (apply_updates' validator will reject them).
+    """
+    # Already new-shape.
+    if isinstance(upd.get("body_markdown"), str):
+        try:
+            from deja.wiki import _strip_leading_frontmatter
+            upd["body_markdown"] = _strip_leading_frontmatter(upd["body_markdown"])
+        except Exception:
+            pass
+        return upd
+
+    content = upd.get("content")
+    if not isinstance(content, str) or not content:
+        return upd
+
+    category = upd.get("category")
+
+    if category == "events" and not isinstance(upd.get("event_metadata"), dict):
+        # Best-effort YAML extraction from the legacy `content` field.
+        try:
+            import yaml as _yaml
+            from deja.wiki import canonicalize_frontmatter, extract_frontmatter
+            repaired, _ = canonicalize_frontmatter(content)
+            fm_block, body = extract_frontmatter(repaired)
+            if fm_block:
+                inner = "\n".join(
+                    ln for ln in fm_block.splitlines()
+                    if ln.strip() != "---"
+                ).strip()
+                try:
+                    parsed = _yaml.safe_load(inner) or {}
+                    if isinstance(parsed, dict):
+                        upd["event_metadata"] = parsed
+                except _yaml.YAMLError:
+                    pass
+                upd["body_markdown"] = body
+                return upd
+        except Exception:
+            pass
+        upd["body_markdown"] = content
+        return upd
+
+    # people / projects: strip any leading frontmatter block the model
+    # slipped in; the write path owns YAML for these pages now.
+    try:
+        from deja.wiki import _strip_leading_frontmatter
+        upd["body_markdown"] = _strip_leading_frontmatter(content)
+    except Exception:
+        upd["body_markdown"] = content
+    return upd
+
+
 def _parse_json(raw: str) -> Any:
     """Best-effort JSON extraction from LLM output.
 
@@ -440,6 +514,16 @@ class GeminiClient:
         result.setdefault("wiki_updates", [])
         result.setdefault("observation_narrative", "")
 
+        # Normalize wiki_updates to the new body_markdown + event_metadata
+        # shape. Old bundled apps and onboarding still emit `content`;
+        # wiki.apply_updates also accepts that, but normalizing here makes
+        # downstream code (shadow-eval record, any new consumer) see a
+        # consistent schema. Passthrough when already normalized.
+        result["wiki_updates"] = [
+            _normalize_wiki_update(u) for u in (result.get("wiki_updates") or [])
+            if isinstance(u, dict)
+        ]
+
         # Save shadow comparison after the production call completes —
         # never block the real cycle on the shadow. If the shadow task
         # fails or times out we just skip serialization; the production
@@ -629,6 +713,13 @@ class GeminiClient:
 
         result.setdefault("reasoning", "")
         result.setdefault("wiki_updates", [])
+        # Onboarding prompt still uses the old `content` shape — normalize
+        # so downstream code sees one schema. apply_updates accepts both,
+        # but this keeps the on-disk shadow-eval / debug artifacts clean.
+        result["wiki_updates"] = [
+            _normalize_wiki_update(u) for u in (result.get("wiki_updates") or [])
+            if isinstance(u, dict)
+        ]
         return result
 
     # Screenshot analysis removed — OCR'd locally via the ``deja-ocr``

@@ -22,6 +22,8 @@ import re
 from datetime import datetime
 from pathlib import Path
 
+import yaml
+
 log = logging.getLogger(__name__)
 
 
@@ -102,6 +104,115 @@ def extract_frontmatter(content: str) -> tuple[str, str]:
     if not m:
         return "", content
     return m.group(1), content[m.end():]
+
+
+def _strip_leading_frontmatter(body: str) -> str:
+    """Defensive: if `body` starts with a ``---\\n...\\n---\\n`` block, drop it.
+
+    Structural guard for the new integrate output contract where
+    ``body_markdown`` must NOT include a YAML frontmatter block — the
+    write path owns frontmatter now. If the model slips and emits one
+    anyway, we strip it rather than writing it and clobbering whatever
+    was there before.
+    """
+    if not body:
+        return body
+    m = _FRONTMATTER_RE.match(body)
+    if m:
+        return body[m.end():].lstrip("\n")
+    # Also catch the one-line corruption shape here, so body_markdown
+    # that accidentally starts with `---date: ...---` can't leak onto
+    # the page.
+    m = _ONELINE_FRONTMATTER_RE.match(body)
+    if m:
+        return body[m.end():].lstrip("\n")
+    return body
+
+
+def _serialize_event_yaml(meta: dict) -> str:
+    """Build the event frontmatter block from `event_metadata`.
+
+    Produces the multi-line shape the rest of the codebase expects:
+
+        date: 2026-04-16
+        time: "14:30"
+        people: [sam-lee]
+        projects: [q2-roadmap]
+
+    `time` is always a double-quoted string (empty → ``""``). List fields
+    are flat inline slug lists. Never raises — missing/odd fields fall
+    back to safe defaults.
+    """
+    date = str(meta.get("date") or datetime.now().strftime("%Y-%m-%d"))
+    time_val = meta.get("time", "")
+    if time_val is None:
+        time_val = ""
+    time_str = str(time_val).strip().strip('"').strip("'")
+
+    def _slug_list(key: str) -> str:
+        raw = meta.get(key) or []
+        if isinstance(raw, str):
+            raw = [raw]
+        slugs = [slugify(str(s)) for s in raw if str(s).strip()]
+        return "[" + ", ".join(slugs) + "]"
+
+    people_str = _slug_list("people")
+    projects_str = _slug_list("projects")
+
+    return (
+        f"date: {date}\n"
+        f'time: "{time_str}"\n'
+        f"people: {people_str}\n"
+        f"projects: {projects_str}"
+    )
+
+
+def _read_existing_frontmatter(path: Path) -> str:
+    """Read `path`, extract its YAML frontmatter as a canonical multi-line
+    block (without the surrounding ``---`` fences).
+
+    Returns ``""`` if the file doesn't exist, has no frontmatter, or the
+    YAML is empty. Repairs one-line corruption along the way so the
+    splice is always clean.
+    """
+    if not path.exists():
+        return ""
+    text = path.read_text()
+    # Repair one-line corruption first so extraction succeeds.
+    text, _ = canonicalize_frontmatter(text)
+    fm_block, _ = extract_frontmatter(text)
+    if not fm_block:
+        return ""
+    # Strip the opening/closing --- fences and any surrounding whitespace.
+    inner_lines = [
+        ln for ln in fm_block.splitlines()
+        if ln.strip() != "---"
+    ]
+    inner = "\n".join(inner_lines).strip()
+    if not inner:
+        return ""
+    # Parse + re-dump is tempting for canonicalization, but we want
+    # verbatim preservation — yaml.safe_load/safe_dump would reorder
+    # keys, re-quote strings, and change flow/block style. Returning
+    # `inner` as-is matches the task's requirement: if the old YAML has
+    # keys, re-serialize them verbatim. We do validate with safe_load
+    # so we can log a warning if the existing YAML is malformed (but
+    # still write it back unchanged — the user's data wins).
+    try:
+        yaml.safe_load(inner)
+    except yaml.YAMLError:
+        log.warning(
+            "wiki: existing frontmatter on %s has invalid YAML — "
+            "preserving verbatim anyway",
+            path,
+        )
+    return inner
+
+
+def _synthesize_person_frontmatter(slug: str) -> str:
+    """Minimal frontmatter for a newly-created people page."""
+    title = slug.replace("-", " ").title()
+    return f"preferred_name: {title}"
 
 
 def _split_inline_yaml(inline: str) -> list[tuple[str, str]]:
@@ -290,12 +401,124 @@ def render_for_prompt(pages: list[dict] | None = None) -> str:
     return "\n\n".join(chunks)
 
 
+def _coerce_body_and_metadata(upd: dict) -> tuple[str, dict | None]:
+    """Extract (body_markdown, event_metadata) from an update dict.
+
+    Accepts the new integrate schema (``body_markdown`` + optional
+    ``event_metadata``) and the legacy shape (``content``, possibly with
+    a YAML block at the top). Transition-period back-compat is load-
+    bearing because:
+
+      * the bundled app may still be running an older integrate prompt,
+      * onboarding + contradictions both still write ``content``.
+
+    Returns ``("", None)`` for updates with no usable body.
+    """
+    body = upd.get("body_markdown")
+    meta = upd.get("event_metadata")
+
+    if body is None:
+        # Legacy: ``content`` might carry a ---YAML--- block plus body.
+        # For people/projects we drop any leading frontmatter (ownership
+        # moved elsewhere). For events, best-effort extract the YAML so
+        # we can still emit event_metadata.
+        legacy = upd.get("content") or ""
+        if not legacy:
+            return "", meta if isinstance(meta, dict) else None
+
+        if upd.get("category") == "events" and meta is None:
+            # Try to pull event metadata out of the old `content` YAML.
+            repaired, _ = canonicalize_frontmatter(legacy)
+            fm_block, rest = extract_frontmatter(repaired)
+            if fm_block:
+                inner = "\n".join(
+                    ln for ln in fm_block.splitlines()
+                    if ln.strip() != "---"
+                ).strip()
+                try:
+                    parsed = yaml.safe_load(inner) or {}
+                    if isinstance(parsed, dict):
+                        meta = parsed
+                except yaml.YAMLError:
+                    log.debug(
+                        "legacy event content had unparseable YAML — "
+                        "writing body only",
+                    )
+                body = rest
+            else:
+                body = legacy
+        else:
+            # People / projects legacy path — strip any YAML the model
+            # may have left at the top; frontmatter is owned elsewhere.
+            body = _strip_leading_frontmatter(legacy)
+
+    if not isinstance(body, str):
+        body = str(body or "")
+    # Defensive cleanup on the new-shape path too.
+    body = _strip_leading_frontmatter(body)
+    if not isinstance(meta, dict):
+        meta = None
+    return body, meta
+
+
+def _compose_page(
+    category: str,
+    slug: str,
+    action: str,
+    body: str,
+    event_meta: dict | None,
+) -> str | None:
+    """Build the final file text for one update. Returns None to skip."""
+    body = body.rstrip()
+    if category == "events":
+        if not event_meta:
+            log.warning(
+                "Skipping event update %s/%s — missing event_metadata "
+                "(integrate contract requires it for events)",
+                category, slug,
+            )
+            return None
+        yaml_block = _serialize_event_yaml(event_meta)
+        return f"---\n{yaml_block}\n---\n{body}\n"
+
+    # people / projects: preserve existing frontmatter verbatim.
+    path = _resolve_page_path(category, slug)
+    existing = _read_existing_frontmatter(path)
+    if existing:
+        return f"---\n{existing}\n---\n{body}\n"
+
+    # No existing frontmatter.
+    if action == "create" and category == "people":
+        return f"---\n{_synthesize_person_frontmatter(slug)}\n---\n{body}\n"
+    # Projects or a stray update on a page without prior YAML:
+    # write an empty frontmatter block so the structural shape is
+    # consistent across the wiki.
+    return f"---\n---\n{body}\n"
+
+
 def apply_updates(updates: list[dict]) -> int:
     """Apply wiki updates returned by the unified analysis call.
 
-    Each update is {category, slug, action, content, reason}. Writes each page,
-    rebuilds the index, refreshes the QMD search index, and commits the
-    changes to git. Returns the number of pages successfully written.
+    Each update is ``{category, slug, action, body_markdown,
+    event_metadata?, reason}``. Legacy ``content`` is still accepted
+    (transition-period back-compat) and routed through the same
+    splicing path.
+
+    Writes each page, rebuilds the index, refreshes the QMD search
+    index, and commits the changes to git. Returns the number of pages
+    successfully written.
+
+    Frontmatter authority (2026-04-16 structural change):
+      * ``people`` / ``projects`` frontmatter is OWNED by other code
+        paths (contact enrichment, onboarding, the user's manual edits).
+        Integrate's body is spliced onto the existing YAML verbatim.
+      * ``events`` frontmatter IS owned by integrate — synthesized from
+        the structured ``event_metadata`` field.
+
+    This eliminates the recurring frontmatter-clobber bug where an
+    integrate cycle would drop ``inner_circle: true`` / ``phones`` /
+    ``emails`` on rewrite. There is no prompt rule to enforce anymore
+    — the authority simply isn't there.
     """
     if not updates:
         return 0
@@ -342,12 +565,17 @@ def apply_updates(updates: list[dict]) -> int:
                 )
             continue
 
-        content = upd.get("content", "")
-        if not content:
-            log.warning("Skipping invalid wiki update (no content): %s", upd)
+        body, event_meta = _coerce_body_and_metadata(upd)
+        if not body:
+            log.warning("Skipping invalid wiki update (no body): %s", upd)
             continue
+
+        composed = _compose_page(category, slug, action, body, event_meta)
+        if composed is None:
+            continue
+
         try:
-            write_page(category, slug, content)
+            write_page(category, slug, composed)
             applied += 1
             changed_slugs.append(f"{category}/{slug}")
             log.info("Wiki %s: %s/%s — %s",
