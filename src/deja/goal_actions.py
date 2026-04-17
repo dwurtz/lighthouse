@@ -258,6 +258,7 @@ def _send_email_to_self(params: dict, reason: str) -> None:
     summaries that are readable on mobile.
     """
     import base64
+    from email.message import EmailMessage
 
     subject = params.get("subject", "")
     body = params.get("body", "")
@@ -276,14 +277,17 @@ def _send_email_to_self(params: dict, reason: str) -> None:
     if not subject.startswith("[Deja]"):
         subject = f"[Deja] {subject}"
 
-    raw_msg = (
-        f"From: {user_email}\n"
-        f"To: {user_email}\n"
-        f"Subject: {subject}\n"
-        f"\n"
-        f"{body}"
-    )
-    encoded = base64.urlsafe_b64encode(raw_msg.encode()).decode()
+    # Build via EmailMessage so non-ASCII in subject + body are encoded
+    # correctly (RFC 2047 for headers, MIME charset declared for body).
+    # A previous version built the raw RFC 822 by string concatenation
+    # and emitted naked UTF-8 bytes for the Subject header, which Gmail
+    # rendered as mojibake ("Ã¢Â€Â\"" in place of an em-dash).
+    msg = EmailMessage()
+    msg["From"] = user_email
+    msg["To"] = user_email
+    msg["Subject"] = subject
+    msg.set_content(body or "")
+    encoded = base64.urlsafe_b64encode(msg.as_bytes()).decode()
 
     svc = _service("gmail", "v1")
     if svc is None:
