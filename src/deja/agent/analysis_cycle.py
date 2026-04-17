@@ -408,16 +408,35 @@ async def _run_analysis_cycle_body(
     # Append observation narratives to ~/Deja/observations/YYYY-MM-DD.md
     # so the user can skim the quality of what Deja is noticing,
     # independent of whether any wiki update fired this cycle.
+    #
+    # Run the narrative through linkify_body so entity mentions
+    # ("Jon Sturos", "Dominique") become [[jon-sturos|Jon Sturos]]
+    # links. Integrate's prompt rule ("wrap entity names in [[slug]]")
+    # applies to entity prose and event bodies; narratives skip that
+    # step in the model, and wiki_linkify's regular sweep only covers
+    # people/ and projects/ pages. Post-processing here is the
+    # deterministic bridge — the narrative becomes navigable in
+    # Obsidian without asking the model to track the slug catalog.
     if all_narratives:
         try:
             from deja.config import WIKI_DIR
+            from deja.wiki_linkify import build_catalog, linkify_body
+
+            catalog = build_catalog()
+            linked: list[str] = []
+            for nar in all_narratives:
+                try:
+                    new_body, _ = linkify_body(nar, catalog)
+                    linked.append(new_body)
+                except Exception:
+                    linked.append(nar)
 
             now_local = datetime.now()
             obs_dir = WIKI_DIR / "observations"
             obs_dir.mkdir(parents=True, exist_ok=True)
             obs_file = obs_dir / f"{now_local.strftime('%Y-%m-%d')}.md"
             header = now_local.strftime("## %H:%M:%S")
-            body = "\n\n".join(all_narratives)
+            body = "\n\n".join(linked)
             entry = f"{header}\n\n{body}\n\n---\n\n"
             with obs_file.open("a", encoding="utf-8") as f:
                 f.write(entry)
