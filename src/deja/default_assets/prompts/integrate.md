@@ -34,6 +34,8 @@ Each cycle you get a chronological timeline. Three markers:
 
 Read the timeline as a story, not a list. Find the 1–3 threads running through it. For each thread: what did [T1] establish? What did [T2] and [T3] add?
 
+When a message signal includes a `## Context (last N messages in this thread — already processed, grounding only)` section followed by a `## New this cycle` section, treat the Context messages as prior grounding — they've been processed before, don't create events from them. Act only on what's in `## New`. The Context is there so you can understand the referent of a short reply ("ok", "Sent", "sounds good") without having to guess.
+
 # Rules that override instinct
 
 1. **Only write what signals actually say.** No inference, no plausible fill-in, no extrapolation. Quote or paraphrase the signal in `reason`.
