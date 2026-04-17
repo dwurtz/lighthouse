@@ -496,6 +496,81 @@ def _compose_page(
     return f"---\n---\n{body}\n"
 
 
+def _autocreate_referenced_projects(updates: list[dict]) -> list[dict]:
+    """Guarantee 'no dangling project slugs' by auto-appending stub
+    `create` entries for any event-referenced project that doesn't
+    exist on disk AND isn't being created in this same batch.
+
+    The model is told (in the integrate prompt) to pair any novel
+    slug with a `create` wiki_update. That's best-effort. This
+    function is the structural enforcement — deterministic,
+    no-LLM, runs inline before any write hits disk.
+
+    Stubs are minimal: a titleized heading + one-sentence placeholder.
+    Next integrate cycle can enrich the page naturally; dedup merges
+    near-duplicates on its 3x/day sweep. The point is that the wiki
+    is always internally consistent — every `[[slug]]` link resolves.
+    """
+    # Collect slugs being created in THIS batch (any category).
+    batch_creates: set[str] = set()
+    for upd in updates:
+        if (upd.get("action") or "").lower() == "create" and upd.get("category") == "projects":
+            s = upd.get("slug", "").strip()
+            if s:
+                batch_creates.add(s)
+
+    # Collect every project slug referenced by an event in this batch.
+    referenced: list[str] = []
+    for upd in updates:
+        if upd.get("category") != "events":
+            continue
+        meta = upd.get("event_metadata") or {}
+        for s in (meta.get("projects") or []):
+            if isinstance(s, str) and s.strip():
+                referenced.append(s.strip())
+
+    # For each referenced slug: exists on disk? in this batch? else stub.
+    appended: set[str] = set()
+    new_stubs: list[dict] = []
+    projects_dir = WIKI_DIR / "projects"
+    for slug in referenced:
+        if slug in batch_creates or slug in appended:
+            continue
+        if (projects_dir / f"{slug}.md").exists():
+            continue
+        # Auto-create a stub.
+        title = slug.replace("-", " ").title()
+        body = (
+            f"# {title}\n\n"
+            f"*Auto-created from event reference. Refine in the next cycle.*\n\n"
+            f"## Recent\n"
+        )
+        new_stubs.append({
+            "category": "projects",
+            "slug": slug,
+            "action": "create",
+            "body_markdown": body,
+            "reason": (
+                "auto-synthesized stub — an event in this batch referenced "
+                f"projects/{slug} but no page existed and no explicit create was emitted"
+            ),
+        })
+        appended.add(slug)
+
+    if new_stubs:
+        log.info(
+            "wiki: auto-created %d stub project page(s) to resolve dangling "
+            "event refs: %s",
+            len(new_stubs),
+            ", ".join(s["slug"] for s in new_stubs),
+        )
+        # Prepend so the project creates run before the event writes that
+        # reference them — the order doesn't affect correctness (filesystem
+        # sees both either way) but it matches natural causality.
+        return new_stubs + list(updates)
+    return updates
+
+
 def apply_updates(updates: list[dict]) -> int:
     """Apply wiki updates returned by the unified analysis call.
 
@@ -524,6 +599,16 @@ def apply_updates(updates: list[dict]) -> int:
         return 0
 
     ensure_dirs()
+
+    # Enforce the "no dangling project slugs" invariant: any event
+    # referencing a project slug must resolve to an existing page. If
+    # the batch has an event pointing at a slug that (a) doesn't exist
+    # on disk and (b) isn't being created in this same batch, auto-
+    # append a stub `create` update for it. This guarantees the
+    # filesystem never holds a dangling link regardless of what the
+    # model emitted. Dedup's 3x/day pass handles any near-duplicate
+    # stubs that accumulate over time. See ship-notes 2026-04-17.
+    updates = _autocreate_referenced_projects(updates)
 
     # Make sure the wiki is a git repo before we write anything
     try:

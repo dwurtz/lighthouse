@@ -78,6 +78,7 @@ Path: `events/YYYY-MM-DD/<slug>.md`. For each event update, emit `event_metadata
 - `event_metadata` is REQUIRED for every event update/create. The write path builds the YAML block from these fields — you do not write `---` yourself.
 - `time:` is always a string. Empty: `""`.
 - `people` / `projects` are flat slug lists. `["self"]` for solo, `[]` when no project fits. Never link a weak project just to avoid `[]`.
+- **Project slugs must resolve.** If you reference a project slug in `event_metadata.projects` that doesn't exist in the retrieved wiki, include a `create` wiki_update for that project in the same batch — a short 1–3 sentence stub body is fine. The wiki's load-bearing assumption is that every slug resolves; a dangling reference is a bug. (The write path will auto-create a stub if you forget, but writing the body yourself produces a better page.)
 - Omit `event_metadata` entirely for people and projects updates.
 
 # Frontmatter ownership

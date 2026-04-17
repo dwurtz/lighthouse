@@ -184,6 +184,12 @@ def test_event_update_produces_quoted_time(isolated_home, monkeypatch):
     """time: is always double-quoted. The rest of the code depends on it."""
     _stub_side_effects(monkeypatch)
 
+    # Pre-create the project so the auto-create stub path doesn't fire
+    # (that path is covered by dedicated tests below).
+    projects_dir = wiki_mod.WIKI_DIR / "projects"
+    projects_dir.mkdir(parents=True, exist_ok=True)
+    (projects_dir / "school-carpool.md").write_text("---\n---\n# School carpool\n")
+
     applied = wiki_mod.apply_updates([{
         "category": "events",
         "slug": "2026-04-16/carpool-plan",
@@ -407,3 +413,96 @@ def test_strip_leading_frontmatter_helper():
     # One-line corruption shape also handled.
     assert f('---date: 2026-04-16---\n# T\n') == "# T\n"
     assert f("") == ""
+
+
+# ---------------------------------------------------------------------------
+# Auto-create invariant — no dangling project refs survive apply_updates
+# ---------------------------------------------------------------------------
+
+
+def test_autocreate_stub_when_event_references_nonexistent_project(isolated_home, monkeypatch):
+    """Event references a project that doesn't exist AND isn't being
+    created in this batch → write path synthesizes a stub create."""
+    _stub_side_effects(monkeypatch)
+
+    applied = wiki_mod.apply_updates([{
+        "category": "events",
+        "slug": "2026-04-17/test-event",
+        "action": "create",
+        "body_markdown": "# Test event\n\nBody.\n",
+        "event_metadata": {
+            "date": "2026-04-17",
+            "time": "10:00",
+            "people": ["david-wurtz"],
+            "projects": ["made-up-project"],
+        },
+        "reason": "test",
+    }])
+    # Two writes: the event + the auto-created stub project.
+    assert applied == 2
+    stub = wiki_mod.WIKI_DIR / "projects" / "made-up-project.md"
+    assert stub.exists(), "stub project should have been auto-created"
+    text = stub.read_text()
+    assert "Made Up Project" in text  # titleized heading
+    assert "Auto-created from event reference" in text
+
+
+def test_no_autocreate_when_project_exists(isolated_home, monkeypatch):
+    """Event references an existing project → no stub created."""
+    _stub_side_effects(monkeypatch)
+
+    # Pre-create the project
+    projects_dir = wiki_mod.WIKI_DIR / "projects"
+    projects_dir.mkdir(parents=True, exist_ok=True)
+    (projects_dir / "real-project.md").write_text("---\n---\n# Real project\n")
+
+    applied = wiki_mod.apply_updates([{
+        "category": "events",
+        "slug": "2026-04-17/other-event",
+        "action": "create",
+        "body_markdown": "# Other event\n\nBody.\n",
+        "event_metadata": {
+            "date": "2026-04-17",
+            "time": "10:00",
+            "people": ["david-wurtz"],
+            "projects": ["real-project"],
+        },
+        "reason": "test",
+    }])
+    # Only the event — no stub.
+    assert applied == 1
+
+
+def test_no_autocreate_when_create_already_in_batch(isolated_home, monkeypatch):
+    """Event references a slug that's being created in this same batch
+    → no duplicate stub."""
+    _stub_side_effects(monkeypatch)
+
+    applied = wiki_mod.apply_updates([
+        {
+            "category": "projects",
+            "slug": "brand-new-project",
+            "action": "create",
+            "body_markdown": "# Brand new project\n\nA real body.\n",
+            "reason": "integrate created it explicitly",
+        },
+        {
+            "category": "events",
+            "slug": "2026-04-17/kickoff-event",
+            "action": "create",
+            "body_markdown": "# Kickoff event\n\nBody.\n",
+            "event_metadata": {
+                "date": "2026-04-17",
+                "time": "10:00",
+                "people": ["david-wurtz"],
+                "projects": ["brand-new-project"],
+            },
+            "reason": "test",
+        },
+    ])
+    # Two writes: the explicit project + the event. No auto-stub.
+    assert applied == 2
+    # Verify the explicit body survived — the stub template didn't overwrite it.
+    text = (wiki_mod.WIKI_DIR / "projects" / "brand-new-project.md").read_text()
+    assert "A real body." in text
+    assert "Auto-created from event reference" not in text
