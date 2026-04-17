@@ -754,22 +754,27 @@ def _mcp_audit_context() -> None:
     audit.set_context(cycle="", trigger_kind="mcp", trigger_detail="hermes")
 
 
-def _profile_headline(profile_md: str) -> str:
-    """Trim the user profile to its first paragraph.
+def _profile_headline(profile_md: str, max_sentences: int = 2) -> str:
+    """Trim the user profile to its first ~2 sentences.
 
-    The full david-wurtz.md body is ~1.5K words and shows up on every
-    briefing call. Most of it is stable state the agent already knows.
-    The first paragraph carries who-they-are + current-affiliation,
-    which is what changes rarely but matters most for framing.
+    The david-wurtz.md body is an ever-accumulating single-paragraph
+    state summary — ~1.5K words of "who they are + everything they're
+    currently doing." Dumping all of it on every briefing is wasteful:
+    the agent needs the headline framing ("who is this person") and
+    will pull current state from goals + narratives, not the profile.
+    Paragraph-based truncation is useless (it's one giant paragraph);
+    sentence-count is the right axis.
     """
+    import re as _re
     text = profile_md.strip()
     if not text:
         return ""
-    # First paragraph = up to the first blank line
-    for i, line in enumerate(text.splitlines()):
-        if not line.strip() and i > 0:
-            return "\n".join(text.splitlines()[:i]).strip()
-    return text
+    # Walk sentences — split on ". " to keep wikilinks intact.
+    # Naive but adequate: the profile is prose, not code blocks.
+    first_para = text.split("\n", 1)[0].strip()
+    sentences = _re.split(r"(?<=[.!?])\s+", first_para)
+    head = " ".join(sentences[:max_sentences]).strip()
+    return head or first_para[:400]
 
 
 def _recent_narratives(limit: int = 5) -> list[str]:
