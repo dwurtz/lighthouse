@@ -284,6 +284,8 @@ def _read_last_observation_times(
     except OSError:
         return latest
 
+    from deja.observations.time_utils import parse_observation_ts
+
     for line in tail[-max_lines:]:
         line = line.strip()
         if not line:
@@ -294,9 +296,14 @@ def _read_last_observation_times(
             ts_str = d.get("timestamp")
             if not src or not ts_str:
                 continue
-            ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
-            if ts.tzinfo is None:
-                ts = ts.replace(tzinfo=timezone.utc)
+            # Observation timestamps are naive local (collector convention).
+            # parse_observation_ts treats naive as local and returns aware
+            # UTC — required for comparison with datetime.now(timezone.utc)
+            # in run_watchdog_once / compute_signal_health. Using
+            # ``.replace(tzinfo=utc)`` here silently shifted ages by
+            # UTC_offset hours on non-UTC machines and made the watchdog
+            # flag every collector as "stalled" on every tick.
+            ts = parse_observation_ts(ts_str)
             cur = latest.get(src)
             if cur is None or ts > cur:
                 latest[src] = ts
