@@ -46,7 +46,7 @@ struct VoicePillContainer: View {
                     ))
             }
             VoicePillView(monitor: monitor)
-                .frame(width: 400, height: 56)
+                .frame(width: 200, height: 86)
         }
         .animation(.spring(response: 0.32, dampingFraction: 0.85), value: monitor.pillExpanded)
         .animation(.easeInOut(duration: 0.25), value: monitor.currentError)
@@ -74,7 +74,10 @@ struct ExpandedNotchPanel: View {
             }
 
             PopoverContentView(monitor: monitor)
-                .frame(width: 460, height: monitor.lastResponseMessage.isEmpty ? 584 : 440)
+                .frame(
+                    width: 460,
+                    height: monitor.lastResponseMessage.isEmpty ? 540 : 420
+                )
         }
         .frame(width: 460)
         .background(
@@ -87,6 +90,12 @@ struct ExpandedNotchPanel: View {
         )
         .padding(.horizontal, 6)
         .padding(.bottom, 4)
+        // Top padding leaves clearance so the "Déjà" header + gear /
+        // refresh buttons aren't crammed against the rounded top edge
+        // of the panel (and, by extension, aren't obscured when the
+        // expanded window butts up against the menu bar on compact
+        // displays).
+        .padding(.top, 4)
         // Clicking anywhere inside the expanded panel counts as
         // engagement — cancels any in-flight auto-collapse timer.
         .contentShape(Rectangle())

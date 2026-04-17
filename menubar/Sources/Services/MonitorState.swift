@@ -27,6 +27,18 @@ class MonitorState: ObservableObject {
     @Published var commandToast: Toast? = nil
     private var activityTimer: Timer?
 
+    // Notch panel tabs — "Now" surfaces the latest observation
+    // narrative + real wiki updates; "Open loops" surfaces every
+    // un-checked task / waiting-for / reminder in goals.md. Both
+    // refresh on the same 10s cadence as the old activity feed.
+    @Published var latestObservation: LatestObservation = .empty
+    @Published var wikiUpdates: [WikiUpdate] = []
+    @Published var openLoops: OpenLoops = .empty
+    /// Selected tab in the command center. 0 = Now, 1 = Open loops.
+    /// Persisted in UserDefaults so the panel opens to whatever the
+    /// user looked at last.
+    @Published var notchTab: Int = UserDefaults.standard.integer(forKey: "dejaNotchTab")
+
     // Notch expansion state — the pill has three visual modes:
     //   .idle       small pill at the bottom of the screen
     //   .recording  waveform or meeting-recording UI in the pill
@@ -1101,6 +1113,89 @@ class MonitorState: ObservableObject {
         }
     }
 
+    /// Fetch the latest observation narrative for the "Now" tab.
+    /// Single-section read — the backend picks the last ``## HH:MM:SS``
+    /// block from today's observations file (or yesterday's if today
+    /// is empty). Cheap, no LLM.
+    func fetchLatestObservation() {
+        localAPICall("/api/latest_observation", method: "GET", timeoutInterval: 5) { [weak self] data, _ in
+            guard let data = data,
+                  let decoded = try? JSONDecoder().decode(LatestObservation.self, from: data) else { return }
+            DispatchQueue.main.async {
+                self?.latestObservation = decoded
+            }
+        }
+    }
+
+    /// Fetch recent wiki updates (filtered — no collector heartbeats).
+    /// Backs the "Today's wiki updates" section of the Now tab.
+    func fetchWikiUpdates(limit: Int = 20) {
+        localAPICall("/api/wiki_updates?limit=\(limit)", method: "GET", timeoutInterval: 5) { [weak self] data, _ in
+            guard let data = data,
+                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let raw = obj["entries"] as? [[String: Any]] else { return }
+            let parsed: [WikiUpdate] = raw.compactMap { dict in
+                guard let ts = dict["timestamp"] as? String,
+                      let action = dict["action"] as? String,
+                      let target = dict["target"] as? String else { return nil }
+                return WikiUpdate(
+                    timestamp: ts,
+                    action: action,
+                    target: target,
+                    slug: (dict["slug"] as? String) ?? "",
+                    display: (dict["display"] as? String) ?? target,
+                    reason: (dict["reason"] as? String) ?? "",
+                    linkable: (dict["linkable"] as? Bool) ?? false
+                )
+            }
+            DispatchQueue.main.async {
+                self?.wikiUpdates = parsed
+            }
+        }
+    }
+
+    /// Fetch the full open-loops view for the "Open loops" tab.
+    /// Reads goals.md via the backend — every un-checked task, every
+    /// waiting-for, every reminder. Deterministic, no LLM.
+    func fetchOpenLoops() {
+        localAPICall("/api/open_loops", method: "GET", timeoutInterval: 5) { [weak self] data, _ in
+            guard let data = data,
+                  let decoded = try? JSONDecoder().decode(OpenLoops.self, from: data) else { return }
+            DispatchQueue.main.async {
+                self?.openLoops = decoded
+            }
+        }
+    }
+
+    /// Persist the selected tab to UserDefaults so the panel re-opens
+    /// to whatever the user was last looking at.
+    func setNotchTab(_ tab: Int) {
+        notchTab = tab
+        UserDefaults.standard.set(tab, forKey: "dejaNotchTab")
+    }
+
+    /// Open a wiki page in the user's Obsidian vault. Uses the standard
+    /// ``obsidian://open?vault=<name>&file=<slug>`` URL scheme, which
+    /// Obsidian registers on install. ``slug`` is a vault-relative path
+    /// without the ``.md`` suffix (e.g. ``people/joan-levinson``).
+    /// Silently drops empty / malformed slugs so a tap on a non-linkable
+    /// row is a visual no-op rather than a broken URL.
+    func openInObsidian(slug: String) {
+        let trimmed = slug.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+        // Percent-encode path separators and spaces. Obsidian's URL
+        // handler accepts raw ``/`` but Apple's URLComponents will
+        // complain if we use addingPercentEncoding blanket — so do it
+        // piecewise: encode each component, then rejoin with ``/``.
+        let encoded = trimmed
+            .split(separator: "/")
+            .map { $0.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? String($0) }
+            .joined(separator: "/")
+        let vault = "Deja"
+        guard let url = URL(string: "obsidian://open?vault=\(vault)&file=\(encoded)") else { return }
+        NSWorkspace.shared.open(url)
+    }
+
     /// Write a JSON snapshot of key UI state to ~/.deja/swift_state.json.
     /// Atomic (temp file + rename) so concurrent readers never see a
     /// half-written file. Best-effort: silently drops on serialization
@@ -1308,13 +1403,25 @@ class MonitorState: ObservableObject {
     }
 
     /// Start polling the activity feed + briefing every 10s while the popover is open.
+    ///
+    /// Polls the data for both tabs (Now + Open loops) up front so
+    /// switching tabs never shows a stale or empty state — the
+    /// payloads are tiny (a few KB each) and the backend endpoints are
+    /// pure file reads. We still refetch ``fetchActivity`` for the old
+    /// Signal Health debug panel which binds to that stream.
     func startActivityPolling() {
         activityTimer?.invalidate()
         fetchActivity()
         fetchBriefing()
+        fetchLatestObservation()
+        fetchWikiUpdates()
+        fetchOpenLoops()
         activityTimer = Timer.scheduledTimer(withTimeInterval: 10.0, repeats: true) { [weak self] _ in
             self?.fetchActivity()
             self?.fetchBriefing()
+            self?.fetchLatestObservation()
+            self?.fetchWikiUpdates()
+            self?.fetchOpenLoops()
         }
     }
 

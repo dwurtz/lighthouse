@@ -7,10 +7,15 @@ struct PopoverContentView: View {
     @ObservedObject var monitor: MonitorState
 
     var body: some View {
+        // Fill whatever frame the parent hands us. The old fixed
+        // 420×600 box was baked in from the legacy popover era and
+        // caused the expanded notch panel (460×584) to overflow its
+        // window, clipping the top header. ExpandedNotchPanel now
+        // sizes this view explicitly.
         Group {
             content
         }
-        .frame(width: 420, height: 600)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.black)
     }
 

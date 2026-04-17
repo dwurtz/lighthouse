@@ -2,11 +2,13 @@ import SwiftUI
 
 /// Floating voice pill — collapsed is a subtle dark capsule at screen bottom.
 ///
-/// Three visual states drive the pill:
+/// Shape and sizing mirror Voquill (48×6 idle capsule; 120×32 hover /
+/// active capsule) so that when both apps run in parallel the two bars
+/// look like siblings. The four visual states are:
 ///
-///   1. **Idle** — the subtle 100×5 capsule (or a hover-expanded "Click to
-///      expand" hint).
-///   2. **Recording** — the animated sine waveform. Shown whenever the
+///   1. **Idle** — the subtle 48×6 capsule. Hovering the window grows
+///      it to a 120×32 capsule with a chevron hint (no text label).
+///   2. **Recording** — the 16-bar live waveform. Shown whenever the
 ///      user is actively capturing audio: push-to-talk voice dictation
 ///      (``voicePillActive``) OR a meeting recording in progress
 ///      (``meetingRecording``). Both share this visual so there's a
@@ -21,6 +23,13 @@ struct VoicePillView: View {
         monitor.voicePillActive || monitor.meetingRecording
     }
 
+    /// Voquill parity.
+    private static let idleCapsuleWidth: CGFloat = 48
+    private static let idleCapsuleHeight: CGFloat = 6
+    private static let hoverCapsuleWidth: CGFloat = 120
+    private static let hoverCapsuleHeight: CGFloat = 32
+    private static let hoverCornerRadius: CGFloat = 16
+
     var body: some View {
         ZStack {
             if isRecording {
@@ -33,7 +42,7 @@ struct VoicePillView: View {
                 collapsedPill
             }
         }
-        .frame(width: 400, height: 56, alignment: .bottom)
+        .frame(width: 200, height: 86, alignment: .bottom)
         .animation(.spring(response: 0.3, dampingFraction: 0.75), value: isRecording)
         .animation(.easeInOut(duration: 0.2), value: monitor.voicePillProcessing)
         .animation(.easeInOut(duration: 0.2), value: monitor.voicePillTranscript.isEmpty)
@@ -42,46 +51,50 @@ struct VoicePillView: View {
 
     // MARK: - Collapsed
 
+    // Hover only changes the visual when the command panel is closed;
+    // with the panel open we leave the bottom capsule alone.
+    private var showHoverVisual: Bool {
+        monitor.voicePillHovered && !monitor.pillExpanded
+    }
+
     private var collapsedPill: some View {
         VStack(spacing: 4) {
             if monitor.isBlocked {
                 // Blocked state — amber capsule signals that Deja is
-                // missing something it needs to run. Click reopens the
-                // setup panel; the hovered label says so explicitly.
-                HStack(spacing: 6) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.system(size: 10))
-                        .foregroundColor(.orange)
-                    if monitor.voicePillHovered {
-                        Text("Click to fix Deja setup")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundColor(.orange.opacity(0.85))
-                    }
-                }
-                .padding(.horizontal, monitor.voicePillHovered ? 14 : 10)
-                .padding(.vertical, monitor.voicePillHovered ? 8 : 5)
-                .background(Capsule().fill(Color.black))
-                .overlay(Capsule().stroke(Color.orange.opacity(0.55), lineWidth: 1.5))
-                .transition(.opacity)
-            } else if monitor.voicePillHovered {
-                HStack(spacing: 6) {
-                    Image(systemName: monitor.pillExpanded ? "chevron.down" : "chevron.up")
-                        .font(.system(size: 10))
-                        .foregroundColor(.white.opacity(0.5))
-                    Text(monitor.pillExpanded ? "Click to collapse" : "Click to expand · hotkey to dictate")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundColor(.white.opacity(0.5))
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 8)
-                .background(Capsule().fill(Color.black))
-                .overlay(Capsule().stroke(Color.white.opacity(0.2), lineWidth: 1.5))
-                .transition(.opacity)
+                // missing something it needs to run. Uses the hover
+                // geometry so the warning icon has room to breathe.
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.orange)
+                    .frame(width: Self.hoverCapsuleWidth, height: Self.hoverCapsuleHeight)
+                    .background(
+                        RoundedRectangle(cornerRadius: Self.hoverCornerRadius)
+                            .fill(Color.black.opacity(0.92))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: Self.hoverCornerRadius)
+                            .stroke(Color.orange.opacity(0.55), lineWidth: 1)
+                    )
+                    .transition(.opacity)
+            } else if showHoverVisual {
+                Image(systemName: monitor.pillExpanded ? "chevron.down" : "chevron.up")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.white.opacity(0.75))
+                    .frame(width: Self.hoverCapsuleWidth, height: Self.hoverCapsuleHeight)
+                    .background(
+                        RoundedRectangle(cornerRadius: Self.hoverCornerRadius)
+                            .fill(Color.black.opacity(0.92))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: Self.hoverCornerRadius)
+                            .stroke(Color.white.opacity(0.3), lineWidth: 1)
+                    )
+                    .transition(.opacity)
             } else {
                 Capsule()
-                    .fill(Color.black)
-                    .overlay(Capsule().stroke(Color.white.opacity(0.2), lineWidth: 1.5))
-                    .frame(width: 100, height: 5)
+                    .fill(Color.black.opacity(0.6))
+                    .overlay(Capsule().stroke(Color.white.opacity(0.3), lineWidth: 1))
+                    .frame(width: Self.idleCapsuleWidth, height: Self.idleCapsuleHeight)
                     .transition(.opacity)
             }
         }
@@ -90,66 +103,81 @@ struct VoicePillView: View {
     // MARK: - Expanded: 16 reactive bars driven by live mic RMS
 
     private var expandedPill: some View {
-        HStack(spacing: 3) {
+        HStack(spacing: 2) {
             ForEach(0..<16, id: \.self) { i in
-                RoundedRectangle(cornerRadius: 2)
+                RoundedRectangle(cornerRadius: 1.5)
                     .fill(Color.white.opacity(0.85))
-                    .frame(width: 3, height: barHeight(for: i))
+                    .frame(width: 2.5, height: barHeight(for: i))
                     .animation(.easeOut(duration: 0.08), value: monitor.levelHistory[i])
             }
         }
-        .frame(height: 32)
-        .padding(.horizontal, 24)
-        .padding(.vertical, 12)
-        .background(Capsule().fill(Color.black))
-        .overlay(Capsule().stroke(Color.white.opacity(0.2), lineWidth: 1.5))
+        .frame(width: Self.hoverCapsuleWidth, height: Self.hoverCapsuleHeight)
+        .background(
+            RoundedRectangle(cornerRadius: Self.hoverCornerRadius)
+                .fill(Color.black.opacity(0.92))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Self.hoverCornerRadius)
+                .stroke(Color.white.opacity(0.3), lineWidth: 1)
+        )
         .transition(.scale(scale: 0.6).combined(with: .opacity))
     }
 
     private func barHeight(for index: Int) -> CGFloat {
         let level = monitor.levelHistory[index]
-        let minH: CGFloat = 4
-        let maxH: CGFloat = 32
+        let minH: CGFloat = 3
+        let maxH: CGFloat = 22
         return minH + level * (maxH - minH)
     }
 
     // MARK: - Processing
 
     private var processingPill: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 6) {
             ProgressView()
-                .scaleEffect(0.6)
-                .frame(width: 14, height: 14)
-            Text(monitor.voicePillStatus.isEmpty ? "Processing..." : monitor.voicePillStatus)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundColor(.white.opacity(0.6))
+                .scaleEffect(0.5)
+                .frame(width: 12, height: 12)
+            Text(monitor.voicePillStatus.isEmpty ? "…" : monitor.voicePillStatus)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundColor(.white.opacity(0.7))
+                .lineLimit(1)
+                .truncationMode(.tail)
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 10)
-        .background(Capsule().fill(Color.black))
-        .overlay(Capsule().stroke(Color.white.opacity(0.2), lineWidth: 1.5))
+        .frame(width: Self.hoverCapsuleWidth, height: Self.hoverCapsuleHeight)
+        .background(
+            RoundedRectangle(cornerRadius: Self.hoverCornerRadius)
+                .fill(Color.black.opacity(0.92))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Self.hoverCornerRadius)
+                .stroke(Color.white.opacity(0.3), lineWidth: 1)
+        )
         .transition(.scale(scale: 0.8).combined(with: .opacity))
     }
 
     // MARK: - Transcript
 
     private var transcriptPill: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 6) {
             Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 12))
-                .foregroundColor(.green.opacity(0.8))
+                .font(.system(size: 11))
+                .foregroundColor(.green.opacity(0.85))
             Text(monitor.voicePillTranscript)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundColor(.white.opacity(0.85))
-                .lineLimit(2)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundColor(.white.opacity(0.9))
+                .lineLimit(1)
                 .truncationMode(.tail)
         }
-        .frame(maxWidth: 280)
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .background(Capsule().fill(Color.black))
-        .overlay(Capsule().stroke(Color.white.opacity(0.2), lineWidth: 1.5))
+        .padding(.horizontal, 10)
+        .frame(maxWidth: Self.hoverCapsuleWidth, minHeight: Self.hoverCapsuleHeight, maxHeight: Self.hoverCapsuleHeight)
+        .background(
+            RoundedRectangle(cornerRadius: Self.hoverCornerRadius)
+                .fill(Color.black.opacity(0.92))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Self.hoverCornerRadius)
+                .stroke(Color.white.opacity(0.3), lineWidth: 1)
+        )
         .transition(.scale(scale: 0.8).combined(with: .opacity))
     }
 }
-

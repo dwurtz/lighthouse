@@ -208,6 +208,309 @@ def get_activity(limit: int = 50) -> dict:
     return {"entries": entries}
 
 
+# ---------------------------------------------------------------------------
+# Notch "Now" tab — latest observation narrative + filtered wiki updates.
+# ---------------------------------------------------------------------------
+
+# Actions that are pure telemetry noise. Excluded from the
+# user-facing "wiki updates" stream — they still land in audit.jsonl
+# for diagnostics, but the notch UI should show real state changes.
+_NOISE_ACTIONS = {
+    "collector_ok",
+    "collector_error",
+    "collector_stalled",
+    "health_check",
+    "cycle_no_op",
+}
+
+
+@router.get("/api/latest_observation")
+def get_latest_observation() -> dict:
+    """Return the most recent observation narrative for the notch.
+
+    Reads ``~/Deja/observations/YYYY-MM-DD.md`` (today's file) and
+    returns the body of the last ``## HH:MM:SS`` section. If today's
+    file is missing or empty, falls back to yesterday. Returns
+    ``{"text": "", "time": "", "date": ""}`` when nothing is available
+    so the Swift side can render a graceful empty state.
+    """
+    from pathlib import Path
+    from datetime import date, timedelta
+
+    from deja.config import WIKI_DIR
+
+    obs_dir = WIKI_DIR / "observations"
+
+    def _read_last_section(path: Path) -> tuple[str, str] | None:
+        """Return (time_header, body_text) for the file's last
+        ``## HH:MM:SS`` section, or None if the file has none.
+        """
+        if not path.exists():
+            return None
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return None
+        # Split on "\n## " so each piece begins with "HH:MM:SS\n\n..."
+        parts = text.split("\n## ")
+        if len(parts) < 2:
+            return None
+        last = parts[-1].strip()
+        if not last:
+            return None
+        header, _, rest = last.partition("\n")
+        body = rest.strip()
+        # Drop the "---" separator line(s) if present.
+        while body.endswith("---"):
+            body = body[: -3].rstrip()
+        if not body:
+            return None
+        return header.strip(), body
+
+    today = date.today()
+    for offset in range(3):
+        d = today - timedelta(days=offset)
+        candidate = obs_dir / f"{d.isoformat()}.md"
+        parsed = _read_last_section(candidate)
+        if parsed is None:
+            continue
+        time_header, body = parsed
+        return {
+            "text": body,
+            "time": time_header,
+            "date": d.isoformat(),
+        }
+
+    return {"text": "", "time": "", "date": ""}
+
+
+def _slug_for_wiki_target(target: str) -> tuple[str, str] | None:
+    """Map an audit ``target`` string to a (vault_path, display_slug)
+    pair suitable for building an ``obsidian://`` URL.
+
+    Audit targets look like ``people/david-wurtz``,
+    ``projects/window-cleaning-vendor-search``, or
+    ``events/2026-04-16/david-tours-mansion``. We strip off a trailing
+    ``.md`` if present and return the path as-is for Obsidian. Returns
+    None for targets that aren't wiki pages (e.g., ``startup/summary``,
+    ``cycle/c_...``) so the Swift side can render them as non-clickable.
+    """
+    if not target:
+        return None
+    # Known non-wiki prefixes from the audit stream.
+    if "/" not in target:
+        return None
+    head = target.split("/", 1)[0]
+    if head in {"startup", "cycle"}:
+        return None
+    clean = target[:-3] if target.endswith(".md") else target
+    display = clean.rsplit("/", 1)[-1]
+    return clean, display
+
+
+@router.get("/api/wiki_updates")
+def get_wiki_updates(limit: int = 20) -> dict:
+    """Return recent wiki updates for the notch 'Now' tab.
+
+    Reads ``~/.deja/audit.jsonl`` via ``audit.read_recent``, filters out
+    collector heartbeats / health checks / no-op cycles (pure telemetry
+    noise the user doesn't care about), and projects each remaining row
+    into a shape the notch UI can render directly:
+
+        {
+          "timestamp": "YYYY-MM-DD HH:MM",
+          "action": "wiki_write",
+          "target": "people/david-wurtz",   # raw
+          "slug":   "people/david-wurtz",   # vault-relative (no .md)
+          "display": "david-wurtz",         # leaf for rendering
+          "reason": "...",
+          "linkable": true,
+        }
+
+    Non-wiki targets (``startup/...``, ``cycle/...``) come back with
+    ``linkable: false`` so the Swift side can render them as plain
+    text rows. Limit clamped to [1, 200].
+    """
+    limit = max(1, min(int(limit), 200))
+    # Pull extra rows up front — after filtering heartbeats we may
+    # have far fewer than ``limit`` real updates. 10x oversampling
+    # handles long idle periods where the audit tail is 90% noise.
+    raw = audit.read_recent(limit=limit * 10)
+    out: list[dict] = []
+    for e in raw:
+        action = e.get("action") or ""
+        if action in _NOISE_ACTIONS:
+            continue
+        ts_iso = e.get("ts", "")
+        ts_short = ts_iso[:16].replace("T", " ") if ts_iso else ""
+        target = e.get("target") or ""
+        slug_info = _slug_for_wiki_target(target)
+        if slug_info is None:
+            slug = ""
+            display = target
+            linkable = False
+        else:
+            slug, display = slug_info
+            linkable = True
+        out.append(
+            {
+                "timestamp": ts_short,
+                "action": action,
+                "target": target,
+                "slug": slug,
+                "display": display,
+                "reason": e.get("reason") or "",
+                "linkable": linkable,
+            }
+        )
+        if len(out) >= limit:
+            break
+    return {"entries": out}
+
+
+# ---------------------------------------------------------------------------
+# Notch "Open loops" tab — full tasks + waiting + reminders lists.
+# ---------------------------------------------------------------------------
+
+
+_WIKILINK_RE = re.compile(r"\[\[([^\]|]+?)(?:\|[^\]]+?)?\]\]")
+
+
+def _first_wikilink_slug(text: str) -> str:
+    """Return the slug of the first ``[[wikilink]]`` in ``text``, or ``""``.
+
+    Used to pick a sensible default target for "open in Obsidian" when
+    a task / waiting-for row mentions one or more wiki entities. We
+    pick the FIRST link on purpose — tasks typically lead with the
+    entity that owns the commitment ("[[matt-brock]] respond about ...").
+    """
+    m = _WIKILINK_RE.search(text or "")
+    if not m:
+        return ""
+    return m.group(1).strip()
+
+
+@router.get("/api/open_loops")
+def get_open_loops() -> dict:
+    """Return the full set of open tasks, waiting-fors, and reminders.
+
+    Reads ``~/Deja/goals.md`` (via ``deja.goals._parse_sections``) and
+    projects each section into a flat list the notch 'Open loops' tab
+    can render directly. This is the full "what does David still owe
+    the world" view — distinct from ``/api/briefing`` which only
+    surfaces the deadline-hot subset (overdue / due soon / stale).
+
+    Return shape:
+        {
+          "tasks":    [{text, slug, checked}],
+          "waiting":  [{text, slug, checked}],
+          "reminders":[{text, date, slug, topics}],
+          "counts":   {tasks, waiting, reminders},
+        }
+
+    ``slug`` is the first wiki entity mentioned in the bullet (so the
+    row can be tapped to jump into Obsidian). Checked items are
+    excluded — the tab shows only what's still open.
+    """
+    from deja.goals import GOALS_PATH, _parse_sections, _parse_reminder_due
+
+    result: dict[str, object] = {
+        "tasks": [],
+        "waiting": [],
+        "reminders": [],
+        "counts": {"tasks": 0, "waiting": 0, "reminders": 0},
+    }
+
+    if not GOALS_PATH.exists():
+        return result
+
+    try:
+        text = GOALS_PATH.read_text(encoding="utf-8")
+    except OSError:
+        return result
+
+    _, sections = _parse_sections(text)
+
+    def _strip_bullet(line: str) -> str:
+        s = line.lstrip()
+        if s.startswith("- [ ] "):
+            return s[6:].strip()
+        if s.startswith("- [x] ") or s.startswith("- [X] "):
+            return s[6:].strip()
+        if s.startswith("- "):
+            return s[2:].strip()
+        return s.strip()
+
+    # --- Tasks: only unchecked ---
+    for line in sections.get("Tasks", []):
+        stripped = line.lstrip()
+        if not stripped.startswith("- [ ]"):
+            continue
+        body = _strip_bullet(line)
+        if not body:
+            continue
+        result["tasks"].append(
+            {
+                "text": body,
+                "slug": _first_wikilink_slug(body),
+            }
+        )
+
+    # --- Waiting for: only unchecked ---
+    for line in sections.get("Waiting for", []):
+        stripped = line.lstrip()
+        if not stripped.startswith("- [ ]"):
+            continue
+        body = _strip_bullet(line)
+        if not body:
+            continue
+        result["waiting"].append(
+            {
+                "text": body,
+                "slug": _first_wikilink_slug(body),
+            }
+        )
+
+    # --- Reminders: date-prefixed bullets, all (due and future) ---
+    for line in sections.get("Reminders", []):
+        stripped = line.lstrip()
+        if not stripped.startswith("- ["):
+            continue
+        m = re.match(r"\s*-\s+\[(\d{4}-\d{2}-\d{2})\]\s+(.*)$", line)
+        if not m:
+            continue
+        due_str = m.group(1)
+        rest = m.group(2).strip()
+        topics: list[str] = []
+        question = rest
+        if "→" in rest:
+            question, topic_part = rest.split("→", 1)
+            for tm in _WIKILINK_RE.finditer(topic_part):
+                topics.append(tm.group(1).strip())
+        question = question.strip().rstrip(",")
+        # Prefer the first topic as the nav slug; fall back to
+        # any wikilink in the question itself.
+        nav_slug = topics[0] if topics else _first_wikilink_slug(question)
+        result["reminders"].append(
+            {
+                "text": question,
+                "date": due_str,
+                "slug": nav_slug,
+                "topics": topics,
+            }
+        )
+
+    # Sort reminders by due date so nearest-term shows first.
+    result["reminders"].sort(key=lambda r: r.get("date", ""))
+
+    result["counts"] = {
+        "tasks": len(result["tasks"]),
+        "waiting": len(result["waiting"]),
+        "reminders": len(result["reminders"]),
+    }
+    return result
+
+
 @router.get("/api/signal_health")
 def get_signal_health() -> dict:
     """Per-source collector health snapshot for the Swift tray menu.

@@ -457,7 +457,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         showSettingsPanel()
     }
 
-    @objc private func showSignalHealth() {
+    @objc func showSignalHealth() {
         if let existing = signalHealthPanelWindow {
             existing.orderFront(nil)
             existing.makeKey()

@@ -70,6 +70,71 @@ struct ActivityEntry: Identifiable, Codable {
     let summary: String
 }
 
+/// Latest observation narrative for the notch "Now" tab. One paragraph
+/// lifted from the tail of ``~/Deja/observations/YYYY-MM-DD.md`` — the
+/// most recent ``## HH:MM:SS`` section. Fetched from ``GET /api/latest_observation``.
+struct LatestObservation: Codable {
+    let text: String
+    let time: String
+    let date: String
+
+    var isEmpty: Bool { text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+
+    static let empty = LatestObservation(text: "", time: "", date: "")
+}
+
+/// One row in the notch "Now" tab's wiki-updates stream. Comes from
+/// ``GET /api/wiki_updates`` — the same audit.jsonl that activity
+/// reads, but with collector heartbeats / health checks / no-op cycles
+/// filtered out. ``slug`` is the vault-relative path (no .md); empty
+/// when ``linkable`` is false.
+struct WikiUpdate: Codable, Identifiable {
+    var id: String { "\(timestamp)-\(action)-\(target)" }
+    let timestamp: String
+    let action: String
+    let target: String
+    let slug: String
+    let display: String
+    let reason: String
+    let linkable: Bool
+}
+
+/// Payload for ``GET /api/open_loops`` — the full un-checked task list,
+/// the full "waiting for" list, and every reminder in goals.md. Source
+/// for the notch "Open loops" tab.
+struct OpenLoops: Codable {
+    struct Item: Codable, Identifiable {
+        var id: String { text }
+        let text: String
+        let slug: String
+    }
+    struct Reminder: Codable, Identifiable {
+        var id: String { "\(date)-\(text)" }
+        let text: String
+        let date: String
+        let slug: String
+        let topics: [String]
+    }
+    struct Counts: Codable {
+        let tasks: Int
+        let waiting: Int
+        let reminders: Int
+    }
+    let tasks: [Item]
+    let waiting: [Item]
+    let reminders: [Reminder]
+    let counts: Counts
+
+    var isEmpty: Bool { tasks.isEmpty && waiting.isEmpty && reminders.isEmpty }
+
+    static let empty = OpenLoops(
+        tasks: [],
+        waiting: [],
+        reminders: [],
+        counts: Counts(tasks: 0, waiting: 0, reminders: 0)
+    )
+}
+
 /// Transient toast message shown after a command dispatch (green on
 /// success, red on error). Auto-dismisses after a short delay.
 struct Toast: Equatable {

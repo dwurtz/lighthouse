@@ -23,15 +23,43 @@ class VoicePillWindow: NSPanel {
     private let monitor: MonitorState
     private var cancellables: Set<AnyCancellable> = []
 
-    /// Dimensions of the collapsed pill. Matches historical sizing so
-    /// the pill's resting shape stays unchanged.
-    private static let collapsedSize = NSSize(width: 400, height: 56)
+    /// Dimensions of the collapsed pill window. Mirrors Voquill's host
+    /// window (200×86) so the two apps' bars line up and share the same
+    /// padding around the visible capsule.
+    private static let collapsedSize = NSSize(width: 200, height: 86)
 
     /// Dimensions of the expanded panel. Width is slightly wider than
     /// the pill so the command-center content has breathing room;
-    /// height is calibrated to fit header + briefing + activity feed
-    /// + command input without scrolling on a 1080p display.
-    private static let expandedSize = NSSize(width: 460, height: 640)
+    /// height is calibrated to fit header + two-tab body + command
+    /// input without clipping on a 13" MacBook (≈900pt visible).
+    ///
+    /// Content stack inside the window (bottom-anchored):
+    ///   • ExpandedNotchPanel — 540pt inner PopoverContentView
+    ///     + 8pt vertical padding + rounded border = ~548pt
+    ///   • VoicePillView — 86pt
+    ///   • Total ≈ 634pt, plus a few pts of slack = 640pt.
+    ///
+    /// The window frame is also clamped at ``positionAtBottomCenter``
+    /// to the current screen's visible frame minus an 8pt top inset,
+    /// so on a tiny display it silently shrinks rather than clipping
+    /// behind the menu bar notch.
+    private static let expandedSize = NSSize(width: 472, height: 640)
+
+    /// Space reserved above the expanded panel so its top edge is not
+    /// flush with the menu bar / notch. Applied by
+    /// ``applyFrame`` when the computed window top would cross the
+    /// visible-frame top.
+    private static let topSafeInset: CGFloat = 10
+
+    /// Voquill's host window width — used to compute adjacency.
+    private static let voquillWindowWidth: CGFloat = 200
+
+    /// Gap between our window's right edge and Voquill's left edge
+    /// when both apps are running in parallel.
+    private static let voquillGap: CGFloat = 12
+
+    /// Bottom inset, matching Voquill's MARGIN_BOTTOM.
+    private static let pillBottomInset: CGFloat = 8
 
     init(monitor: MonitorState) {
         self.monitor = monitor
@@ -143,10 +171,28 @@ class VoicePillWindow: NSPanel {
         guard let screen = NSScreen.screens.first(where: { $0.frame.contains(mouseLocation) }) ?? NSScreen.main else { return }
         let screenFrame = screen.frame
         let visibleFrame = screen.visibleFrame
-        let x = screenFrame.origin.x + (screenFrame.width - size.width) / 2
-        // Anchor y at the bottom of the pill — same as collapsed so
-        // the pill doesn't jump when the panel grows above it.
-        let y = visibleFrame.origin.y + 24
+
+        // Anchor the pill's center to a fixed screen x just to the left
+        // of Voquill's horizontally-centered window. When the window
+        // resizes to show the expanded panel we keep this center stable
+        // so the pill doesn't slide sideways between states.
+        let voquillLeftEdge = screenFrame.origin.x + (screenFrame.width - Self.voquillWindowWidth) / 2
+        let pillCenterX = voquillLeftEdge - Self.voquillGap - (Self.collapsedSize.width / 2)
+
+        // Clamp the expanded height so the window never overlaps the
+        // menu bar / camera notch. On a 13" MacBook Air the usable
+        // area between the bottom inset and the menu bar is only
+        // ~900pt; the expanded panel is 640pt tall so normally fits,
+        // but an external display + zoom or Stage Manager can shrink
+        // the visibleFrame below that. When it does, we trim the
+        // window height rather than let SwiftUI clip the top header.
+        let maxHeight = visibleFrame.height - Self.pillBottomInset - Self.topSafeInset
+        if size.height > maxHeight {
+            size = NSSize(width: size.width, height: max(Self.collapsedSize.height, maxHeight))
+        }
+
+        let x = pillCenterX - size.width / 2
+        let y = visibleFrame.origin.y + Self.pillBottomInset
         let newFrame = NSRect(x: x, y: y, width: size.width, height: size.height)
         setFrame(newFrame, display: true, animate: animate)
 
