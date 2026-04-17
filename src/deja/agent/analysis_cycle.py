@@ -503,6 +503,48 @@ async def _run_analysis_cycle_body(
     except Exception:
         log.debug("cycle telemetry failed", exc_info=True)
 
+    # Fire webhooks for any configured receivers (Claude Code Routines,
+    # Slack, etc). Non-blocking — runs on a daemon thread. Silent cycles
+    # (no wiki changes, no goal changes, no due reminders, no T1 signals)
+    # are skipped by the emitter itself. See deja/webhooks.py.
+    try:
+        from deja.webhooks import emit_cycle_complete
+        from deja.goals import due_reminder_topics
+        from datetime import date as _date
+
+        # Count T1 signals in this cycle. classify_tier was already run
+        # during triage — keep the logic consistent here so we don't
+        # drift between the two code paths.
+        from deja.signals.tiering import classify_tier
+        t1_count = sum(1 for s in signal_items if classify_tier(s) == 1)
+
+        # Today's due reminders — "today or earlier" is the usual gate
+        # for "act on this now" reminders.
+        try:
+            due = due_reminder_topics(_date.today())
+        except Exception:
+            due = []
+
+        # Merge the batched tasks_updates so the webhook sees the union
+        # of everything this cycle mutated.
+        merged_tasks_update: dict = {}
+        for tu in all_tasks_updates:
+            for k, v in (tu or {}).items():
+                merged_tasks_update.setdefault(k, [])
+                if isinstance(v, list):
+                    merged_tasks_update[k].extend(v)
+
+        emit_cycle_complete(
+            cycle_id=cycle_id,
+            narrative=" ".join(all_narratives),
+            wiki_updates=wiki_updates,
+            tasks_update=merged_tasks_update,
+            due_reminders=due,
+            new_t1_signal_count=t1_count,
+        )
+    except Exception:
+        log.debug("cycle webhook emit failed", exc_info=True)
+
     loop_ref.last_analysis_time = datetime.now(timezone.utc)
     loop_ref._fire_stats_update()
     loop_ref.phase = "IDLE"

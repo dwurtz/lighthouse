@@ -182,6 +182,19 @@ def main() -> None:
         "briefing",
         help="Print the same daily-briefing view the MCP agent sees (profile + goals + active projects + recent narratives)",
     )
+    wh_p = sub.add_parser(
+        "webhooks",
+        help="Manage outbound webhooks (Claude Code Routines, Slack, etc.) that fire after each integrate cycle",
+    )
+    wh_sub = wh_p.add_subparsers(dest="wh_command")
+    wh_sub.add_parser("list", help="Show configured webhooks")
+    wh_add = wh_sub.add_parser("add", help="Register a new webhook")
+    wh_add.add_argument("--name", required=True, help="Display name (e.g. 'chief-of-staff')")
+    wh_add.add_argument("--url", required=True, help="POST target URL")
+    wh_rm = wh_sub.add_parser("remove", help="Remove a webhook by name")
+    wh_rm.add_argument("name")
+    wh_test = wh_sub.add_parser("test", help="Fire a synthetic cycle payload at all configured webhooks")
+    wh_test.add_argument("--name", help="Only fire the webhook with this name")
     trail_p = sub.add_parser(
         "hermes-trail",
         help="Show recent audit entries from Hermes (trigger.kind=mcp) — see what your chief-of-staff has been doing",
@@ -227,6 +240,8 @@ def main() -> None:
     elif command == "briefing":
         from deja.mcp_server import _daily_briefing
         print(_daily_briefing())
+    elif command == "webhooks":
+        _run_webhooks(getattr(args, "wh_command", None), args)
     elif command == "hermes-trail":
         _run_hermes_trail(hours=args.hours, limit=args.limit)
     else:
@@ -350,6 +365,76 @@ def _run_health(indent: str = "") -> None:
         print()
         print("One or more checks failed. Address the fixes above, then re-run.")
         sys.exit(1)
+
+
+def _run_webhooks(sub_command: str | None, args) -> None:
+    """List / add / remove / test outbound webhooks."""
+    import yaml
+    from deja.webhooks import WEBHOOKS_CONFIG, _load_webhooks, emit_cycle_complete
+
+    if sub_command in (None, "list"):
+        webhooks = _load_webhooks()
+        if not webhooks:
+            print(f"(no webhooks configured at {WEBHOOKS_CONFIG})")
+            return
+        print(f"Configured webhooks ({WEBHOOKS_CONFIG}):\n")
+        for w in webhooks:
+            flag = "✓" if w.enabled else "✗"
+            print(f"  [{flag}] {w.name}  →  {w.url}")
+        return
+
+    if sub_command == "add":
+        existing = _load_webhooks()
+        if any(w.name == args.name for w in existing):
+            print(f"(webhook '{args.name}' already exists — remove it first)")
+            return
+        entries = [{"name": w.name, "url": w.url, "enabled": w.enabled} for w in existing]
+        entries.append({"name": args.name, "url": args.url, "enabled": True})
+        WEBHOOKS_CONFIG.parent.mkdir(parents=True, exist_ok=True)
+        WEBHOOKS_CONFIG.write_text(
+            yaml.safe_dump({"webhooks": entries}, default_flow_style=False, sort_keys=False),
+            encoding="utf-8",
+        )
+        print(f"added webhook '{args.name}' → {args.url}")
+        return
+
+    if sub_command == "remove":
+        existing = _load_webhooks()
+        kept = [w for w in existing if w.name != args.name]
+        if len(kept) == len(existing):
+            print(f"(no webhook named '{args.name}')")
+            return
+        entries = [{"name": w.name, "url": w.url, "enabled": w.enabled} for w in kept]
+        WEBHOOKS_CONFIG.write_text(
+            yaml.safe_dump({"webhooks": entries}, default_flow_style=False, sort_keys=False),
+            encoding="utf-8",
+        )
+        print(f"removed webhook '{args.name}'")
+        return
+
+    if sub_command == "test":
+        target_name = getattr(args, "name", None)
+        emit_cycle_complete(
+            cycle_id="test-cycle-manual",
+            narrative=(
+                "This is a synthetic test webhook from `deja webhooks test`. "
+                "Nothing actually happened; this is just verifying your receiver "
+                "is reachable and returning 2xx."
+            ),
+            wiki_updates=[{"category": "projects", "slug": "clawvisor"}],
+            tasks_update={"add_tasks": ["test task — ignore"]},
+            due_reminders=[],
+            new_t1_signal_count=1,
+        )
+        # emit_cycle_complete is async (daemon thread); give it a beat
+        # to fire before we return control so the user sees the audit
+        # line written.
+        import time as _time
+        _time.sleep(1)
+        print("test webhook fired — check `deja hermes-trail --hours 1` for the audit entry")
+        return
+
+    print("unknown webhooks subcommand — try: list | add | remove | test")
 
 
 def _run_hermes_trail(hours: int, limit: int) -> None:
