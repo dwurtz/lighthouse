@@ -33,7 +33,11 @@ from pathlib import Path
 
 log = logging.getLogger(__name__)
 
-_SUBPROCESS_TIMEOUT_SEC = 60
+# Bumped from 60s after real-cycle shadow calls routinely exceeded it.
+# Claude reading a full integrate prompt (goals + wiki + 5K+ tokens of
+# signals) with reasoning and JSON generation is a 60-120s operation.
+# 240s leaves headroom while still catching runaway invocations.
+_SUBPROCESS_TIMEOUT_SEC = 240
 
 _CLAUDE_FALLBACK_PATHS = (
     "/Applications/cmux.app/Contents/Resources/bin/claude",

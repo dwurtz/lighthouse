@@ -609,8 +609,13 @@ class GeminiClient:
         """
         async def _resolve(model: str, task) -> tuple[dict | None, int, str | None]:
             start = time.time()
+            # Gemini variants complete in ~3-15s; claude-local takes 60-
+            # 120s end-to-end (full integrate prompt + reasoning +
+            # JSON). Wait long enough for Claude so the shadow actually
+            # lands; Gemini still finishes first and never feels the
+            # cap.
             try:
-                text = await asyncio.wait_for(task, timeout=45.0)
+                text = await asyncio.wait_for(task, timeout=240.0)
                 latency = int((time.time() - start) * 1000)
                 try:
                     parsed = json.loads(text, strict=False)
