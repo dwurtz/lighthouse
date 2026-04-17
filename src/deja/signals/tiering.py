@@ -36,9 +36,15 @@ log = logging.getLogger(__name__)
 
 
 # Sources whose TEXT is authored by the user regardless of sender string.
-# Voice dictation and typed content never come from anyone else; treat
-# them as Tier 1 by source alone.
-_USER_AUTHORED_SOURCES = {"microphone", "voice", "typed", "chat"}
+# Voice, typed content, and chat turns never come from anyone else; treat
+# them as Tier 1 by source alone. Browser visits count too — the user
+# chose to navigate there, which is a form of authored attention. That
+# choice is strong enough grounding for integrate to create a project
+# stub for a previously-unknown domain (e.g. visiting a new vendor's
+# site); integrate's existing "lean toward creating" rule on T1 does
+# the rest. Before this rule change, browser visits were T3 ambient and
+# a one-time visit to a new product page died in the raw log.
+_USER_AUTHORED_SOURCES = {"microphone", "voice", "typed", "chat", "browser"}
 
 # Sources where the "sender" string literally being "You" means outbound.
 # (Matches the convention in observations/imessage.py + whatsapp.py.)

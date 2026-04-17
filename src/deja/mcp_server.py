@@ -709,38 +709,70 @@ def _get_context(topic: str) -> str:
         log.debug("goals slice failed", exc_info=True)
 
     # --- Recent raw observations (last 60 min — real-time layer) ---
-    if OBSERVATIONS_LOG.exists():
-        cutoff = datetime.now(timezone.utc) - timedelta(minutes=60)
-        topic_words = set(topic.lower().split())
-        matching_obs: list[str] = []
-        try:
-            for line in OBSERVATIONS_LOG.read_text().splitlines()[-500:]:
-                try:
-                    d = json.loads(line)
-                    ts = datetime.fromisoformat(d["timestamp"])
-                    if ts.tzinfo is None:
-                        ts = ts.astimezone(timezone.utc)
-                    if ts < cutoff:
-                        continue
-                    text_lower = (d.get("text", "") + " " + d.get("sender", "")).lower()
-                    if any(w in text_lower for w in topic_words):
-                        hm = ts.strftime("%H:%M")
-                        matching_obs.append(
-                            f"[{hm}] [{d.get('source', '?')}] "
-                            f"{d.get('sender', '?')}: {d.get('text', '')[:200]}"
-                        )
-                except (json.JSONDecodeError, KeyError, ValueError):
-                    continue
-        except OSError:
-            pass
-
-        if matching_obs:
-            sections.append(
-                f"## Live activity mentioning \"{topic}\" (last hour)\n\n"
-                + "\n".join(matching_obs[-15:])
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=60)
+    topic_words = set(topic.lower().split())
+    matching_obs: list[str] = []
+    for d in _iter_recent_observations(cutoff):
+        text_lower = (d.get("text", "") + " " + d.get("sender", "")).lower()
+        if any(w in text_lower for w in topic_words):
+            hm = d["_ts"].strftime("%H:%M")
+            matching_obs.append(
+                f"[{hm}] [{d.get('source', '?')}] "
+                f"{d.get('sender', '?')}: {d.get('text', '')[:200]}"
             )
+        if len(matching_obs) >= 40:
+            break
+
+    if matching_obs:
+        chronological = list(reversed(matching_obs))[-15:]
+        sections.append(
+            f"## Live activity mentioning \"{topic}\" (last hour)\n\n"
+            + "\n".join(chronological)
+        )
 
     return "\n\n---\n\n".join(sections)
+
+
+# ---------------------------------------------------------------------------
+# Observation log helpers
+# ---------------------------------------------------------------------------
+
+
+def _iter_recent_observations(cutoff: datetime):
+    """Yield parsed observation dicts with timestamp >= cutoff.
+
+    Streams the observations.jsonl file from the end (newest-first)
+    and stops as soon as it hits a line older than ``cutoff``. This
+    replaces the old "last 500 lines" tail, which silently capped any
+    ``minutes``-based query to whatever fit in 500 lines — hiding
+    signals older than ~20–30 min even when the caller asked for 6 h.
+
+    Returns lines in newest-first order. Callers that need chronological
+    output should ``list(...)`` and reverse.
+    """
+    from deja.config import OBSERVATIONS_LOG
+    if not OBSERVATIONS_LOG.exists():
+        return
+    # Reading all lines is acceptable for today's log sizes (~20 MB).
+    # If this grows past 100 MB we should switch to reverse block reads.
+    try:
+        lines = OBSERVATIONS_LOG.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return
+    for line in reversed(lines):
+        if not line.strip():
+            continue
+        try:
+            d = json.loads(line)
+            ts = datetime.fromisoformat(d["timestamp"])
+            if ts.tzinfo is None:
+                ts = ts.astimezone(timezone.utc)
+        except (json.JSONDecodeError, KeyError, ValueError):
+            continue
+        if ts < cutoff:
+            break
+        d["_ts"] = ts
+        yield d
 
 
 # ---------------------------------------------------------------------------
@@ -1107,30 +1139,26 @@ def _dispatch(name: str, args: dict) -> str:
         return r.message
 
     if name == "recent_activity":
-        from deja.config import OBSERVATIONS_LOG
         minutes = min(args.get("minutes", 30), 1440)
         source_filter = args.get("source")
         cutoff = datetime.now(timezone.utc) - timedelta(minutes=minutes)
-        lines: list[str] = []
-        if OBSERVATIONS_LOG.exists():
-            for line in OBSERVATIONS_LOG.read_text().splitlines()[-500:]:
-                try:
-                    d = json.loads(line)
-                    ts = datetime.fromisoformat(d["timestamp"])
-                    if ts.tzinfo is None:
-                        ts = ts.astimezone(timezone.utc)
-                    if ts < cutoff:
-                        continue
-                    if source_filter and d.get("source") != source_filter:
-                        continue
-                    hm = ts.strftime("%H:%M")
-                    lines.append(
-                        f"[{hm}] [{d.get('source', '?')}] "
-                        f"{d.get('sender', '?')}: {d.get('text', '')[:200]}"
-                    )
-                except (json.JSONDecodeError, KeyError, ValueError):
-                    continue
-        return "\n".join(lines[-100:]) or f"(no observations in the last {minutes} minutes)"
+        # The iterator bounds by time, not count — so walk the full
+        # window and take the most recent 100 matches for output.
+        # Caps were the root of the earlier 500-line silent truncation
+        # bug; don't reintroduce one here.
+        newest_first: list[str] = []
+        for d in _iter_recent_observations(cutoff):
+            if source_filter and d.get("source") != source_filter:
+                continue
+            hm = d["_ts"].strftime("%H:%M")
+            newest_first.append(
+                f"[{hm}] [{d.get('source', '?')}] "
+                f"{d.get('sender', '?')}: {d.get('text', '')[:200]}"
+            )
+            if len(newest_first) >= 500:
+                break
+        chronological = list(reversed(newest_first))
+        return "\n".join(chronological) or f"(no observations in the last {minutes} minutes)"
 
     if name == "daily_briefing":
         return _daily_briefing()
