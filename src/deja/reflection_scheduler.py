@@ -163,6 +163,7 @@ async def run_reflection() -> dict:
     async with _run_lock:
         from deja.dedup import run_dedup
         from deja.events_to_projects import run_events_to_projects
+        from deja.goals_reconcile import run_goals_reconcile
 
         # 1. Dedup — merges same-entity pages.
         result = await run_dedup()
@@ -184,7 +185,15 @@ async def run_reflection() -> dict:
         if isinstance(result, dict) and isinstance(etp_result, dict):
             result["events_to_projects"] = etp_result
 
-        # 4. Audit trim — keep audit.jsonl bounded to ~7 days.
+        # 4. Goals reconcile — sweeps open waiting-fors against recent
+        #    events and closes the ones Flash decides were satisfied
+        #    (including indirectly). Compensates for integrate dropping
+        #    the close-satisfied-commitments step under load.
+        reconcile_result = await run_goals_reconcile()
+        if isinstance(result, dict) and isinstance(reconcile_result, dict):
+            result["goals_reconcile"] = reconcile_result
+
+        # 5. Audit trim — keep audit.jsonl bounded to ~7 days.
         try:
             from deja.audit import trim_older_than
             dropped = trim_older_than(days=7)

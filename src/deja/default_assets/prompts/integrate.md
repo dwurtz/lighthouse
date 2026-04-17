@@ -50,6 +50,7 @@ When a message signal includes a `## Context (last N messages in this thread —
 Every cycle: new signals, retrieved pages, current goals. Before deciding there's nothing to do:
 
 - **Close commitments the signals satisfied.** `complete_tasks` only when a signal in THIS batch shows the thing happening. The substring must match the existing task line verbatim.
+- **Indirect satisfaction counts.** A waiting_for is satisfied when the committed person delivers the promised outcome, even indirectly. If Jon Sturos promised "send builder contact" and a builder (Davin Tarnanen) emails David referencing Jon as the referrer, Jon has fulfilled. Patterns: forwarded info, delegated reach-out ("X asked me to contact you"), the promised event simply happening, the answer being provided by the person they said would provide it. When the signal names the committed person as the referrer/delegator/source, treat that as evidence for closing their waiting_for.
 - **Fix claims made stale.** Every retrieved page is fair game. Sam's page says Acme, signature today says Widget → fix it now.
 - **Answer due reminders.** For each reminder with date ≤ today: answerable → fix + `resolve_reminders`; moot → `archive_reminders`.
 

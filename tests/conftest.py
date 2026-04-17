@@ -82,4 +82,12 @@ def isolated_home(request, monkeypatch, tmp_path):
     except ImportError:
         pass
 
+    # goals_reconcile imports WIKI_DIR at module load for the events
+    # scan path.
+    try:
+        import deja.goals_reconcile as gr_mod
+        monkeypatch.setattr(gr_mod, "WIKI_DIR", wiki)
+    except ImportError:
+        pass
+
     yield home, wiki
