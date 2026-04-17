@@ -345,6 +345,24 @@ async def _run_analysis_cycle_body(
         if not batch_items:
             continue
         batch_text = format_signals(batch_items)
+
+        # Build a second timeline with raw Apple Vision OCR swapped in
+        # for screenshot observations (preprocessed text otherwise).
+        # Only the Claude shadow consumes this — Gemini production and
+        # the "apples-to-apples" claude-local shadow both use
+        # preprocessed. See signals/format._with_raw_ocr + llm_client
+        # integrate_observations for how it's routed. Cheap to build
+        # regardless of whether the shadow flag is on; the extra
+        # sidecar reads are bounded by screenshot count per batch.
+        try:
+            from deja.config import INTEGRATE_CLAUDE_SHADOW
+            claude_override = (
+                format_signals(batch_items, use_raw_ocr=True)
+                if INTEGRATE_CLAUDE_SHADOW else None
+            )
+        except Exception:
+            claude_override = None
+
         log.info("Running analysis on %d %s...", len(batch_items), batch_name)
 
         # Save fixture for local model evaluation
@@ -371,6 +389,7 @@ async def _run_analysis_cycle_body(
                 signals_text=batch_text,
                 wiki_text=wiki_text,
                 open_windows=open_windows_text,
+                claude_signals_text_override=claude_override,
             )
 
             # Save the response alongside the fixture

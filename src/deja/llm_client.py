@@ -396,6 +396,8 @@ class GeminiClient:
         signals_text: str,
         wiki_text: str,
         open_windows: str = "",
+        *,
+        claude_signals_text_override: str | None = None,
     ) -> dict:
         """Run one unified analysis cycle. Returns {reasoning, wiki_updates}."""
         now = datetime.now()
@@ -490,13 +492,20 @@ class GeminiClient:
             )
             shadow_tasks.append((m, t))
 
-        # Claude shadow — independent of the Gemini A/B flag. Spawns a
-        # `claude -p` subprocess with the SAME prompt the Gemini
-        # production model saw; the response JSON is parsed and saved
-        # into the same ~/.deja/integrate_shadow/<ts>.json record.
-        # Gated on INTEGRATE_CLAUDE_SHADOW so it stays off until the
-        # user opts in (runs against Max subscription, has higher
-        # latency than Flash). Never writes to the wiki.
+        # Claude shadow — independent of the Gemini A/B flag. Spawns
+        # `claude -p` subprocesses with prompts that mirror what
+        # Gemini saw. Response JSON lands in the same shadow record
+        # under ``shadows[model=claude-local*]``. Never writes to the
+        # wiki.
+        #
+        # Two variants (when both are available):
+        #   claude-local           — preprocessed signals (apples-to-
+        #                            apples vs Gemini)
+        #   claude-local-raw-ocr   — raw Apple Vision OCR substituted
+        #                            for screenshot preprocess output
+        #                            (tests whether Claude does better
+        #                            on unadulterated input, bypassing
+        #                            the VLM hallucination class)
         try:
             from deja.config import INTEGRATE_CLAUDE_SHADOW
             if INTEGRATE_CLAUDE_SHADOW:
@@ -505,6 +514,22 @@ class GeminiClient:
                     "claude-local",
                     asyncio.create_task(invoke_claude_shadow(prompt)),
                 ))
+                if claude_signals_text_override and claude_signals_text_override != signals_text:
+                    prompt_raw = load_prompt("integrate").format(
+                        current_time=current_time,
+                        day_of_week=day_of_week,
+                        time_of_day=time_of_day,
+                        contacts_text=contacts_text,
+                        goals=goals_text or "(no goals.md)",
+                        wiki_text=wiki_text or "(empty)",
+                        signals_text=claude_signals_text_override,
+                        open_windows=open_windows or "(not available)",
+                        **user_fields,
+                    )
+                    shadow_tasks.append((
+                        "claude-local-raw-ocr",
+                        asyncio.create_task(invoke_claude_shadow(prompt_raw)),
+                    ))
         except Exception:
             log.debug("claude shadow hook failed to schedule", exc_info=True)
 

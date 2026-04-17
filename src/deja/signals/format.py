@@ -282,13 +282,54 @@ def _render_line(obs: dict, marker: str) -> str:
     return f"{marker} [{ts}] [{source}] {sender}: {text}"
 
 
-def format_signals(signals: Iterable[dict]) -> str:
+def _with_raw_ocr(obs: dict) -> dict:
+    """Return a copy of obs with screenshot.text replaced by the raw OCR sidecar.
+
+    Used by the Claude shadow experiment: feed the integrator the
+    pixel-to-text output BEFORE the preprocess VLM had a chance to
+    synthesize (and hallucinate) structured extractions. Non-screenshot
+    signals pass through unchanged. Missing sidecar → pass through
+    (preprocessed text is all we've got).
+    """
+    if obs.get("source") != "screenshot":
+        return obs
+    id_key = obs.get("id_key") or ""
+    if not id_key:
+        return obs
+    try:
+        from deja.raw_ocr_sidecar import read as _read_sidecar
+        raw = _read_sidecar(id_key)
+    except Exception:
+        raw = None
+    if not raw:
+        return obs
+    out = dict(obs)
+    # Preserve the bracketed app/window header the formatter adds so
+    # tier classification / focused-attention detection still work.
+    # The preprocessed text shape is "[Label]\n\n<body>"; swap only
+    # the body.
+    preprocessed = obs.get("text") or ""
+    header_end = preprocessed.find("\n\n")
+    if header_end != -1:
+        out["text"] = preprocessed[: header_end + 2] + raw
+    else:
+        out["text"] = raw
+    return out
+
+
+def format_signals(signals: Iterable[dict], *, use_raw_ocr: bool = False) -> str:
     """Render a batch of observation dicts as a chronological timeline.
 
     Each line carries its tier as a ``[T1]`` / ``[T2]`` / ``[T3]``
     prefix. Order is by timestamp (ascending); ties fall back to
     caller order. iMessage / WhatsApp signals are augmented with
     thread context (see ``_inject_thread_context``).
+
+    When ``use_raw_ocr`` is True, screenshot observations have their
+    text replaced with the raw Apple Vision OCR sidecar (written by
+    the agent pipeline before preprocess runs). Used by the Claude
+    integrate shadow to compare reasoning quality on unadulterated
+    input vs. preprocessed. Production stays ``False``.
     """
     signals = list(signals)
     if not signals:
@@ -300,6 +341,8 @@ def format_signals(signals: Iterable[dict]) -> str:
     ordered = sorted(signals, key=_sort_key)
     lines = []
     for obs in ordered:
+        if use_raw_ocr:
+            obs = _with_raw_ocr(obs)
         augmented = _inject_thread_context(obs)
         tier = classify_tier(augmented)
         marker = _TIER_MARKERS.get(tier, _TIER_MARKERS[3])
