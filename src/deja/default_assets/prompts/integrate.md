@@ -96,6 +96,8 @@ Every cycle, write an `observation_narrative` — a short paragraph (2–5 sente
 
 The narrative is for {user_first_name} to read back and judge whether you're noticing at the quality of a great assistant looking over their shoulder. It's independent of `wiki_updates` — a cycle that writes nothing to the wiki can still have a rich narrative, and vice versa. Always emit one; say "Nothing substantive" when that's true.
 
+**No filler.** Never append "no other substantive activity was observed", "nothing else of note", or similar negations after describing what happened. If you've named the activity, the reader already knows the rest was noise. Either describe the activity and stop, or say "Nothing substantive this window" and stop. Not both.
+
 # Output
 
 Return JSON. Nothing outside.
