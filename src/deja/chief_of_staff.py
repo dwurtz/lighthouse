@@ -34,7 +34,7 @@ Invocation
   * Non-blocking (daemon thread) — never delays the agent loop
   * 10-minute subprocess timeout — runaway invocations get killed
   * Every invocation writes ``audit.record("cos_invoke", ...)``
-    so ``deja hermes-trail`` shows both the trigger and what
+    so ``deja trail`` shows both the trigger and what
     Claude then did via MCP (which carries ``trigger.kind=mcp``)
 
 The loop is intentionally permission-bypassing in the spawned
@@ -125,7 +125,7 @@ For every invocation, pick ONE of:
   to ground it in their context.
 - Every MCP mutation writes an audit entry tagged
   `trigger.kind=mcp, trigger.detail=hermes` — the user reviews with
-  `deja hermes-trail`. Make your `reason` field concrete and cite
+  `deja trail`. Make your `reason` field concrete and cite
   the triggering signal.
 - Never fabricate. If the wiki doesn't say it, don't invent it.
 - Close loops aggressively. Stale items are failure modes. Indirect

@@ -16,7 +16,7 @@ Two client profiles:
 
 Every mutating call sets the audit context to
 ``trigger=("mcp","hermes")`` (or the calling client) so each change is
-traceable via ``python -m deja hermes-trail`` or raw
+traceable via ``python -m deja trail`` or raw
 ``~/.deja/audit.jsonl``.
 
 Start with:

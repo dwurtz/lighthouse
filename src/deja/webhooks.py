@@ -46,7 +46,7 @@ Audit
 -----
 
 Every emit records one ``audit.record()`` entry with ``action="webhook_emit"``
-so ``deja hermes-trail`` can correlate webhook fires to downstream
+so ``deja trail`` can correlate webhook fires to downstream
 routine actions (which come back in via MCP with ``trigger.kind=mcp``).
 This closes the loop: David can see "webhook fired at 10:23, Claude
 drafted email at 10:24" as consecutive audit entries.

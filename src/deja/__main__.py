@@ -206,8 +206,9 @@ def main() -> None:
     wh_test = wh_sub.add_parser("test", help="Fire a synthetic cycle payload at all configured webhooks")
     wh_test.add_argument("--name", help="Only fire the webhook with this name")
     trail_p = sub.add_parser(
-        "hermes-trail",
-        help="Show recent audit entries from Hermes (trigger.kind=mcp) — see what your chief-of-staff has been doing",
+        "trail",
+        aliases=["hermes-trail"],  # old name, kept working
+        help="Show recent agent audit entries (trigger.kind=mcp) — see what the chief-of-staff has been doing",
     )
     trail_p.add_argument(
         "--hours",
@@ -254,8 +255,8 @@ def main() -> None:
         _run_webhooks(getattr(args, "wh_command", None), args)
     elif command == "cos":
         _run_cos(getattr(args, "cos_command", None))
-    elif command == "hermes-trail":
-        _run_hermes_trail(hours=args.hours, limit=args.limit)
+    elif command in ("trail", "hermes-trail"):
+        _run_trail(hours=args.hours, limit=args.limit)
     else:
         parser.print_help()
         sys.exit(1)
@@ -426,7 +427,7 @@ def _run_cos(sub_command: str | None) -> None:
             due_reminders=[],
             new_t1_signal_count=1,
         )
-        print("invocation fired in background — tail with `deja cos tail` or `deja hermes-trail --hours 1`")
+        print("invocation fired in background — tail with `deja cos tail` or `deja trail --hours 1`")
         import time as _time
         _time.sleep(2)
         return
@@ -523,18 +524,19 @@ def _run_webhooks(sub_command: str | None, args) -> None:
         # line written.
         import time as _time
         _time.sleep(1)
-        print("test webhook fired — check `deja hermes-trail --hours 1` for the audit entry")
+        print("test webhook fired — check `deja trail --hours 1` for the audit entry")
         return
 
     print("unknown webhooks subcommand — try: list | add | remove | test")
 
 
-def _run_hermes_trail(hours: int, limit: int) -> None:
-    """Print Hermes (MCP) audit entries from the last N hours.
+def _run_trail(hours: int, limit: int) -> None:
+    """Print agent (MCP-triggered) audit entries from the last N hours.
 
     Tails ``~/.deja/audit.jsonl`` and shows only rows where
-    ``trigger.kind == "mcp"``. Gives David visibility into every write
-    Hermes has made without grepping JSON by hand.
+    ``trigger.kind == "mcp"``. Gives the user visibility into every
+    write the chief-of-staff loop (or any MCP client) has made,
+    without grepping JSON by hand.
     """
     import json as _json
     from datetime import datetime as _dt, timedelta as _td, timezone as _tz
@@ -569,11 +571,11 @@ def _run_hermes_trail(hours: int, limit: int) -> None:
         return
 
     if not rows:
-        print(f"(no Hermes activity in the last {hours}h)")
+        print(f"(no agent activity in the last {hours}h)")
         return
 
     rows = rows[-limit:]
-    print(f"Hermes activity — last {hours}h, showing {len(rows)} entries\n")
+    print(f"Agent activity — last {hours}h, showing {len(rows)} entries\n")
     for e in rows:
         ts_str = e.get("ts", "")[:19].replace("T", " ")
         action = e.get("action", "")
