@@ -212,8 +212,16 @@ async def _run_analysis_cycle_body(
     #      minute-old frame will mislead the integrator into reasoning
     #      about "what the user is doing now" based on a stale view.
     #      See MAX_SCREENSHOT_AGE_SECONDS at the top of this module.
+    #
+    #      Observation timestamps are NAIVE LOCAL (every collector
+    #      writes `datetime.now()` or `datetime.strptime(...)` with
+    #      no tzinfo). Compare against naive-local now to get correct
+    #      ages. A prior version here mixed aware-UTC `now` with the
+    #      naive-local observation time, which made every screenshot
+    #      look `UTC_offset` hours older than it actually was and
+    #      silently dropped all of them for any user not in UTC.
     if signal_items:
-        now_dt = datetime.now(timezone.utc)
+        now_naive = datetime.now()
         filtered: list[dict] = []
         for item in signal_items:
             if item.get("source") != "screenshot":
@@ -222,9 +230,12 @@ async def _run_analysis_cycle_body(
             ts_str = item.get("timestamp") or ""
             try:
                 ts_dt = datetime.fromisoformat(ts_str)
-                if ts_dt.tzinfo is None:
-                    ts_dt = ts_dt.replace(tzinfo=timezone.utc)
-                age = (now_dt - ts_dt).total_seconds()
+                # If a collector ever starts writing aware timestamps,
+                # normalize to naive local so the arithmetic stays in
+                # one timezone.
+                if ts_dt.tzinfo is not None:
+                    ts_dt = ts_dt.astimezone().replace(tzinfo=None)
+                age = (now_naive - ts_dt).total_seconds()
             except Exception:
                 # Unparseable timestamp — keep the signal rather than
                 # silently dropping it; the integrator will surface any
