@@ -182,6 +182,16 @@ def main() -> None:
         "briefing",
         help="Print the same daily-briefing view the MCP agent sees (profile + goals + active projects + recent narratives)",
     )
+    cos_p = sub.add_parser(
+        "cos",
+        help="Chief-of-staff loop — spawn a local `claude` after each substantive cycle to decide whether to notify or act",
+    )
+    cos_sub = cos_p.add_subparsers(dest="cos_command")
+    cos_sub.add_parser("status", help="Show whether the loop is enabled and where config lives")
+    cos_sub.add_parser("enable", help="Enable the chief-of-staff loop (creates config on first run)")
+    cos_sub.add_parser("disable", help="Disable the chief-of-staff loop")
+    cos_sub.add_parser("test", help="Fire the loop once with a synthetic payload — good for verifying claude CLI + MCP wiring")
+    cos_sub.add_parser("tail", help="Tail the invocations log to see what Claude has been deciding and doing")
     wh_p = sub.add_parser(
         "webhooks",
         help="Manage outbound webhooks (Claude Code Routines, Slack, etc.) that fire after each integrate cycle",
@@ -242,6 +252,8 @@ def main() -> None:
         print(_daily_briefing())
     elif command == "webhooks":
         _run_webhooks(getattr(args, "wh_command", None), args)
+    elif command == "cos":
+        _run_cos(getattr(args, "cos_command", None))
     elif command == "hermes-trail":
         _run_hermes_trail(hours=args.hours, limit=args.limit)
     else:
@@ -365,6 +377,86 @@ def _run_health(indent: str = "") -> None:
         print()
         print("One or more checks failed. Address the fixes above, then re-run.")
         sys.exit(1)
+
+
+def _run_cos(sub_command: str | None) -> None:
+    """Manage the chief-of-staff loop."""
+    import shutil as _shutil
+    from deja import chief_of_staff as cos
+
+    if sub_command in (None, "status"):
+        claude_path = _shutil.which("claude") or "(not installed)"
+        enabled = cos.is_enabled()
+        print(f"Chief-of-staff loop: {'ENABLED' if enabled else 'disabled'}")
+        print(f"  claude CLI:      {claude_path}")
+        print(f"  config dir:      {cos.COS_DIR}")
+        print(f"  system prompt:   {cos.COS_SYSTEM_PROMPT}"
+              + ("" if cos.COS_SYSTEM_PROMPT.exists() else "  (not created yet)"))
+        print(f"  MCP config:      {cos.COS_MCP_CONFIG}"
+              + ("" if cos.COS_MCP_CONFIG.exists() else "  (not created yet)"))
+        print(f"  invocation log:  {cos.COS_LOG}")
+        if enabled:
+            print("\nFires after each substantive integrate cycle. Disable with `deja cos disable`.")
+        else:
+            print("\nEnable with `deja cos enable`, then test with `deja cos test`.")
+        return
+
+    if sub_command == "enable":
+        cos.enable()
+        print(f"enabled — fires after substantive cycles. Tail with `deja cos tail`.")
+        return
+
+    if sub_command == "disable":
+        cos.disable()
+        print("disabled")
+        return
+
+    if sub_command == "test":
+        if not cos.is_enabled():
+            print("(cos is disabled — `deja cos enable` first)")
+            return
+        cos.invoke(
+            cycle_id="test-cos-manual",
+            narrative="Synthetic test invocation from `deja cos test`. "
+                      "If Claude sees this, it should recognize it as a "
+                      "test and return SILENT (no email) after optionally "
+                      "reading the briefing to verify MCP wiring.",
+            wiki_updates=[],
+            tasks_update={},
+            due_reminders=[],
+            new_t1_signal_count=1,
+        )
+        print("invocation fired in background — tail with `deja cos tail` or `deja hermes-trail --hours 1`")
+        import time as _time
+        _time.sleep(2)
+        return
+
+    if sub_command == "tail":
+        if not cos.COS_LOG.exists():
+            print(f"(no invocations yet — log at {cos.COS_LOG})")
+            return
+        import json as _json
+        lines = cos.COS_LOG.read_text(encoding="utf-8").splitlines()
+        for line in lines[-10:]:
+            try:
+                entry = _json.loads(line)
+            except Exception:
+                continue
+            ts = entry.get("ts", "")[:19].replace("T", " ")
+            rc = entry.get("rc")
+            cycle = entry.get("cycle_id", "")
+            print(f"[{ts}] cycle={cycle} rc={rc}")
+            stdout = (entry.get("stdout") or "").strip()
+            if stdout:
+                for ln in stdout.splitlines()[-6:]:
+                    print(f"    {ln}")
+            stderr = (entry.get("stderr") or "").strip()
+            if stderr and rc != 0:
+                print(f"  stderr: {stderr[:300]}")
+            print()
+        return
+
+    print("unknown cos subcommand — try: status | enable | disable | test | tail")
 
 
 def _run_webhooks(sub_command: str | None, args) -> None:

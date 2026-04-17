@@ -248,6 +248,60 @@ def _draft_email(params: dict, reason: str) -> None:
     _log_action("draft_email", f"draft to {to}: {subject}")
 
 
+def _send_email_to_self(params: dict, reason: str) -> None:
+    """Send an email to the user's own address. Used as a push channel.
+
+    Unlike _draft_email (third-party, user reviews before send), this
+    action sends immediately. Scope is restricted to the user's own
+    email to prevent accidental outreach. Intended use: the chief-of-
+    staff agent pinging the user with "here's what I noticed / did"
+    summaries that are readable on mobile.
+    """
+    import base64
+
+    subject = params.get("subject", "")
+    body = params.get("body", "")
+    if not subject:
+        log.warning("send_email_to_self: missing subject")
+        return
+
+    from deja.identity import load_user
+    user = load_user()
+    user_email = user.email
+    if not user_email:
+        log.warning("send_email_to_self: no user email on file")
+        return
+
+    # Prefix the subject so the user can filter/rule on these in Gmail.
+    if not subject.startswith("[Deja]"):
+        subject = f"[Deja] {subject}"
+
+    raw_msg = (
+        f"From: {user_email}\n"
+        f"To: {user_email}\n"
+        f"Subject: {subject}\n"
+        f"\n"
+        f"{body}"
+    )
+    encoded = base64.urlsafe_b64encode(raw_msg.encode()).decode()
+
+    svc = _service("gmail", "v1")
+    if svc is None:
+        log.warning("send_email_to_self: skipped (no service)")
+        return
+
+    try:
+        svc.users().messages().send(
+            userId="me",
+            body={"raw": encoded},
+        ).execute()
+    except Exception as e:
+        log.warning("send_email_to_self failed: %s", type(e).__name__)
+        return
+    log.info("send_email_to_self: sent '%s' — %s", subject, reason)
+    _log_action("send_email_to_self", f"to self: {subject}")
+
+
 def _create_task(params: dict, reason: str) -> None:
     """Add a task to Google Tasks."""
     title = params.get("title", "")
@@ -338,6 +392,7 @@ _EXECUTORS = {
     "calendar_create": _calendar_create,
     "calendar_update": _calendar_update,
     "draft_email": _draft_email,
+    "send_email_to_self": _send_email_to_self,
     "create_task": _create_task,
     "complete_task": _complete_task,
     "notify": _notify,

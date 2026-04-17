@@ -542,6 +542,27 @@ async def _run_analysis_cycle_body(
             due_reminders=due,
             new_t1_signal_count=t1_count,
         )
+
+        # Chief-of-staff reflex: spawn a local `claude` with Deja MCP
+        # to decide whether to ping the user or take any action. Gated
+        # on the same substantive-cycle criteria as the webhook, plus
+        # the user-managed enabled flag at ~/.deja/chief_of_staff/enabled.
+        substantive = (
+            bool(wiki_updates)
+            or any(merged_tasks_update.get(k) for k in merged_tasks_update)
+            or bool(due)
+            or t1_count > 0
+        )
+        if substantive:
+            from deja.chief_of_staff import invoke as cos_invoke
+            cos_invoke(
+                cycle_id=cycle_id,
+                narrative=" ".join(all_narratives),
+                wiki_updates=wiki_updates,
+                tasks_update=merged_tasks_update,
+                due_reminders=due,
+                new_t1_signal_count=t1_count,
+            )
     except Exception:
         log.debug("cycle webhook emit failed", exc_info=True)
 

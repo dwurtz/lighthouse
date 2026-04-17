@@ -465,6 +465,10 @@ def create_server() -> Server:
                     "Types:\n"
                     "  • draft_email — {to, subject, body}. Creates a Gmail "
                     "draft for the user to review and send.\n"
+                    "  • send_email_to_self — {subject, body}. Sends an email "
+                    "to the user's own address immediately (push channel for "
+                    "notifying the user on mobile). Subject auto-prefixed "
+                    "with '[Deja]'.\n"
                     "  • calendar_create — {summary, start, end, attendees?, "
                     "description?, location?}. ISO 8601 datetimes.\n"
                     "  • calendar_update — {event_id, ...patch}.\n"
@@ -479,6 +483,7 @@ def create_server() -> Server:
                             "type": "string",
                             "enum": [
                                 "draft_email",
+                                "send_email_to_self",
                                 "calendar_create",
                                 "calendar_update",
                                 "create_task",
