@@ -164,6 +164,7 @@ async def run_reflection() -> dict:
         from deja.dedup import run_dedup
         from deja.events_to_projects import run_events_to_projects
         from deja.goals_reconcile import run_goals_reconcile
+        from deja import chief_of_staff
 
         # 1. Dedup — merges same-entity pages.
         result = await run_dedup()
@@ -193,7 +194,27 @@ async def run_reflection() -> dict:
         if isinstance(result, dict) and isinstance(reconcile_result, dict):
             result["goals_reconcile"] = reconcile_result
 
-        # 5. Audit trim — keep audit.jsonl bounded to ~7 days.
+        # 5. Chief-of-staff reflective pass — a genuine LLM pass that
+        #    asks "what would a proactive chief of staff be doing for
+        #    the user right now?" given the state just cleaned up by
+        #    steps 1-4. Clock-driven (not event-driven like the normal
+        #    cos cycle invocation), so it runs exactly once per slot.
+        #    Gracefully no-ops when cos is disabled.
+        try:
+            if chief_of_staff.is_enabled():
+                rc, stdout, stderr = await asyncio.get_running_loop().run_in_executor(
+                    None, chief_of_staff.invoke_reflective_sync,
+                )
+                if isinstance(result, dict):
+                    final_line = (stdout or "").strip().splitlines()[-1:]
+                    result["cos_reflective"] = {
+                        "rc": rc,
+                        "summary": (final_line[0][:200] if final_line else ""),
+                    }
+        except Exception:
+            log.exception("reflect: cos reflective pass failed")
+
+        # 6. Audit trim — keep audit.jsonl bounded to ~7 days.
         try:
             from deja.audit import trim_older_than
             dropped = trim_older_than(days=7)

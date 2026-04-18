@@ -435,6 +435,19 @@ def _run_cos(sub_command: str | None) -> None:
             print(f"\nstderr:\n{stderr.strip()[:1000]}")
         return
 
+    if sub_command == "reflect":
+        if not cos.is_enabled():
+            print("(cos is disabled — `deja cos enable` first)")
+            return
+        print("invoking reflective pass synchronously (30-90s) — clock-driven; no cycle trigger\n")
+        rc, stdout, stderr = cos.invoke_reflective_sync()
+        print(f"rc: {rc}")
+        if stdout.strip():
+            print(f"\nclaude output:\n{stdout.strip()}")
+        if stderr.strip() and rc != 0:
+            print(f"\nstderr:\n{stderr.strip()[:1000]}")
+        return
+
     if sub_command == "tail":
         if not cos.COS_LOG.exists():
             print(f"(no invocations yet — log at {cos.COS_LOG})")
@@ -460,7 +473,7 @@ def _run_cos(sub_command: str | None) -> None:
             print()
         return
 
-    print("unknown cos subcommand — try: status | enable | disable | test | tail")
+    print("unknown cos subcommand — try: status | enable | disable | test | reflect | tail")
 
 
 def _run_webhooks(sub_command: str | None, args) -> None:

@@ -114,7 +114,21 @@ the user reads on their phone: they lose trust in you.
    about a different week; maybe it was answered in an iMessage you
    haven't seen yet. Verify the referent before restating.
 
-4. **Count what you're saying.** If your email says "two things"
+4. **Re-derive the premise from signals — don't trust the reminder
+   text.** A reminder is a hint from a past agent invocation; it
+   may have been written with incomplete information OR its premise
+   may have been resolved since. Before surfacing a reminder like
+   "arrange X for Y's early-dismissal next week," call
+   `recent_activity` filtered on Y's name (and any linked people
+   from the reminder's tags) and read the last 3-5 days of iMessage
+   / email threads on the topic. Ask: *"Is the concern this reminder
+   describes actually still a concern, given what people have already
+   said?"* If yes, surface it. If the signals show a plan is already
+   in motion, `resolve_reminder` with a reason citing the resolving
+   thread and say nothing. Inheriting a reminder is NOT permission
+   to forward it uncritically.
+
+5. **Count what you're saying.** If your email says "two things"
    and then lists three, the user will notice. Draft body → count →
    edit → send.
 
@@ -204,6 +218,7 @@ you respond?"
     {
       "cycle_id": "...",
       "ts": "2026-04-17T...Z",
+      "mode": "cycle" | "reflective",
       "narrative": "one-paragraph prose summary of what the
         integrate cycle just observed and wrote",
       "wiki_update_slugs": ["category/slug", ...],
@@ -212,9 +227,79 @@ you respond?"
       "new_t1_signal_count": N
     }
 
+If ``mode == "reflective"`` the payload also carries ``slot``
+("morning" | "midday" | "evening") and ``horizon`` ("day" | "week" |
+"month") — see the REFLECTIVE MODE section below for how to handle it.
+
 Do the work now. End your response with a single sentence describing
 what you did (or why you stayed silent) — that becomes the final
 audit line.
+"""
+
+
+REFLECTIVE_APPENDIX = """\
+
+## REFLECTIVE MODE
+
+When the payload has ``mode: "reflective"`` you were NOT fired because
+something happened. You were fired because the clock crossed a
+reflection slot (morning / midday / evening). Nothing specific is
+demanding your attention — the point is to *think*.
+
+Your job in reflective mode: act like a good chief of staff pausing
+between tasks to survey what the user has on their plate, and ask
+"what would I proactively do for them right now that they haven't
+asked for?"
+
+**Procedure:**
+
+1. **Load state.** Call ``daily_briefing`` once. Read the active
+   projects, open waiting-fors, reminders due in the horizon window,
+   and the calendar block.
+
+2. **Focus by horizon.**
+     - ``horizon: "day"`` — what's on today/tomorrow; what's about to
+       go wrong if no one intervenes.
+     - ``horizon: "week"`` — the week ahead; pre-kickoff projects;
+       trips; major deadlines.
+     - ``horizon: "month"`` — longer-lead items the user hasn't
+       started prepping for yet.
+
+3. **Ask the proactive question.** For each active/pre-kickoff
+   project AND each high-stakes calendar event in the horizon:
+     - What does this person's situation demand that isn't already in
+       motion? (A draft email? A calendar reminder with context? A
+       flagged reminder the user will thank you for?)
+     - Is there someone named in the wiki who's about to be relevant
+       (a manager speaking at a conference, a counterparty promised
+       something due) whom the user hasn't connected the dots on?
+     - Is there a recurring pattern in past behavior that suggests a
+       rule — and if so, does it deserve to be surfaced (not silently
+       applied)?
+
+4. **Verify before acting.** Same VERIFY BEFORE NOTIFYING checklist
+   as cycle mode applies. Don't propose based on stale wiki memories;
+   use ``calendar_list_events`` / ``gmail_search`` to confirm.
+
+5. **Decide.**
+     - If you find something concrete: NOTIFY (email) or ACT (draft,
+       create calendar entry, add reminder).
+     - If nothing's actionable: stay SILENT. Don't manufacture work.
+       A reflective pass with no output is a healthy outcome.
+
+**Tone in reflective emails.** Lead with "I was thinking ahead about
+X…" or "Heads-up for the week…". Not reactive. Specific. Bundle
+related items — if you find 3 things in one reflective pass, send
+ONE email with 3 bullets, not 3 emails.
+
+**Proposed rules.** If a pattern is worth codifying as standing
+guidance (e.g., "when David travels for work, draft Dominique a Day-1
+handoff"), DO NOT silently write it to ``goals.md``. Instead, include
+it as a proposal in your email so David can approve by adding it to
+his Standing Context himself. Your job is to surface, not to encode.
+
+Budget: 5-10 tool calls. Err on the side of one concrete, well-grounded
+item over a laundry list of half-verified ones.
 """
 
 
@@ -295,6 +380,27 @@ def _claude_binary() -> str | None:
     return None
 
 
+def _build_reflective_payload(
+    *,
+    slot: str,
+    horizon: str,
+) -> dict[str, Any]:
+    """Payload for a reflective (clock-driven) invocation.
+
+    No cycle_id, no narrative — the reflective pass is not reacting
+    to anything specific. The payload exists only to tell Claude which
+    time-of-day slot fired it and which planning horizon to consider.
+    """
+    return {
+        "mode": "reflective",
+        "slot": slot,
+        "horizon": horizon,
+        "ts": datetime.now(timezone.utc)
+            .isoformat(timespec="seconds")
+            .replace("+00:00", "Z"),
+    }
+
+
 def _build_payload(
     *,
     cycle_id: str,
@@ -342,6 +448,15 @@ def _run_claude(payload: dict) -> tuple[int, str, str]:
         system_prompt_text = COS_SYSTEM_PROMPT.read_text(encoding="utf-8")
     except OSError as e:
         return (1, "", f"read system prompt failed: {e}")
+
+    # Reflective-mode runs ride on top of the user's (possibly
+    # customized) system_prompt.md by appending REFLECTIVE_APPENDIX
+    # inline. This keeps cycle mode untouched for users who have hand-
+    # tuned their prompt.
+    if payload.get("mode") == "reflective":
+        system_prompt_text = (
+            system_prompt_text.rstrip() + "\n\n" + REFLECTIVE_APPENDIX
+        )
 
     cmd = [
         claude_bin,
@@ -472,6 +587,66 @@ def invoke_sync(
     return rc, stdout, stderr
 
 
+def _slot_and_horizon_for_hour(hour: int) -> tuple[str, str]:
+    """Classify the local clock hour into a slot + default horizon.
+
+    The three configured reflect-slot hours (default 02, 11, 18) map
+    to semantic slots:
+      - 00-06 → morning (plan the day, consider the week)
+      - 07-14 → midday (check in on today)
+      - 15-23 → evening (wrap today, prep tomorrow)
+    Horizon widens on Sunday-evening runs (month-ahead) so the start-
+    of-week gets one monthly look.
+    """
+    from datetime import date
+    if hour < 7:
+        slot, horizon = "morning", "week"
+    elif hour < 15:
+        slot, horizon = "midday", "day"
+    else:
+        slot, horizon = "evening", "day"
+    if slot == "evening" and date.today().weekday() == 6:
+        horizon = "month"
+    return slot, horizon
+
+
+def invoke_reflective_sync(
+    *,
+    slot: str | None = None,
+    horizon: str | None = None,
+) -> tuple[int, str, str]:
+    """Fire a reflective (clock-driven) cos pass and block until done.
+
+    Called from ``run_reflection()`` at each slot boundary and from
+    ``deja cos reflect`` for manual testing. Slot/horizon default to
+    whatever the local clock implies; callers can override for tests
+    or one-off runs.
+    """
+    if not is_enabled():
+        return (0, "(cos disabled)", "")
+    if not COS_SYSTEM_PROMPT.exists() or not COS_MCP_CONFIG.exists():
+        _ensure_cos_dir()
+
+    if slot is None or horizon is None:
+        from datetime import datetime as _dt
+        auto_slot, auto_horizon = _slot_and_horizon_for_hour(
+            _dt.now().astimezone().hour
+        )
+        slot = slot or auto_slot
+        horizon = horizon or auto_horizon
+
+    payload = _build_reflective_payload(slot=slot, horizon=horizon)
+    rc, stdout, stderr = _run_claude(payload)
+    _log_invocation(
+        cycle_id=f"reflective/{slot}",
+        payload=payload,
+        rc=rc,
+        stdout=stdout,
+        stderr=stderr,
+    )
+    return rc, stdout, stderr
+
+
 def invoke(
     *,
     cycle_id: str,
@@ -524,9 +699,11 @@ __all__ = [
     "COS_MCP_CONFIG",
     "COS_LOG",
     "DEFAULT_SYSTEM_PROMPT",
+    "REFLECTIVE_APPENDIX",
     "is_enabled",
     "enable",
     "disable",
     "invoke",
     "invoke_sync",
+    "invoke_reflective_sync",
 ]
