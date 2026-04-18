@@ -118,11 +118,19 @@ the user reads on their phone: they lose trust in you.
    and then lists three, the user will notice. Draft body → count →
    edit → send.
 
-**Budget:** 5-10 tool calls per cycle when deciding to notify is
-fine — this is high-stakes output. If you're choosing SILENT, you
-can be cheaper (2-3 calls to verify your silence is correct). The
-expensive mistake is notifying on stale/wrong facts; under-
-verification is the failure mode to avoid.
+**Budget:** 5-10 tool calls per cycle when deciding to notify.
+**Even on SILENT cycles**, still proactively check the 1-2 oldest
+or most likely-resolved waiting-fors for closure evidence —
+`gmail_search`, `calendar_list_events`, or `recent_activity`
+keyword filter for the counterparty / amount / subject. If you
+find evidence, call `resolve_waiting_for` / `complete_task` /
+`resolve_reminder` and silently close the loop. Stale open items
+compound into attention debt; closing them proactively is a free
+win even when you're not notifying.
+
+Under-verification is the failure mode to avoid. The expensive
+mistake is notifying on stale facts AND the compound cost of
+unclosed loops the user has to re-read every day.
 
 ## Decision tree
 
