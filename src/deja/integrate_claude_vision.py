@@ -115,9 +115,14 @@ def _build_env() -> dict:
     return env
 
 
-def _collect_screenshot_images(signal_items: Iterable[dict]) -> list[tuple[str, bytes]]:
-    """Return (id_key, png_bytes) for up to ``_MAX_IMAGES_PER_CYCLE``
-    screenshot signals, favoring the MOST RECENT.
+def _collect_screenshot_images(signal_items: Iterable[dict]) -> list[dict]:
+    """Return screenshot metadata records for up to ``_MAX_IMAGES_PER_CYCLE``
+    signals, favoring the MOST RECENT.
+
+    Each record is ``{id_key, timestamp, sender, data}`` so callers can
+    caption each image with its precise timestamp + display label —
+    essential for Claude to reason about elapsed time between frames
+    ("was this 3 seconds after the previous one or 3 minutes?").
 
     A rapid-switching user can produce 20+ screenshots per cycle; the
     image token budget + Claude's attention are both bounded. We
@@ -137,14 +142,19 @@ def _collect_screenshot_images(signal_items: Iterable[dict]) -> list[tuple[str, 
     # Sort newest-first by timestamp string (ISO lex-order is chrono).
     screenshots.sort(key=lambda o: o.get("timestamp") or "", reverse=True)
 
-    out: list[tuple[str, bytes]] = []
+    out: list[dict] = []
     for obs in screenshots:
         if len(out) >= _MAX_IMAGES_PER_CYCLE:
             break
         data = _read_img(obs["id_key"])
         if not data:
             continue
-        out.append((obs["id_key"], data))
+        out.append({
+            "id_key": obs["id_key"],
+            "timestamp": obs.get("timestamp") or "",
+            "sender": obs.get("sender") or "",
+            "data": data,
+        })
     # Reverse to chronological so Claude sees them oldest→newest (the
     # natural narrative order). The "newest-first" sort was just for
     # the cap-respecting selection step.
@@ -152,16 +162,28 @@ def _collect_screenshot_images(signal_items: Iterable[dict]) -> list[tuple[str, 
     return out
 
 
-def _build_stream_json_input(prompt_text: str, images: list[tuple[str, bytes]]) -> str:
-    """Assemble the single-line stream-json user message with text + images."""
-    content = [{"type": "text", "text": prompt_text}]
-    for (id_key, data) in images:
+def _build_stream_json_input(prompt_text: str, images: list[dict]) -> str:
+    """Assemble a stream-json user message: the integrate prompt as
+    text, then each screenshot preceded by a small caption block giving
+    its timestamp + display label.
+
+    Interleaving text + image blocks is the Anthropic-API-native way
+    to caption images. Without captions Claude sees a flat sequence of
+    unlabeled pictures and can't reason about "frame 3 was 2 seconds
+    after frame 2" vs "4 minutes later" — both gaps look identical.
+    """
+    content: list[dict] = [{"type": "text", "text": prompt_text}]
+    for i, meta in enumerate(images, 1):
+        ts = (meta.get("timestamp") or "").replace("T", " ")[:19]
+        sender = meta.get("sender") or "display"
+        caption = f"\n[screenshot {i}/{len(images)} — {ts} — {sender}]"
+        content.append({"type": "text", "text": caption})
         content.append({
             "type": "image",
             "source": {
                 "type": "base64",
                 "media_type": "image/png",
-                "data": base64.b64encode(data).decode(),
+                "data": base64.b64encode(meta["data"]).decode(),
             },
         })
     return json.dumps({
