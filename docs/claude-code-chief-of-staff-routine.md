@@ -53,11 +53,13 @@ For every fire, make one decision per category:
      - A new commitment appeared without a task to track it — call
        add_task with the commitment.
      - A calendar event belongs from the signal — call
-       execute_action("calendar_create", ...). Use the prefix
-       convention:
-         - No prefix = firm appointment (confirmed by signal)
-         - 🔔 prefix = reminder
-         - ❓ prefix = open question / soft suggestion
+       execute_action("calendar_create", ...). Pass `kind`:
+         - `"firm"` (default) = real appointment. No prefix.
+         - `"reminder"` = time-bound nudge. Auto-prefixes `[Deja] `
+           and pops notification at event start.
+         - `"question"` = open question. Auto-prefixes `[Deja] ❓ `.
+       Calendar and goals.md are complementary: for time/place-bound
+       reminders, call `calendar_create` AND `add_reminder`.
 
 3. **SILENT** — no push, no write. Return without doing anything.
    Do this when the cycle's activity is routine context-building that

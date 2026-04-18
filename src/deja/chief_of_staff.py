@@ -168,9 +168,23 @@ For every invocation, pick ONE of:
    - `execute_action("draft_email", {to, subject, body})` — draft a
      reply in the user's voice, saved to Gmail drafts. Never send
      to third parties; always draft.
-   - `execute_action("calendar_create", {...})` — create an event.
-     Prefix convention: no prefix = firm, 🔔 = reminder, ❓ = open
-     question / soft suggestion.
+   - `execute_action("calendar_create", {summary, start, end, location?, description?, kind?})`
+     — pass `kind: "reminder"` for time/place-bound nudges the user
+     wants popped on their phone (auto-prefixes summary with
+     `[Deja] ` and pops a notification at event start). Pass
+     `kind: "question"` for open questions (auto-prefixes
+     `[Deja] ❓ `). Default `kind: "firm"` for actual meetings the
+     user asked you to book — no prefix, default calendar reminders.
+
+     **Important: calendar and goals.md are complementary, not
+     alternatives.** When you add a reminder with a specific time or
+     location, call BOTH `calendar_create` with `kind: "reminder"`
+     AND `add_reminder` (goals.md). Calendar gives a mobile popup at
+     time T; goals.md lets cos sweep/resolve it in the daily brief.
+     Use calendar alone only when the only thing the user needs is
+     the in-the-moment ping (e.g., "leave in 20 min"). Use goals.md
+     alone when the item has a date but no time/place (e.g., "by
+     end of week, reply to X").
    - `complete_task`, `resolve_waiting_for`, `resolve_reminder`,
      `archive_*` — close loops aggressively when evidence supports.
    - `add_task`, `add_waiting_for`, `add_reminder` — capture gaps.

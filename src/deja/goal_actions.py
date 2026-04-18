@@ -111,29 +111,55 @@ def _log_action(action_type: str, summary: str, reason: str = "") -> None:
 # Individual action executors
 # ---------------------------------------------------------------------------
 
+def _strip_deja_prefix(title: str) -> str:
+    """Return title with any leading ``[Deja]`` / ``❓`` marker stripped."""
+    t = (title or "").strip()
+    if t.startswith("[Deja]"):
+        t = t[len("[Deja]"):].strip()
+    if t.startswith("❓"):
+        t = t[len("❓"):].strip()
+    return t
+
+
 def _calendar_create(params: dict, reason: str) -> None:
     """Create a Google Calendar event, skipping if a similar one already exists.
 
-    Checks for existing events with the same title in the same time window
-    to prevent duplicates from repeated integrate/reflect cycles.
+    Params: ``summary``, ``start``, ``end``, optional ``location``,
+    ``description``, and ``kind``. ``kind`` is one of:
+
+    - ``"firm"`` (default): real meeting/appointment. No prefix. Google
+      Calendar's default reminders apply (e.g. 10-min popup).
+    - ``"reminder"``: time-bound nudge. Summary is prefixed with
+      ``"[Deja] "`` and the event overrides reminders to a single popup
+      at start time (minutes=0) so the user gets pinged AT time T.
+    - ``"question"``: open question / soft suggestion. Summary prefixed
+      with ``"[Deja] ❓ "``. Same popup-at-start override as reminder.
+
+    Dedup: compares un-prefixed titles so a re-run with a different
+    ``kind`` won't double-insert. Searches ±1h around ``start``.
     """
     summary = params.get("summary", "")
     start = params.get("start", "")
     end = params.get("end", "")
+    kind = params.get("kind", "firm")
     if not summary or not start or not end:
         log.warning("calendar_create: missing summary/start/end")
         return
+
+    if kind == "reminder" and not summary.startswith("[Deja]"):
+        summary = f"[Deja] {summary}"
+    elif kind == "question" and not summary.startswith("[Deja]"):
+        summary = f"[Deja] ❓ {summary}"
 
     svc = _service("calendar", "v3")
     if svc is None:
         log.warning("calendar_create: skipped (no service)")
         return
 
-    # Dedup: check if an event with a similar title already exists near this time
+    # Dedup: compare un-prefixed titles so re-runs that flip kind don't double-insert
     try:
         from datetime import timedelta
         start_dt = datetime.fromisoformat(start)
-        # Search window: 1 hour before to 1 hour after the start time
         search_min = (start_dt - timedelta(hours=1)).isoformat()
         search_max = (start_dt + timedelta(hours=1)).isoformat()
 
@@ -144,9 +170,9 @@ def _calendar_create(params: dict, reason: str) -> None:
             singleEvents=True,
             maxResults=10,
         ).execute()
+        new_title = _strip_deja_prefix(summary).lower()
         for event in existing.get("items", []):
-            existing_title = (event.get("summary") or "").lower().strip()
-            new_title = summary.lower().strip()
+            existing_title = _strip_deja_prefix(event.get("summary") or "").lower()
             if existing_title == new_title:
                 log.info(
                     "calendar_create: skipping duplicate — '%s' already exists at %s",
@@ -165,6 +191,11 @@ def _calendar_create(params: dict, reason: str) -> None:
         event_body["location"] = params["location"]
     if params.get("description"):
         event_body["description"] = params["description"]
+    if kind in ("reminder", "question"):
+        event_body["reminders"] = {
+            "useDefault": False,
+            "overrides": [{"method": "popup", "minutes": 0}],
+        }
 
     try:
         svc.events().insert(calendarId="primary", body=event_body).execute()
