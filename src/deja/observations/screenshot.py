@@ -21,6 +21,15 @@ from deja.observations.types import Observation
 log = logging.getLogger(__name__)
 
 _last_image_hashes: dict[str, object] = {}  # per-screen perceptual hash
+# Per-screen wall-clock time of the last ACCEPTED capture. Used to
+# override pHash dedup for stable text-heavy views (terminals, chat
+# threads) where content changes substantively but the visual hash
+# barely moves — a scrolling cmux session diffs at ~6 bits vs the
+# pHash threshold of 8, so every frame gets silently dropped. After
+# this many seconds of consecutive dedup-rejects, accept the next
+# frame anyway.
+_last_accepted_ts: dict[str, float] = {}
+_DEDUP_TIME_OVERRIDE_SEC = 90
 _last_read_ts: float = 0
 
 _DEJA_HOME = os.path.expanduser("~/.deja")
@@ -110,15 +119,28 @@ def capture_screenshot_if_changed(
 
         current_hash = imagehash.phash(Image.open(path))
         prev_hash = _last_image_hashes.get(hash_key)
+        now = time.time()
         if prev_hash is not None:
             distance = current_hash - prev_hash
-            log.info("Screenshot dedup %s: hash distance=%d (threshold=8)", os.path.basename(src_path), distance)
+            last_accepted = _last_accepted_ts.get(hash_key, 0.0)
+            time_since = now - last_accepted
             if distance < 8:
-                os.remove(path)
-                return None
+                if time_since >= _DEDUP_TIME_OVERRIDE_SEC:
+                    log.info(
+                        "Screenshot %s: dedup override — distance=%d but %.0fs since last accept",
+                        os.path.basename(src_path), distance, time_since,
+                    )
+                else:
+                    log.info(
+                        "Screenshot dedup %s: hash distance=%d (threshold=8)",
+                        os.path.basename(src_path), distance,
+                    )
+                    os.remove(path)
+                    return None
         else:
             log.info("Screenshot %s: first capture (no prev hash)", os.path.basename(src_path))
         _last_image_hashes[hash_key] = current_hash
+        _last_accepted_ts[hash_key] = now
     except Exception:
         log.debug("imagehash dedup failed — proceeding without dedup", exc_info=True)
 
