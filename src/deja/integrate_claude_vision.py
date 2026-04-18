@@ -89,6 +89,13 @@ _SYSTEM_PROMPT = (
     "    time window to avoid duplicates.\n"
     "  • When a signal is ambiguous: `mcp__deja__recent_activity` to "
     "    correlate across sources.\n"
+    "  • To VERIFY an appointment time or attendee list seen on "
+    "    screen: `mcp__deja__calendar_list_events` — hits the user's "
+    "    Google Calendar directly; authoritative ground truth.\n"
+    "  • To VERIFY an email you saw a fragment of: "
+    "    `mcp__deja__gmail_search` (by sender/subject/recency) then "
+    "    `mcp__deja__gmail_get_message` for full body. Use when a "
+    "    message is only visible as a preview and you need the text.\n"
     "\n"
     "DO NOT call any write tool (update_wiki, add_task, execute_action, "
     "resolve_*, archive_*). Your contract is to PROPOSE writes in the "
@@ -264,6 +271,7 @@ def _run_claude_vision_sync(
             "--mcp-config", str(COS_MCP_CONFIG),
             "--allowedTools",
             ",".join([
+                # Deja memory (read-only)
                 "mcp__deja__search_deja",
                 "mcp__deja__get_page",
                 "mcp__deja__list_goals",
@@ -271,6 +279,10 @@ def _run_claude_vision_sync(
                 "mcp__deja__recent_activity",
                 "mcp__deja__daily_briefing",
                 "mcp__deja__get_context",
+                # Google APIs (read-only, authoritative)
+                "mcp__deja__calendar_list_events",
+                "mcp__deja__gmail_search",
+                "mcp__deja__gmail_get_message",
             ]),
         ]
 

@@ -497,6 +497,72 @@ def create_server() -> Server:
                     "required": ["type", "params", "reason"],
                 },
             ),
+            # -------- Direct Google API access (read-only) ---------
+            # These bypass Deja's observation pipeline and hit the
+            # user's Google Workspace directly via the OAuth token
+            # collected at setup. Intended for integrate/cos to
+            # ground-truth specific facts (a meeting time, a message
+            # body) when screenshots or wiki excerpts are ambiguous.
+            types.Tool(
+                name="calendar_list_events",
+                description=(
+                    "List the user's Google Calendar events in a date "
+                    "range. Authoritative source for meeting times, "
+                    "attendees, and locations — use this to verify "
+                    "facts that screenshots may have rendered "
+                    "ambiguously. ISO 8601 times. Default calendar is "
+                    "primary."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "time_min": {
+                            "type": "string",
+                            "description": "ISO 8601 start (e.g. 2026-04-18T00:00:00-07:00). Defaults to now if omitted.",
+                        },
+                        "time_max": {
+                            "type": "string",
+                            "description": "ISO 8601 end. Defaults to 24h after time_min.",
+                        },
+                        "max_results": {"type": "integer", "default": 25},
+                        "calendar_id": {"type": "string", "default": "primary"},
+                    },
+                },
+            ),
+            types.Tool(
+                name="gmail_search",
+                description=(
+                    "Search the user's Gmail for messages matching a "
+                    "query (Gmail's native query syntax: 'from:', "
+                    "'to:', 'subject:', 'newer_than:3d', etc.). "
+                    "Returns message IDs, sender, subject, snippet. "
+                    "Use gmail_get_message for full body."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string"},
+                        "max_results": {"type": "integer", "default": 10},
+                    },
+                    "required": ["query"],
+                },
+            ),
+            types.Tool(
+                name="gmail_get_message",
+                description=(
+                    "Fetch a single Gmail message by ID. Returns "
+                    "from, to, subject, date, full text body "
+                    "(plain-text extracted, quoted history stripped). "
+                    "Get the ID from gmail_search first."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "message_id": {"type": "string"},
+                    },
+                    "required": ["message_id"],
+                },
+            ),
         ]
 
     @app.call_tool()
@@ -1109,6 +1175,150 @@ def _execute_action(action_type: str, params: dict, reason: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Direct Google API tools (read-only)
+# ---------------------------------------------------------------------------
+
+
+def _calendar_list_events(
+    time_min: str | None = None,
+    time_max: str | None = None,
+    max_results: int = 25,
+    calendar_id: str = "primary",
+) -> str:
+    """Query Google Calendar directly. Authoritative source for meeting times."""
+    from datetime import datetime, timedelta, timezone as _tz
+    try:
+        from deja.google_api import get_service
+        svc = get_service("calendar", "v3")
+    except Exception as e:
+        return f"(calendar unavailable: {type(e).__name__}: {e})"
+
+    if not time_min:
+        time_min = datetime.now(_tz.utc).isoformat()
+    if not time_max:
+        try:
+            t0 = datetime.fromisoformat(time_min.replace("Z", "+00:00"))
+        except Exception:
+            t0 = datetime.now(_tz.utc)
+        time_max = (t0 + timedelta(days=1)).isoformat()
+
+    try:
+        resp = svc.events().list(
+            calendarId=calendar_id,
+            timeMin=time_min,
+            timeMax=time_max,
+            maxResults=max(1, min(max_results, 100)),
+            singleEvents=True,
+            orderBy="startTime",
+        ).execute()
+    except Exception as e:
+        return f"(calendar query failed: {type(e).__name__}: {str(e)[:200]})"
+
+    items = resp.get("items") or []
+    if not items:
+        return f"(no events on {calendar_id} between {time_min} and {time_max})"
+
+    lines = [f"{len(items)} event(s) on {calendar_id} between {time_min[:16]} and {time_max[:16]}:"]
+    for e in items:
+        start = (e.get("start") or {}).get("dateTime") or (e.get("start") or {}).get("date") or "?"
+        end = (e.get("end") or {}).get("dateTime") or (e.get("end") or {}).get("date") or "?"
+        summary = e.get("summary") or "(no title)"
+        attendees = e.get("attendees") or []
+        att_str = ", ".join(a.get("email") or a.get("displayName") or "?" for a in attendees[:5]) if attendees else ""
+        loc = e.get("location") or ""
+        lines.append(
+            f"  [{start[:19]} → {end[:19]}] {summary}"
+            + (f"  • at {loc}" if loc else "")
+            + (f"  • with {att_str}" if att_str else "")
+        )
+    return "\n".join(lines)
+
+
+def _gmail_search(query: str, max_results: int = 10) -> str:
+    """Search Gmail. Returns msg_id, from, subject, snippet per hit."""
+    if not query:
+        return "(empty query — try from:arbella, newer_than:2d, subject:roof, etc.)"
+    try:
+        from deja.google_api import get_service
+        svc = get_service("gmail", "v1")
+    except Exception as e:
+        return f"(gmail unavailable: {type(e).__name__}: {e})"
+
+    try:
+        resp = svc.users().messages().list(
+            userId="me",
+            q=query,
+            maxResults=max(1, min(max_results, 50)),
+        ).execute()
+    except Exception as e:
+        return f"(gmail search failed: {type(e).__name__}: {str(e)[:200]})"
+
+    msgs = resp.get("messages") or []
+    if not msgs:
+        return f"(no Gmail hits for query {query!r})"
+
+    lines = [f"{len(msgs)} Gmail hit(s) for {query!r}:"]
+    for m in msgs:
+        mid = m.get("id") or "?"
+        try:
+            meta = svc.users().messages().get(
+                userId="me",
+                id=mid,
+                format="metadata",
+                metadataHeaders=["From", "To", "Subject", "Date"],
+            ).execute()
+        except Exception:
+            continue
+        hdrs = {h.get("name", "").lower(): h.get("value", "") for h in (meta.get("payload") or {}).get("headers", [])}
+        snippet = (meta.get("snippet") or "").replace("&#39;", "'")[:140]
+        lines.append(
+            f"  id={mid}"
+            f"  from={hdrs.get('from', '?')[:60]}"
+            f"  subj={hdrs.get('subject', '?')[:80]}"
+            f"  date={hdrs.get('date', '')[:25]}"
+            f"\n    snippet: {snippet}"
+        )
+    return "\n".join(lines)
+
+
+def _gmail_get_message(message_id: str) -> str:
+    """Fetch one Gmail message's full body (plain-text stripped of quoted history)."""
+    if not message_id:
+        return "(no message_id — get one via gmail_search first)"
+    try:
+        from deja.google_api import get_service
+        svc = get_service("gmail", "v1")
+    except Exception as e:
+        return f"(gmail unavailable: {type(e).__name__}: {e})"
+
+    try:
+        msg = svc.users().messages().get(userId="me", id=message_id, format="full").execute()
+    except Exception as e:
+        return f"(gmail fetch failed: {type(e).__name__}: {str(e)[:200]})"
+
+    payload = msg.get("payload") or {}
+    hdrs = {h.get("name", "").lower(): h.get("value", "") for h in payload.get("headers", [])}
+
+    try:
+        from deja.observations.email import _extract_plain_text_body, _strip_quoted_reply
+        body = _extract_plain_text_body(payload) or ""
+        body = _strip_quoted_reply(body).strip()
+    except Exception:
+        body = msg.get("snippet") or ""
+
+    if len(body) > 8000:
+        body = body[:8000] + "\n\n[...truncated at 8K chars]"
+
+    return (
+        f"From: {hdrs.get('from', '?')}\n"
+        f"To: {hdrs.get('to', '?')}\n"
+        f"Subject: {hdrs.get('subject', '?')}\n"
+        f"Date: {hdrs.get('date', '?')}\n\n"
+        f"{body}"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Tool dispatch
 # ---------------------------------------------------------------------------
 
@@ -1201,6 +1411,23 @@ def _dispatch(name: str, args: dict) -> str:
             params=args.get("params") or {},
             reason=args.get("reason", ""),
         )
+
+    if name == "calendar_list_events":
+        return _calendar_list_events(
+            time_min=args.get("time_min"),
+            time_max=args.get("time_max"),
+            max_results=args.get("max_results", 25),
+            calendar_id=args.get("calendar_id", "primary"),
+        )
+
+    if name == "gmail_search":
+        return _gmail_search(
+            query=args.get("query", ""),
+            max_results=args.get("max_results", 10),
+        )
+
+    if name == "gmail_get_message":
+        return _gmail_get_message(args.get("message_id", ""))
 
     return f"(unknown tool: {name})"
 
