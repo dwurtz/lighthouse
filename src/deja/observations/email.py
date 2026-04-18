@@ -486,6 +486,53 @@ def _get_thread(thread_id: str) -> list[dict]:
 _PROCESSED_REPLIES_PATH = DEJA_HOME / "chief_of_staff" / "processed_replies"
 
 
+def _verify_reply_auth(raw_message: dict, user_email: str) -> tuple[bool, str]:
+    """Validate a candidate user-reply email against spoofing.
+
+    Two checks:
+
+      1. The parsed ``From:`` email MUST exactly match ``user_email``
+         (the Google-authenticated identity from ``load_user()``).
+         Substring match would let a spoofed ``david@davidwurtz.com.evil.tld``
+         pass through. We accept only the exact address.
+
+      2. Gmail's ``Authentication-Results`` header MUST show
+         ``dmarc=pass`` with ``header.from=<user's domain>``. DMARC
+         enforcement requires DKIM or SPF alignment on the From
+         domain, so a ``dmarc=pass`` verdict means the mail either
+         carries a valid DKIM signature from the domain or came over
+         an SPF-authorized path. We don't require SPF independently
+         because legitimate forwarders break SPF; DMARC covers us.
+
+    Returns ``(ok, reason)``. On False, caller drops the reply and
+    audits the rejection so you can see spoofing attempts in ``deja trail``.
+    """
+    from email.utils import parseaddr
+
+    if not user_email:
+        return (False, "no authenticated user identity on file")
+
+    headers = {
+        (h.get("name") or "").lower(): h.get("value") or ""
+        for h in raw_message.get("payload", {}).get("headers", [])
+    }
+    from_header = headers.get("from", "")
+    auth_results = headers.get("authentication-results", "").lower()
+
+    _, parsed_email = parseaddr(from_header)
+    parsed_email = (parsed_email or "").strip().lower()
+    expected = user_email.strip().lower()
+    if parsed_email != expected:
+        return (False, f"From mismatch: {parsed_email!r} vs {expected!r}")
+
+    if "dmarc=pass" not in auth_results:
+        return (False, "DMARC did not pass")
+    domain = expected.split("@", 1)[1] if "@" in expected else ""
+    if domain and f"header.from={domain}" not in auth_results:
+        return (False, f"DMARC header.from not aligned to {domain!r}")
+    return (True, "ok")
+
+
 def _is_reply_processed(message_id: str) -> bool:
     """True iff this Gmail Message-Id has already been dispatched to cos."""
     if not message_id:
@@ -546,6 +593,32 @@ def _handle_user_reply_to_cos(
         log.debug(
             "email: user reply already processed: %s", reply_message_id[:80],
         )
+        return
+
+    # Anti-spoofing: require exact sender + DMARC pass. Reject otherwise
+    # and audit so probing attempts are visible in ``deja trail``.
+    try:
+        from deja.identity import load_user
+        user_email = (load_user().email or "").lower()
+    except Exception:
+        user_email = ""
+    ok, auth_reason = _verify_reply_auth(latest_raw, user_email)
+    if not ok:
+        log.warning(
+            "email: rejected user reply (auth fail): %s — subject=%r",
+            auth_reason, subject[:80],
+        )
+        try:
+            from deja import audit
+            audit.record(
+                "reply_auth_reject",
+                target=f"email/{reply_message_id[:40]}",
+                reason=f"{auth_reason} — subject={subject[:80]}",
+            )
+        except Exception:
+            pass
+        if reply_message_id:
+            _mark_reply_processed(reply_message_id)
         return
 
     user_message = (latest_msg.get("body") or "").strip()
