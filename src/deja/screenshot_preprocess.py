@@ -95,7 +95,6 @@ SALIENT_FACTS: <structured facts visible on screen that a good
                   CONTACT: <Person — email or phone>
                   EMAIL: <address@domain — whose it is>
                   PHONE: <+15551234 — whose it is>
-                  APPOINTMENT: <what — when — where>
                   PRESCRIPTION: <drug — source / pharmacy / prescriber>
                   DEADLINE: <what — by when>
                   DECISION: <short summary of a commitment made>
@@ -103,7 +102,16 @@ SALIENT_FACTS: <structured facts visible on screen that a good
                   URL: <link — what it is>
                 Include a fact whenever its value is visible on this
                 screen and would be worth remembering, regardless of
-                whether you've seen it before.>
+                whether you've seen it before.
+                DO NOT emit APPOINTMENT entries. Calendar events come
+                from the Google Calendar API as structured signals;
+                inferring appointment times from visual calendar grids
+                or email notification previews has produced
+                hallucinated cell-to-time mappings (e.g. reading a
+                12pm cell as 4:30pm) and fabricated attendee pages
+                from garbled names. If the user's calendar is on
+                screen, it's [T3] context — not a source of schedule
+                facts.>
 CONTENT:
 <the substantive visible text — email body, message thread, document
 paragraph, meeting agenda, OR for DEV_WORK: the actual terminal output,

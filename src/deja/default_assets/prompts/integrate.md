@@ -48,6 +48,12 @@ When a message signal includes a `## Context (last N messages in this thread —
 4. **Closure comes from the user's voice.** "Passing on this", "declined", "shipped", "signed" — rewrite the project's opening sentence so closure is visible. Inbound "congrats" is not closure.
 5. **One conversation = one event**, not one per message. Capture the arc in 4–8 sentences. Preserve specifics: who drives which days, actual pickup times, verbatim commitments.
 6. **Attribute by name.** `You` = {user_first_name}. Everyone else by name. If Kim said "no drop-off needed", write "[[kim]] confirmed no drop-off was needed" — never "{user_first_name} confirmed."
+7. **Person pages require structured grounding.** Do NOT create a new `people/<slug>.md` page unless the name appears in at least one of:
+     (a) a structured signal field — email From/To/Cc header, `[imessage]` / `[whatsapp]` chat_label, `[calendar]` attendee list, or the user's own voice ([T1] typed / spoken);
+     (b) the same cycle's screenshot OCR alongside a visible email address or phone number for that person;
+     (c) an existing wiki reference (`[[slug]]` already elsewhere), meaning prior cycles already corroborated.
+   A name that appears only in a screenshot of a calendar cell, dropdown, or inbox-list preview — with no email, no phone, no structured handle — is almost always OCR noise or a one-off mention. Skip the person-page creation. If the name resurfaces across multiple cycles with real structure, it will pass the gate next time.
+8. **Update-without-new-fact is not allowed.** An `[update]` to a page must name a concrete new fact in `reason`: added X, changed Y to Z, confirmed date W, received quote $N. "Activities continued", "noted in calendar", "reviewed inbox" are not facts — they're presence. Blanket re-touches of people/project pages without a new delta are banned.
 
 # Reconcile
 
