@@ -248,11 +248,26 @@ def _inject_thread_context(obs: dict) -> dict:
     context_body = "\n".join(_render(m) for m in messages[-_THREAD_CONTEXT_LIMIT:])
     new_text = (obs.get("text") or "").strip()
 
+    # The context section prefixes each message with `[ts] speaker:` —
+    # the "new" section should use the same shape so integrate (text
+    # path) can unambiguously attribute every line. Without this the
+    # new-cycle block is bare body text and text integrators must
+    # guess who said what. Caused a real miss: a T1 inner-circle
+    # WhatsApp from Nie ("maybe we need to raise au pair pay") went
+    # unattributed → Gemini skipped it; vision-path (which sees the
+    # chat bubble visually) caught it.
+    speaker_for_new = obs.get("speaker") or obs.get("sender") or ""
+    speaker_prefix = f"{speaker_for_new}: " if speaker_for_new else ""
+    new_body_prefixed = "\n".join(
+        (f"  {speaker_prefix}{line}" if line.strip() else "")
+        for line in new_text.splitlines()
+    ) if new_text else "(no new content)"
+
     wrapped = (
         f"## Context (last {min(len(messages), _THREAD_CONTEXT_LIMIT)} messages in this thread — already processed, grounding only)\n"
         f"{context_body}\n\n"
         f"## New this cycle\n"
-        f"{new_text}"
+        f"{new_body_prefixed}"
     )
 
     out = dict(obs)
