@@ -64,8 +64,17 @@ final class ScreenCaptureScheduler {
     private var axRunLoopSource: CFRunLoopSource?
 
     // Debounce windows — named for clarity at call sites.
+    //
+    // typingPauseDebounce was 0.0 ("fire immediately"); bumped to 0.5s
+    // so the UI has time to settle after the user stops typing. The
+    // 2s quiet threshold in KeystrokeMonitor already guarantees the
+    // user isn't mid-burst; the extra 0.5s covers the message-sent
+    // animation + "Marked Done" state update + any background
+    // reflows. Also coheres with appFocusDebounce so rapid "type →
+    // send → app switches focus" sequences don't stack 2-3 captures
+    // where 1 suffices.
     private let appFocusDebounce: TimeInterval = 0.5
-    private let typingPauseDebounce: TimeInterval = 0.0
+    private let typingPauseDebounce: TimeInterval = 0.5
     private let windowChangeDebounce: TimeInterval = 1.0
 
     // Floor interval (seconds of no event → force a capture).
