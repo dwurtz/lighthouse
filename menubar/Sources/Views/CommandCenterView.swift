@@ -233,11 +233,7 @@ private struct ObservationCard: View {
                 }
                 Spacer()
             }
-            Text(entry.text)
-                .font(.system(size: 12))
-                .foregroundColor(.white.opacity(0.85))
-                .lineLimit(nil)
-                .fixedSize(horizontal: false, vertical: true)
+            narrativeBody
                 .textSelection(.enabled)
         }
         .padding(10)
@@ -246,6 +242,66 @@ private struct ObservationCard: View {
             RoundedRectangle(cornerRadius: 8)
                 .fill(Color.white.opacity(0.04))
         )
+    }
+
+    /// Render the narrative body with structure: a lead paragraph in
+    /// normal weight, then any `- ` bullets as indented rows so the
+    /// card is scannable instead of a wall of prose.
+    @ViewBuilder
+    private var narrativeBody: some View {
+        let (lead, bullets) = Self.split(entry.text)
+        VStack(alignment: .leading, spacing: 6) {
+            if !lead.isEmpty {
+                Text(lead)
+                    .font(.system(size: 12))
+                    .foregroundColor(.white.opacity(0.9))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if !bullets.isEmpty {
+                VStack(alignment: .leading, spacing: 3) {
+                    ForEach(Array(bullets.enumerated()), id: \.offset) { _, b in
+                        HStack(alignment: .top, spacing: 6) {
+                            Text("•")
+                                .font(.system(size: 11))
+                                .foregroundColor(.white.opacity(0.45))
+                            Text(b)
+                                .font(.system(size: 11))
+                                .foregroundColor(.white.opacity(0.8))
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Split narrative text into (lead, bullets). Bullets are any lines
+    /// beginning with "- " or "• ". The lead is everything before the
+    /// first bullet (joined with spaces) and may be empty for bullet-only
+    /// narratives. Older prose-only narratives (no bullets) fall through
+    /// as a single lead paragraph, preserving backward compatibility.
+    private static func split(_ text: String) -> (lead: String, bullets: [String]) {
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+        var leadLines: [String] = []
+        var bullets: [String] = []
+        var inBullets = false
+        for raw in lines {
+            let line = String(raw)
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            let isBullet = trimmed.hasPrefix("- ") || trimmed.hasPrefix("• ")
+            if isBullet {
+                inBullets = true
+                let body = trimmed
+                    .replacingOccurrences(of: "- ", with: "", options: [.anchored])
+                    .replacingOccurrences(of: "• ", with: "", options: [.anchored])
+                bullets.append(body)
+            } else if !inBullets {
+                if !trimmed.isEmpty {
+                    leadLines.append(trimmed)
+                }
+            }
+        }
+        return (leadLines.joined(separator: " "), bullets)
     }
 
     private func isToday(_ iso: String) -> Bool {
