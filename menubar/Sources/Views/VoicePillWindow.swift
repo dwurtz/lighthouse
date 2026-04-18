@@ -23,10 +23,13 @@ class VoicePillWindow: NSPanel {
     private let monitor: MonitorState
     private var cancellables: Set<AnyCancellable> = []
 
-    /// Dimensions of the collapsed pill window. Mirrors Voquill's host
-    /// window (200×86) so the two apps' bars line up and share the same
-    /// padding around the visible capsule.
-    private static let collapsedSize = NSSize(width: 200, height: 86)
+    /// Dimensions of the collapsed pill window. Wider than the old
+    /// 200×86 footprint so the post-dispatch echo pill (badge +
+    /// transcript + optional confirmation line) has room to render
+    /// without clipping. The idle capsule and recording-bars variants
+    /// still draw inside their own smaller frames, so the extra width
+    /// is invisible except during the 3s echo window.
+    private static let collapsedSize = NSSize(width: 320, height: 96)
 
     /// Dimensions of the expanded panel. Width is slightly wider than
     /// the pill so the command-center content has breathing room;

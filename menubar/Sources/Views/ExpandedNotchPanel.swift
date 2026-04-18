@@ -46,7 +46,7 @@ struct VoicePillContainer: View {
                     ))
             }
             VoicePillView(monitor: monitor)
-                .frame(width: 200, height: 86)
+                .frame(width: 320, height: 96)
         }
         .animation(.spring(response: 0.32, dampingFraction: 0.85), value: monitor.pillExpanded)
         .animation(.easeInOut(duration: 0.25), value: monitor.currentError)

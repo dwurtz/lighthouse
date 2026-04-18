@@ -42,10 +42,11 @@ struct VoicePillView: View {
                 collapsedPill
             }
         }
-        .frame(width: 200, height: 86, alignment: .bottom)
+        .frame(width: 320, height: 96, alignment: .bottom)
         .animation(.spring(response: 0.3, dampingFraction: 0.75), value: isRecording)
         .animation(.easeInOut(duration: 0.2), value: monitor.voicePillProcessing)
         .animation(.easeInOut(duration: 0.2), value: monitor.voicePillTranscript.isEmpty)
+        .animation(.easeInOut(duration: 0.2), value: monitor.voicePillConfirmation.isEmpty)
         .animation(.easeInOut(duration: 0.15), value: monitor.voicePillHovered)
     }
 
@@ -157,19 +158,42 @@ struct VoicePillView: View {
 
     // MARK: - Transcript
 
+    /// Width budget for the echo pill — wider than the idle/hover capsule
+    /// so we can actually fit a dictated sentence without shrinking to a
+    /// single word. Still tight enough to stay a "pill" rather than a
+    /// card. Confirmation layout re-uses the same width and grows in
+    /// height when a second line is present.
+    private static let transcriptPillWidth: CGFloat = 300
+
     private var transcriptPill: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 11))
-                .foregroundColor(.green.opacity(0.85))
-            Text(monitor.voicePillTranscript)
-                .font(.system(size: 10, weight: .medium))
-                .foregroundColor(.white.opacity(0.9))
-                .lineLimit(1)
-                .truncationMode(.tail)
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 6) {
+                if !monitor.voicePillBadge.isEmpty {
+                    Text(monitor.voicePillBadge)
+                        .font(.system(size: 12))
+                } else {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 11))
+                        .foregroundColor(.green.opacity(0.85))
+                }
+                Text(monitor.voicePillTranscript)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.white.opacity(0.95))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+            if !monitor.voicePillConfirmation.isEmpty {
+                Text(monitor.voicePillConfirmation)
+                    .font(.system(size: 9, weight: .regular))
+                    .foregroundColor(.white.opacity(0.6))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .padding(.leading, 18)
+            }
         }
         .padding(.horizontal, 10)
-        .frame(maxWidth: Self.hoverCapsuleWidth, minHeight: Self.hoverCapsuleHeight, maxHeight: Self.hoverCapsuleHeight)
+        .padding(.vertical, 6)
+        .frame(maxWidth: Self.transcriptPillWidth, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: Self.hoverCornerRadius)
                 .fill(Color.black.opacity(0.92))

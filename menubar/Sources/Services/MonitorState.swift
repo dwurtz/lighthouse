@@ -66,6 +66,14 @@ class MonitorState: ObservableObject {
     @Published var voicePillProcessing: Bool = false
     @Published var voicePillStatus: String = ""  // "Listening..." or "Transcribing..."
     @Published var voicePillTranscript: String = ""
+    /// Emoji badge for the post-dispatch echo in the pill — mapped from
+    /// the classification type returned by /api/mic/stop. Empty string
+    /// when no recent result is being displayed.
+    @Published var voicePillBadge: String = ""
+    /// Short human-readable summary of what the dispatch actually did
+    /// (e.g. "Created event: Dentist…"). Rendered as a secondary line
+    /// below the transcript during the 3-second echo window.
+    @Published var voicePillConfirmation: String = ""
     @Published var voicePillHovered: Bool = false
     // 16 rolling audio-level samples, 0.0–1.0 each. Newest sample gets
     // appended at the end and the oldest is dropped off the front, so
@@ -875,6 +883,8 @@ class MonitorState: ObservableObject {
         guard !voicePillActive, !voicePillProcessing else { return }
         voicePillActive = true
         voicePillTranscript = ""
+        voicePillBadge = ""
+        voicePillConfirmation = ""
 
         // Reset the bar history so the pill starts at rest. New RMS
         // samples will flow in via recordVoiceLevel() as VoiceRecorder's
@@ -905,6 +915,8 @@ class MonitorState: ObservableObject {
         voicePillProcessing = true
         voicePillStatus = "Transcribing..."
         voicePillTranscript = ""
+        voicePillBadge = ""
+        voicePillConfirmation = ""
 
         // Stop recording and run the transcript through the command
         // classifier (backend routes mic transcripts through the same
@@ -967,19 +979,34 @@ class MonitorState: ObservableObject {
 
             let confirmation = (obj["confirmation"] as? String) ?? ""
             let cmdType = (obj["type"] as? String) ?? ""
+            let badge: String
+            switch cmdType {
+            case "action":     badge = "📅"
+            case "goal":       badge = "✓"
+            case "automation": badge = "🔁"
+            case "context":    badge = "🧠"
+            default:           badge = ""
+            }
 
             DispatchQueue.main.async {
                 self.voicePillProcessing = false
                 self.voicePillTranscript = transcript
+                self.voicePillBadge = badge
+                self.voicePillConfirmation = confirmation
 
                 // Force a fresh screenshot — the user just spoke, so this
                 // is the moment we want vision to see (and the next vision
                 // cycle will correlate the voice context with it).
                 self.captureScreenshot(force: true)
 
-                // Show the transcript briefly on the pill, then clear.
-                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                // Show the transcript + badge + confirmation for 3s, then
+                // collapse the pill back to idle. If the user re-triggers
+                // push-to-talk in the interim, startVoiceCapture() clears
+                // the echo state itself, so this late clear is idempotent.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
                     self.voicePillTranscript = ""
+                    self.voicePillBadge = ""
+                    self.voicePillConfirmation = ""
                 }
 
                 // Expand the notch to show the classification banner +

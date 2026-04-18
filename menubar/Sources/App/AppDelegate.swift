@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import AVFoundation
+import AudioToolbox
 import Combine
 import ScreenCaptureKit
 import Sparkle
@@ -570,6 +571,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         hotkeyManager.onKeyDown = { [weak self] in
             guard let self = self else { return }
+            // Aural bookend: a crisp "Tink" confirms to the user that
+            // push-to-talk actually armed. Plays unconditionally on
+            // keydown — even the blocked-path gives a click so the
+            // keystroke never feels swallowed.
+            AudioServicesPlaySystemSound(1103)
             // Voice capture is gated while Deja is structurally
             // blocked — no point recording when the agent can't
             // process the transcript. Reopen the setup panel so the
@@ -581,6 +587,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             self.monitor.startVoiceCapture()
         }
         hotkeyManager.onKeyUp = { [weak self] in
+            // Release bookend — subtler than the keydown click.
+            AudioServicesPlaySystemSound(1306)
             self?.monitor.stopVoiceCapture()
         }
         hotkeyManager.start()
