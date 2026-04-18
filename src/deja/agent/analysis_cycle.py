@@ -390,6 +390,7 @@ async def _run_analysis_cycle_body(
                 wiki_text=wiki_text,
                 open_windows=open_windows_text,
                 claude_signals_text_override=claude_override,
+                claude_signal_items=batch_items,
             )
 
             # Save the response alongside the fixture

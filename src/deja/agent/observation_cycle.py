@@ -235,8 +235,16 @@ async def run_collect_cycle(loop_ref) -> None:
                         # see the unadulterated pixel-to-text output. See
                         # deja/raw_ocr_sidecar.py for the contract.
                         if ocr_text:
-                            from deja.raw_ocr_sidecar import write as _sidecar_write
-                            _sidecar_write(sig.id_key, ocr_text)
+                            from deja.raw_ocr_sidecar import write as _ocr_sidecar_write
+                            _ocr_sidecar_write(sig.id_key, ocr_text)
+
+                        # Also save the raw PNG so downstream vision-
+                        # based consumers (Claude shadow in vision mode)
+                        # can reason about pixels directly — no OCR
+                        # lossy intermediate. Image is about to be
+                        # deleted below; copy first.
+                        from deja.raw_image_sidecar import write as _img_sidecar_write
+                        _img_sidecar_write(sig.id_key, image_path)
 
                         if ocr_text:
                             # Label the signal clearly so integrate

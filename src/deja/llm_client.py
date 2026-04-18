@@ -398,6 +398,7 @@ class GeminiClient:
         open_windows: str = "",
         *,
         claude_signals_text_override: str | None = None,
+        claude_signal_items: list[dict] | None = None,
     ) -> dict:
         """Run one unified analysis cycle. Returns {reasoning, wiki_updates}."""
         now = datetime.now()
@@ -492,46 +493,67 @@ class GeminiClient:
             )
             shadow_tasks.append((m, t))
 
-        # Claude shadow — independent of the Gemini A/B flag. Spawns
-        # `claude -p` subprocesses with prompts that mirror what
-        # Gemini saw. Response JSON lands in the same shadow record
-        # under ``shadows[model=claude-local*]``. Never writes to the
-        # wiki.
+        # Claude shadow — vision-based integrator. Spawns a `claude -p`
+        # subprocess with the integrate prompt AND the screenshot PNGs
+        # from the cycle attached as multimodal image blocks. Pure
+        # pixels in, JSON out — no OCR / preprocess-VLM layer in the
+        # Claude path at all. This is the "best Claude has to offer"
+        # comparison point against Gemini-on-preprocessed-text.
         #
-        # Two variants (when both are available):
-        #   claude-local           — preprocessed signals (apples-to-
-        #                            apples vs Gemini)
-        #   claude-local-raw-ocr   — raw Apple Vision OCR substituted
-        #                            for screenshot preprocess output
-        #                            (tests whether Claude does better
-        #                            on unadulterated input, bypassing
-        #                            the VLM hallucination class)
+        # Response JSON lands in the same ~/.deja/integrate_shadow/
+        # <ts>.json record under ``shadows[model=claude-local-vision]``.
+        # Never writes to the wiki.
         try:
             from deja.config import INTEGRATE_CLAUDE_SHADOW
             if INTEGRATE_CLAUDE_SHADOW:
-                from deja.integrate_claude import invoke_claude_shadow
-                shadow_tasks.append((
-                    "claude-local",
-                    asyncio.create_task(invoke_claude_shadow(prompt)),
-                ))
-                if claude_signals_text_override and claude_signals_text_override != signals_text:
-                    prompt_raw = load_prompt("integrate").format(
-                        current_time=current_time,
-                        day_of_week=day_of_week,
-                        time_of_day=time_of_day,
-                        contacts_text=contacts_text,
-                        goals=goals_text or "(no goals.md)",
-                        wiki_text=wiki_text or "(empty)",
-                        signals_text=claude_signals_text_override,
-                        open_windows=open_windows or "(not available)",
-                        **user_fields,
+                # Build a vision-friendly prompt: same template, but
+                # swap the screenshot signal text for a marker so
+                # Claude understands the images are the authoritative
+                # visual context (not the preprocessed text).
+                vision_signals_text = (
+                    claude_signals_text_override or signals_text
+                )
+                # Strip screenshot signal text entirely — images carry it
+                from deja.signals.format import format_signals as _fmt
+                if claude_signal_items is not None:
+                    non_screenshot = [
+                        s for s in claude_signal_items if s.get("source") != "screenshot"
+                    ]
+                    vision_signals_text = _fmt(non_screenshot) or "(no non-screenshot signals this cycle)"
+                    vision_signals_text += (
+                        "\n\n[ATTACHED IMAGES] "
+                        f"{sum(1 for s in claude_signal_items if s.get('source')=='screenshot')} "
+                        "screenshot(s) from this cycle are attached as images. "
+                        "They are the authoritative visual context for the user's screen "
+                        "during this window. Use them to distinguish active-reading from "
+                        "inbox-list preview; resolve ambiguous pronouns against what's "
+                        "currently on screen; reject text that appears only as a background "
+                        "list-preview snippet. Do not create wiki events for each message "
+                        "visible in an inbox — only for active threads / new commitments."
                     )
-                    shadow_tasks.append((
-                        "claude-local-raw-ocr",
-                        asyncio.create_task(invoke_claude_shadow(prompt_raw)),
-                    ))
+                prompt_vision = load_prompt("integrate").format(
+                    current_time=current_time,
+                    day_of_week=day_of_week,
+                    time_of_day=time_of_day,
+                    contacts_text=contacts_text,
+                    goals=goals_text or "(no goals.md)",
+                    wiki_text=wiki_text or "(empty)",
+                    signals_text=vision_signals_text,
+                    open_windows=open_windows or "(not available)",
+                    **user_fields,
+                )
+                from deja.integrate_claude_vision import invoke_claude_vision_shadow
+                shadow_tasks.append((
+                    "claude-local-vision",
+                    asyncio.create_task(
+                        invoke_claude_vision_shadow(
+                            prompt_vision,
+                            claude_signal_items or [],
+                        )
+                    ),
+                ))
         except Exception:
-            log.debug("claude shadow hook failed to schedule", exc_info=True)
+            log.debug("claude vision shadow hook failed to schedule", exc_info=True)
 
         t0 = time.time()
         resp_text = await self._generate(
