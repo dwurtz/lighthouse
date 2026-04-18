@@ -545,6 +545,26 @@ def _build_observation_from_thread(
     if any(n.lower() in subject.lower() for n in _SYSTEM_NOISE):
         return None
 
+    # Filter [Deja]-prefixed self-emails — those are cos notifications
+    # written BY the agent TO the user. If we let them through, they'd
+    # appear as [SENT] outbound signals, integrate would write events
+    # about them, cos on the next cycle would re-email about those
+    # events, and the loop never converges. This filter cuts the loop
+    # at the observer layer. Only affects emails where the user is
+    # both sender and recipient AND the subject is [Deja]-prefixed —
+    # so legitimate self-notes stay in.
+    try:
+        from deja.identity import load_user
+        user_email = (load_user().email or "").lower()
+    except Exception:
+        user_email = ""
+    if user_email and subject.strip().startswith("[Deja]"):
+        from_lower = (latest_from or "").lower()
+        to_lower = (latest_to or "").lower()
+        if user_email in from_lower and user_email in to_lower:
+            log.debug("email: skipping cos self-email loopback: %s", subject[:60])
+            return None
+
     n = len(thread_messages)
 
     if n == 1:

@@ -141,6 +141,14 @@ INTEGRATE_SHADOW_EVAL = False
 # decide whether Claude should become the production integrator.
 INTEGRATE_CLAUDE_SHADOW = bool(_raw.get("integrate_claude_shadow", False))
 
+# Which integrator drives wiki writes.
+#   "gemini"        — default; Gemini Flash is production, optional Claude shadow
+#   "claude_vision" — Claude Opus 4.7 with native PNG input is production;
+#                     Gemini Flash becomes the parallel shadow
+# On claude_vision, a Gemini fallback kicks in if the Claude subprocess
+# fails / times out so a bad shadow doesn't take the cycle down.
+INTEGRATE_MODE = str(_raw.get("integrate_mode", "gemini"))
+
 # Kill switch for the screenshot collector. Set to false in config.yaml
 # if macOS Screen Recording permission is unstable or if you want to
 # run Deja without any visual observation (messaging-only mode).

@@ -493,19 +493,20 @@ class GeminiClient:
             )
             shadow_tasks.append((m, t))
 
-        # Claude shadow — vision-based integrator. Spawns a `claude -p`
-        # subprocess with the integrate prompt AND the screenshot PNGs
-        # from the cycle attached as multimodal image blocks. Pure
-        # pixels in, JSON out — no OCR / preprocess-VLM layer in the
-        # Claude path at all. This is the "best Claude has to offer"
-        # comparison point against Gemini-on-preprocessed-text.
-        #
-        # Response JSON lands in the same ~/.deja/integrate_shadow/
-        # <ts>.json record under ``shadows[model=claude-local-vision]``.
-        # Never writes to the wiki.
+        # Claude vision integrator — used either as a shadow (default)
+        # or as the production driver (INTEGRATE_MODE="claude_vision").
+        # Spawns a `claude -p` subprocess with the integrate prompt
+        # AND the screenshot PNGs from the cycle attached as multimodal
+        # image blocks. Pure pixels in, JSON out — no OCR / preprocess-
+        # VLM layer in the Claude path at all.
+        claude_vision_task = None
         try:
-            from deja.config import INTEGRATE_CLAUDE_SHADOW
-            if INTEGRATE_CLAUDE_SHADOW:
+            from deja.config import INTEGRATE_CLAUDE_SHADOW, INTEGRATE_MODE
+            vision_wanted = (
+                INTEGRATE_CLAUDE_SHADOW
+                or INTEGRATE_MODE == "claude_vision"
+            )
+            if vision_wanted:
                 # Build a vision-friendly prompt: same template, but
                 # swap the screenshot signal text for a marker so
                 # Claude understands the images are the authoritative
@@ -543,28 +544,81 @@ class GeminiClient:
                     **user_fields,
                 )
                 from deja.integrate_claude_vision import invoke_claude_vision_shadow
-                shadow_tasks.append((
-                    "claude-local-vision",
-                    asyncio.create_task(
-                        invoke_claude_vision_shadow(
-                            prompt_vision,
-                            claude_signal_items or [],
-                        )
-                    ),
-                ))
+                claude_vision_task = asyncio.create_task(
+                    invoke_claude_vision_shadow(
+                        prompt_vision,
+                        claude_signal_items or [],
+                    )
+                )
+                # When vision is shadow-only, register it as a shadow
+                # task so _save_integrate_shadow picks it up. When
+                # vision is production, it goes directly to the await
+                # below; Gemini becomes a shadow instead.
+                if INTEGRATE_MODE != "claude_vision":
+                    shadow_tasks.append((
+                        "claude-local-vision",
+                        claude_vision_task,
+                    ))
         except Exception:
-            log.debug("claude vision shadow hook failed to schedule", exc_info=True)
+            log.debug("claude vision task scheduling failed", exc_info=True)
 
+        # Production call. Default is Gemini Flash; INTEGRATE_MODE=
+        # "claude_vision" promotes the vision task to production and
+        # demotes Gemini to a parallel shadow. On vision failure we
+        # fall back to Gemini so a bad subprocess doesn't kill the
+        # cycle.
+        try:
+            from deja.config import INTEGRATE_MODE as _INT_MODE
+        except Exception:
+            _INT_MODE = "gemini"
+
+        prod_model_name = INTEGRATE_MODEL
         t0 = time.time()
-        resp_text = await self._generate(
-            model=INTEGRATE_MODEL,
-            contents=prompt,
-            config_dict={
-                "response_mime_type": "application/json",
-                "max_output_tokens": 16384,
-                "temperature": 0.2,
-            },
-        )
+        resp_text: str = ""
+
+        if _INT_MODE == "claude_vision" and claude_vision_task is not None:
+            # Fire Gemini as a parallel SHADOW so we still capture its
+            # output in the record and keep the A/B corpus growing.
+            gemini_shadow_task = asyncio.create_task(self._generate(
+                model=INTEGRATE_MODEL,
+                contents=prompt,
+                config_dict={
+                    "response_mime_type": "application/json",
+                    "max_output_tokens": 16384,
+                    "temperature": 0.2,
+                },
+            ))
+            shadow_tasks.append((INTEGRATE_MODEL + "-shadow", gemini_shadow_task))
+
+            try:
+                resp_text = await claude_vision_task
+                prod_model_name = "claude-local-vision"
+            except Exception as e:
+                log.warning(
+                    "claude vision production failed (%s) — falling back to Gemini",
+                    type(e).__name__,
+                )
+                resp_text = await self._generate(
+                    model=INTEGRATE_MODEL,
+                    contents=prompt,
+                    config_dict={
+                        "response_mime_type": "application/json",
+                        "max_output_tokens": 16384,
+                        "temperature": 0.2,
+                    },
+                )
+                prod_model_name = INTEGRATE_MODEL + "-fallback"
+        else:
+            resp_text = await self._generate(
+                model=INTEGRATE_MODEL,
+                contents=prompt,
+                config_dict={
+                    "response_mime_type": "application/json",
+                    "max_output_tokens": 16384,
+                    "temperature": 0.2,
+                },
+            )
+
         prod_latency_ms = int((time.time() - t0) * 1000)
 
         try:
@@ -598,7 +652,7 @@ class GeminiClient:
                 await self._save_integrate_shadow(
                     prompt=prompt,
                     signals_text=signals_text,
-                    prod_model=INTEGRATE_MODEL,
+                    prod_model=prod_model_name,
                     prod_result=result,
                     prod_latency_ms=prod_latency_ms,
                     shadow_tasks=shadow_tasks,
