@@ -116,23 +116,39 @@ def _build_env() -> dict:
 
 
 def _collect_screenshot_images(signal_items: Iterable[dict]) -> list[tuple[str, bytes]]:
-    """Return (id_key, png_bytes) for every screenshot signal whose
-    sidecar is on disk. Skips gracefully when the image is missing."""
+    """Return (id_key, png_bytes) for up to ``_MAX_IMAGES_PER_CYCLE``
+    screenshot signals, favoring the MOST RECENT.
+
+    A rapid-switching user can produce 20+ screenshots per cycle; the
+    image token budget + Claude's attention are both bounded. We
+    prioritize the most recent frames (closer to "what the user is
+    doing right now") over the oldest. Observation signals carry an
+    ISO timestamp; sort descending and take the top N.
+
+    Graceful skips: missing sidecar, missing timestamp, missing id_key
+    — we just drop that entry.
+    """
     from deja.raw_image_sidecar import read_bytes as _read_img
 
+    screenshots = [
+        o for o in (signal_items or [])
+        if o.get("source") == "screenshot" and o.get("id_key")
+    ]
+    # Sort newest-first by timestamp string (ISO lex-order is chrono).
+    screenshots.sort(key=lambda o: o.get("timestamp") or "", reverse=True)
+
     out: list[tuple[str, bytes]] = []
-    for obs in signal_items or []:
-        if obs.get("source") != "screenshot":
-            continue
-        id_key = obs.get("id_key") or ""
-        if not id_key:
-            continue
-        data = _read_img(id_key)
-        if not data:
-            continue
-        out.append((id_key, data))
+    for obs in screenshots:
         if len(out) >= _MAX_IMAGES_PER_CYCLE:
             break
+        data = _read_img(obs["id_key"])
+        if not data:
+            continue
+        out.append((obs["id_key"], data))
+    # Reverse to chronological so Claude sees them oldest→newest (the
+    # natural narrative order). The "newest-first" sort was just for
+    # the cap-respecting selection step.
+    out.reverse()
     return out
 
 
