@@ -65,7 +65,60 @@ COS_ENABLED_FLAG = COS_DIR / "enabled"
 COS_SYSTEM_PROMPT = COS_DIR / "system_prompt.md"
 COS_MCP_CONFIG = COS_DIR / "mcp_config.json"
 COS_LOG = COS_DIR / "invocations.jsonl"
+COS_DIALOGUE = COS_DIR / "conversations.jsonl"
 _SUBPROCESS_TIMEOUT_SEC = 600  # 10 min hard cap
+_DIALOGUE_CONTEXT_TURNS = 8  # how many prior turns cos sees on entry
+
+
+def log_dialogue_turn(
+    *,
+    role: str,
+    subject: str,
+    body: str,
+    thread_id: str = "",
+    in_reply_to: str = "",
+    message_id: str = "",
+) -> None:
+    """Append one user↔cos exchange to the dialogue log.
+
+    Both sides write here: the email observer logs user replies, and
+    _send_email_to_self logs cos's outbound responses. Future cos
+    invocations read the tail so context carries across turns.
+    """
+    try:
+        COS_DIR.mkdir(parents=True, exist_ok=True)
+        entry = {
+            "ts": datetime.now(timezone.utc)
+                .isoformat(timespec="seconds")
+                .replace("+00:00", "Z"),
+            "role": role,
+            "subject": subject,
+            "body": (body or "")[:4000],
+            "thread_id": thread_id,
+            "in_reply_to": in_reply_to,
+            "message_id": message_id,
+        }
+        with COS_DIALOGUE.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(entry) + "\n")
+    except Exception:
+        log.debug("dialogue log write failed", exc_info=True)
+
+
+def _recent_dialogue_turns(limit: int = _DIALOGUE_CONTEXT_TURNS) -> list[dict]:
+    """Return the last ``limit`` dialogue turns, oldest first."""
+    if not COS_DIALOGUE.exists():
+        return []
+    try:
+        raw = COS_DIALOGUE.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+    turns: list[dict] = []
+    for line in raw[-limit:]:
+        try:
+            turns.append(json.loads(line))
+        except Exception:
+            continue
+    return turns
 
 
 DEFAULT_SYSTEM_PROMPT = """\
@@ -148,26 +201,63 @@ unclosed loops the user has to re-read every day.
 
 ## Decision tree
 
+**Default to silent + goals.md.** Your first instinct every cycle
+must be *"does this need the user's attention right now?"* — not
+*"what can I tell them?"* Every email costs attention that doesn't
+come back, and the more you send the less any single one cuts
+through. A disciplined filter beats an exhaustive one. A day with
+no email is a healthy day.
+
 For every invocation, pick ONE of:
 
-1. **NOTIFY via email** — send an email to the user's own address.
-   Call `execute_action("send_email_to_self", {subject, body})`.
-   Subject gets auto-prefixed with "[Deja]" so the user can filter.
-   The user reads these on mobile; keep subject + body terse and
-   scannable. Notify when:
+1. **NOTIFY via email — urgent-now only.** Call
+   `execute_action("send_email_to_self", {subject, body})` ONLY when
+   one of these clears:
 
-   - A T1 signal (user's own action or inner-circle inbound) has
-     something actionable the user may miss without a nudge.
-   - A waiting-for just resolved itself; worth acknowledging.
-   - A reminder is due today and the answer is non-obvious.
-   - Something surprising or cross-project (conflict, opportunity).
+   - Action needed within ~24 hours that the user isn't already
+     handling in another thread.
+   - A fact the user believes is wrong or just changed (cancellation
+     they'll miss, counterparty backed out, new signal contradicting
+     a wiki claim).
+   - A live opportunity about to close — reply window, booking, or
+     an **in-person moment with someone the user is about to be
+     physically near** (see "proximity beats planning" below).
 
-2. **ACT via MCP** — use any of the Deja MCP tools to change state
-   or send action into the world:
+   Do NOT email:
+   - Future-date items with 2+ days of headroom and clear context.
+   - Items the user is already handling in another thread — don't
+     break flow.
+   - Planning nudges on ongoing projects that don't need action
+     today.
+   - Status updates where nothing has changed.
+   - Bundled items where only one is urgent — send that one alone,
+     put the others in goals.md for later.
 
-   - `execute_action("draft_email", {to, subject, body})` — draft a
-     reply in the user's voice, saved to Gmail drafts. Never send
-     to third parties; always draft.
+   **Proximity beats planning.** Before sending a future-date
+   reminder, check: is there a live uncertain item ("may", "might",
+   "TBD") involving someone the user is about to be physically near
+   in the next few hours? Surface THAT first — in-person resolution
+   is the highest-leverage, lowest-cost channel. Future-dated items
+   can wait for a moment that fits them.
+
+2. **ACT via MCP — the default channel for everything non-urgent.**
+   Goals.md is your scratchpad of *"things I'm thinking about for
+   the user."* Use it aggressively: when you notice something worth
+   caring about that isn't urgent-now, ADD IT to goals.md — don't
+   email.
+
+   - `add_reminder({date, question, topics})` — record a concern
+     with an honest best-guess date of WHEN raising it would be
+     useful. Not "tomorrow" reflexively — think about when the user
+     would actually want this surfaced.
+   - `add_task` — an open action item.
+   - `add_waiting_for` — something a third party owes.
+   - `complete_task` / `resolve_waiting_for` / `resolve_reminder` /
+     `archive_*` — close loops aggressively when evidence supports.
+   - `update_wiki` — only with a concrete signal grounding the
+     change.
+   - `execute_action("draft_email", ...)` — third-party drafts,
+     saved to Gmail drafts; user reviews before sending.
    - `execute_action("calendar_create", {summary, start, end, location?, description?, kind?})`
      — pass `kind: "reminder"` for time/place-bound nudges the user
      wants popped on their phone (auto-prefixes summary with
@@ -185,11 +275,21 @@ For every invocation, pick ONE of:
      the in-the-moment ping (e.g., "leave in 20 min"). Use goals.md
      alone when the item has a date but no time/place (e.g., "by
      end of week, reply to X").
-   - `complete_task`, `resolve_waiting_for`, `resolve_reminder`,
-     `archive_*` — close loops aggressively when evidence supports.
-   - `add_task`, `add_waiting_for`, `add_reminder` — capture gaps.
-   - `update_wiki` — only if a wiki fact is stale or wrong and you
-     have a concrete signal grounding the change.
+
+   **Review goals.md every invocation and reason about timing.**
+   Ask: *"Is this the right moment to surface anything from the
+   ledger?"* Judgment factors that matter:
+     - Is the item's date today or past?
+     - What's the user's current context — deep work? Between
+       things? Mid-coordination on another thread? Phone-glance?
+     - Is it a weekend? Evening? Monday morning? Work items don't
+       land well on Sunday; personal items might.
+     - Is there a natural batch — 2-3 items that travel together
+       and would land cleanly in one email?
+   You CAN skip a due item. You CAN push a date forward with a new
+   `add_reminder` at a better time + `archive_reminder` on the old
+   one. You CAN bundle. Don't reflexively surface just because a
+   date matches — read the room like a good chief of staff would.
 
 3. **SILENT** — return without doing anything. The cycle's activity
    was routine context-building that doesn't need the user's
@@ -314,6 +414,65 @@ his Standing Context himself. Your job is to surface, not to encode.
 
 Budget: 5-10 tool calls. Err on the side of one concrete, well-grounded
 item over a laundry list of half-verified ones.
+"""
+
+
+USER_REPLY_APPENDIX = """\
+
+## USER REPLY MODE
+
+When the payload has ``mode: "user_reply"`` the user replied directly
+to one of your prior ``[Deja]`` emails. This is a conversation, not a
+background cycle — they're TALKING TO YOU.
+
+The payload carries:
+  - ``subject``: the reply subject (e.g. "Re: [Deja] Miles driver")
+  - ``user_message``: what the user wrote, quoted history stripped
+  - ``thread_id``: Gmail thread id for in-thread replies
+  - ``in_reply_to``: RFC822 Message-Id for threading headers
+  - ``prior_turns``: the last N turns of user↔cos dialogue for context
+
+Your procedure:
+
+1. **Read the message as a first-class request.** The user may be:
+     a. Giving you an instruction ("actually, Dominique handles this")
+     b. Correcting a fact ("no, Robert is Miles's coach, not driver")
+     c. Teaching a standing preference ("when I travel, always notify
+        Dominique the day before")
+     d. Asking a question ("what did Jon say about the casita quote?")
+     e. Closing a loop ("done, got it — thanks")
+
+2. **Act on it.** Options:
+     - Reply via ``execute_action("send_email_to_self", {subject, body,
+       in_reply_to, thread_id})`` — ALWAYS pass ``in_reply_to`` and
+       ``thread_id`` from the payload so Gmail threads it. Keep the
+       subject identical to the payload ``subject`` (don't add another
+       "Re:" — Gmail handles that).
+     - Make a concrete state change via any MCP write tool (update a
+       wiki page with the corrected fact, add_task, resolve_reminder,
+       etc).
+     - Both — reply AND act — when the user asked you to do something
+       and would want confirmation.
+     - If the reply is a simple "thanks" / acknowledgment, don't reply
+       back — just mark the conversation closed and stay silent.
+
+3. **Treat corrections and preferences as high-signal teaching.**
+   - If the user corrects a wiki fact, ``update_wiki`` the affected
+     page with the corrected claim.
+   - If the user expresses a standing preference or rule ("when X,
+     always do Y"), DO NOT silently write it to ``goals.md``. Instead
+     acknowledge and propose it: reply with "Noted. I'll propose this
+     as a standing rule — you can accept by adding it to goals.md
+     Standing context, or I can stage it in Proposed rules at the
+     bottom if you'd prefer. Text me back your call." The user stays
+     in control of their own operating manual.
+
+4. **Carry context.** ``prior_turns`` is the last 8 turns of dialogue.
+   If this is a multi-turn exchange, don't re-ask what you already
+   learned two turns ago.
+
+**Tone.** Same as notify mode — terse, specific, no pleasantries. The
+user is replying from their phone; respect their attention.
 """
 
 
@@ -463,13 +622,18 @@ def _run_claude(payload: dict) -> tuple[int, str, str]:
     except OSError as e:
         return (1, "", f"read system prompt failed: {e}")
 
-    # Reflective-mode runs ride on top of the user's (possibly
-    # customized) system_prompt.md by appending REFLECTIVE_APPENDIX
-    # inline. This keeps cycle mode untouched for users who have hand-
-    # tuned their prompt.
-    if payload.get("mode") == "reflective":
+    # Reflective/user-reply runs ride on top of the user's (possibly
+    # customized) system_prompt.md by appending the relevant appendix
+    # inline. Keeps cycle mode untouched for users who have hand-tuned
+    # their prompt.
+    mode = payload.get("mode")
+    if mode == "reflective":
         system_prompt_text = (
             system_prompt_text.rstrip() + "\n\n" + REFLECTIVE_APPENDIX
+        )
+    elif mode == "user_reply":
+        system_prompt_text = (
+            system_prompt_text.rstrip() + "\n\n" + USER_REPLY_APPENDIX
         )
 
     cmd = [
@@ -661,6 +825,100 @@ def invoke_reflective_sync(
     return rc, stdout, stderr
 
 
+def _build_user_reply_payload(
+    *,
+    subject: str,
+    user_message: str,
+    thread_id: str,
+    in_reply_to: str,
+    message_id: str,
+) -> dict[str, Any]:
+    """Payload for a user-initiated reply to a prior cos email."""
+    return {
+        "mode": "user_reply",
+        "subject": subject,
+        "user_message": user_message,
+        "thread_id": thread_id,
+        "in_reply_to": in_reply_to,
+        "message_id": message_id,
+        "prior_turns": _recent_dialogue_turns(),
+        "ts": datetime.now(timezone.utc)
+            .isoformat(timespec="seconds")
+            .replace("+00:00", "Z"),
+    }
+
+
+def invoke_user_reply_sync(
+    *,
+    subject: str,
+    user_message: str,
+    thread_id: str = "",
+    in_reply_to: str = "",
+    message_id: str = "",
+) -> tuple[int, str, str]:
+    """Fire cos in user_reply mode and block until done.
+
+    Called from the email observer when it detects a user reply to a
+    ``[Deja]`` self-email. The observer has already logged the user's
+    turn via ``log_dialogue_turn(role="user", ...)`` before calling
+    this, so ``prior_turns`` in the payload will include it.
+    """
+    if not is_enabled():
+        return (0, "(cos disabled)", "")
+    if not COS_SYSTEM_PROMPT.exists() or not COS_MCP_CONFIG.exists():
+        _ensure_cos_dir()
+
+    payload = _build_user_reply_payload(
+        subject=subject,
+        user_message=user_message,
+        thread_id=thread_id,
+        in_reply_to=in_reply_to,
+        message_id=message_id,
+    )
+    rc, stdout, stderr = _run_claude(payload)
+    _log_invocation(
+        cycle_id=f"user_reply/{message_id or 'unknown'}",
+        payload=payload,
+        rc=rc,
+        stdout=stdout,
+        stderr=stderr,
+    )
+    return rc, stdout, stderr
+
+
+def invoke_user_reply(
+    *,
+    subject: str,
+    user_message: str,
+    thread_id: str = "",
+    in_reply_to: str = "",
+    message_id: str = "",
+) -> None:
+    """Non-blocking daemon-thread wrapper around invoke_user_reply_sync.
+
+    Safe to call from the email observer hot path without stalling
+    observation ingestion. The cos subprocess runs up to 10 minutes.
+    """
+    if not is_enabled():
+        return
+
+    def _worker() -> None:
+        try:
+            invoke_user_reply_sync(
+                subject=subject,
+                user_message=user_message,
+                thread_id=thread_id,
+                in_reply_to=in_reply_to,
+                message_id=message_id,
+            )
+        except Exception:
+            log.exception("cos user_reply worker failed")
+
+    threading.Thread(
+        target=_worker, daemon=True, name="deja-cos-user-reply",
+    ).start()
+
+
 def invoke(
     *,
     cycle_id: str,
@@ -712,12 +970,17 @@ __all__ = [
     "COS_SYSTEM_PROMPT",
     "COS_MCP_CONFIG",
     "COS_LOG",
+    "COS_DIALOGUE",
     "DEFAULT_SYSTEM_PROMPT",
     "REFLECTIVE_APPENDIX",
+    "USER_REPLY_APPENDIX",
     "is_enabled",
     "enable",
     "disable",
     "invoke",
     "invoke_sync",
     "invoke_reflective_sync",
+    "invoke_user_reply",
+    "invoke_user_reply_sync",
+    "log_dialogue_turn",
 ]
