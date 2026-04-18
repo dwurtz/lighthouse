@@ -74,6 +74,14 @@ class MonitorState: ObservableObject {
     /// (e.g. "Created event: Dentist…"). Rendered as a secondary line
     /// below the transcript during the 3-second echo window.
     @Published var voicePillConfirmation: String = ""
+    /// Opaque undo token from /api/command/*. When non-empty, the pill
+    /// renders an Undo button during the echo window. Server-side TTL
+    /// is 15s; the UI stops offering it at 5s so network round-trip
+    /// fits inside the token's validity.
+    @Published var voicePillUndoToken: String = ""
+    /// Brief status shown after Undo succeeds ("Undone") or fails
+    /// ("Undo failed"). Replaces the confirmation line for 2s.
+    @Published var voicePillUndoStatus: String = ""
     @Published var voicePillHovered: Bool = false
     // 16 rolling audio-level samples, 0.0–1.0 each. Newest sample gets
     // appended at the end and the oldest is dropped off the front, so
@@ -885,6 +893,8 @@ class MonitorState: ObservableObject {
         voicePillTranscript = ""
         voicePillBadge = ""
         voicePillConfirmation = ""
+        voicePillUndoToken = ""
+        voicePillUndoStatus = ""
 
         // Reset the bar history so the pill starts at rest. New RMS
         // samples will flow in via recordVoiceLevel() as VoiceRecorder's
@@ -893,6 +903,35 @@ class MonitorState: ObservableObject {
         // in-process VoiceCommandDispatcher picks up).
         levelHistory = Array(repeating: 0, count: 16)
         localAPICall("/api/mic/start", method: "POST", timeoutInterval: 5) { _, _ in }
+    }
+
+    /// Undo the action just dispatched by a voice command. Called from
+    /// the pill's "Undo" button during the 5-second window after a
+    /// successful action/goal dispatch. Clears the undo token
+    /// immediately (one-shot) and shows a short status line in place
+    /// of the confirmation for 2 seconds.
+    func undoLastVoiceDispatch() {
+        let token = voicePillUndoToken
+        guard !token.isEmpty else { return }
+        voicePillUndoToken = ""
+        let path = "/api/command/undo/\(token)"
+        localAPICall(path, method: "POST", timeoutInterval: 5) { [weak self] data, error in
+            guard let self = self else { return }
+            DispatchQueue.main.async {
+                if error != nil {
+                    self.voicePillUndoStatus = "Undo failed"
+                } else if let data = data,
+                          let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                          (obj["ok"] as? Bool) == true {
+                    self.voicePillUndoStatus = "Undone"
+                } else {
+                    self.voicePillUndoStatus = "Undo failed"
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                    self.voicePillUndoStatus = ""
+                }
+            }
+        }
     }
 
     /// Called from VoiceCommandDispatcher's level callback for every
@@ -988,11 +1027,19 @@ class MonitorState: ObservableObject {
             default:           badge = ""
             }
 
+            // Undo token — the backend registers one for action/goal
+            // dispatches that created a reversible artifact (calendar
+            // event, goals.md line). Nested in details.undo_token.
+            let details = obj["details"] as? [String: Any] ?? [:]
+            let undoToken = (details["undo_token"] as? String) ?? ""
+
             DispatchQueue.main.async {
                 self.voicePillProcessing = false
                 self.voicePillTranscript = transcript
                 self.voicePillBadge = badge
                 self.voicePillConfirmation = confirmation
+                self.voicePillUndoToken = undoToken
+                self.voicePillUndoStatus = ""
 
                 // Force a fresh screenshot — the user just spoke, so this
                 // is the moment we want vision to see (and the next vision
@@ -1000,13 +1047,18 @@ class MonitorState: ObservableObject {
                 self.captureScreenshot(force: true)
 
                 // Show the transcript + badge + confirmation for 3s, then
-                // collapse the pill back to idle. If the user re-triggers
-                // push-to-talk in the interim, startVoiceCapture() clears
-                // the echo state itself, so this late clear is idempotent.
+                // collapse the pill back to idle. The Undo button stops
+                // offering itself at 5s (longer than 3s so the button
+                // outlasts the transcript briefly). If the user
+                // re-triggers push-to-talk in the interim,
+                // startVoiceCapture() clears the echo state itself.
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
                     self.voicePillTranscript = ""
                     self.voicePillBadge = ""
                     self.voicePillConfirmation = ""
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) {
+                    self.voicePillUndoToken = ""
                 }
 
                 // Expand the notch to show the classification banner +

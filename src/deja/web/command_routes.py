@@ -261,8 +261,13 @@ def _translate_action_params(action_type: str, params: dict) -> dict:
 
 
 def _dispatch_action(payload: dict) -> dict:
-    """Execute a one-off action via goal_actions.execute_all."""
-    from deja.goal_actions import execute_all
+    """Execute a one-off action via goal_actions.execute_with_artifacts.
+
+    Captures created artifacts (calendar event id, draft id, etc.) and
+    registers them under a short-TTL undo token so the UI can offer an
+    Undo button in the pill.
+    """
+    from deja.goal_actions import execute_with_artifacts
 
     action_type = payload.get("action_type")
     params = payload.get("params") or {}
@@ -270,18 +275,115 @@ def _dispatch_action(payload: dict) -> dict:
         raise HTTPException(400, "Action payload missing action_type")
 
     translated = _translate_action_params(action_type, params)
-    result = execute_all(
+    executed, artifacts = execute_with_artifacts(
         [{"type": action_type, "params": translated, "reason": "command"}]
     )
-    return {
-        "executed": result,
+    details: dict = {
+        "executed": executed,
         "action_type": action_type,
         "params": translated,
     }
+    if artifacts:
+        details["undo_token"] = _register_undo(artifacts)
+    return details
+
+
+# ---------------------------------------------------------------------------
+# Undo registry — voice UX shows an Undo button for UNDO_TTL_SEC after
+# an action dispatches. The token maps to the list of artifacts we
+# captured during dispatch; the undo endpoint reverses each.
+# ---------------------------------------------------------------------------
+
+UNDO_TTL_SEC = 15  # slightly larger than the UI's 5s so network round-trip fits
+
+
+_undo_registry: dict[str, tuple[float, list[dict]]] = {}
+
+
+def _register_undo(artifacts: list[dict]) -> str:
+    """Store artifacts under a short opaque token. Returns the token."""
+    import secrets
+    token = secrets.token_urlsafe(12)
+    _undo_registry[token] = (time.time() + UNDO_TTL_SEC, artifacts)
+    _prune_undo_registry()
+    return token
+
+
+def _prune_undo_registry() -> None:
+    now = time.time()
+    expired = [t for t, (exp, _) in _undo_registry.items() if exp < now]
+    for t in expired:
+        _undo_registry.pop(t, None)
+
+
+def _undo_artifact(artifact: dict) -> dict:
+    """Reverse a single artifact. Returns a result dict for logging."""
+    kind = artifact.get("kind", "")
+    if kind == "calendar_event":
+        from deja.goal_actions import _service
+        svc = _service("calendar", "v3")
+        if svc is None:
+            return {"kind": kind, "ok": False, "reason": "no calendar service"}
+        event_id = artifact.get("id", "")
+        try:
+            svc.events().delete(
+                calendarId="primary", eventId=event_id,
+            ).execute()
+            return {"kind": kind, "ok": True, "id": event_id}
+        except Exception as e:
+            return {
+                "kind": kind, "ok": False,
+                "reason": f"{type(e).__name__}: {e}",
+            }
+    if kind == "goal_line":
+        from deja.goals import apply_tasks_update
+        section = artifact.get("section", "tasks")
+        text = artifact.get("text", "")
+        archive_key = (
+            "archive_tasks" if section == "tasks" else "archive_waiting"
+        )
+        try:
+            applied = apply_tasks_update({
+                archive_key: [{"needle": text, "reason": "undo via voice UX"}],
+            })
+            return {"kind": kind, "ok": applied > 0, "text": text[:60]}
+        except Exception as e:
+            return {
+                "kind": kind, "ok": False,
+                "reason": f"{type(e).__name__}: {e}",
+            }
+    return {"kind": kind, "ok": False, "reason": "unsupported artifact kind"}
+
+
+@router.post("/api/command/undo/{token}")
+def command_undo(token: str) -> dict:
+    """Reverse the action identified by ``token``. Returns per-artifact
+    results. Token is consumed on first use.
+    """
+    _prune_undo_registry()
+    entry = _undo_registry.pop(token, None)
+    if entry is None:
+        raise HTTPException(404, "Undo token expired or unknown")
+    _, artifacts = entry
+    results = [_undo_artifact(a) for a in artifacts]
+    try:
+        from deja import audit
+        audit.record(
+            "voice_undo",
+            target=f"command/undo/{token}",
+            reason=f"undid {sum(1 for r in results if r.get('ok'))}/{len(results)}",
+        )
+    except Exception:
+        pass
+    return {"ok": True, "results": results}
 
 
 def _dispatch_goal(payload: dict) -> dict:
-    """Add a new task or waiting-for item to goals.md."""
+    """Add a new task or waiting-for item to goals.md.
+
+    Registers an undo token so the voice UX can archive the item if the
+    classifier misfired.
+    """
     from deja.goals import apply_tasks_update
 
     section = (payload.get("section") or "tasks").strip()
@@ -291,7 +393,14 @@ def _dispatch_goal(payload: dict) -> dict:
 
     key = "add_tasks" if section == "tasks" else "add_waiting"
     changes = apply_tasks_update({key: [text]})
-    return {"section": section, "text": text, "applied": changes}
+    details: dict = {"section": section, "text": text, "applied": changes}
+    if changes > 0:
+        details["undo_token"] = _register_undo([{
+            "kind": "goal_line",
+            "section": section,
+            "text": text,
+        }])
+    return details
 
 
 def _dispatch_automation(payload: dict) -> dict:

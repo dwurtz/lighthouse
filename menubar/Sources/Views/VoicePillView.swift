@@ -181,8 +181,32 @@ struct VoicePillView: View {
                     .foregroundColor(.white.opacity(0.95))
                     .lineLimit(1)
                     .truncationMode(.tail)
+                Spacer(minLength: 4)
+                if !monitor.voicePillUndoToken.isEmpty {
+                    Button(action: { monitor.undoLastVoiceDispatch() }) {
+                        Text("Undo")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundColor(.white.opacity(0.9))
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(
+                                RoundedRectangle(cornerRadius: 6)
+                                    .fill(Color.white.opacity(0.15))
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 6)
+                                    .stroke(Color.white.opacity(0.35), lineWidth: 0.5)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                }
             }
-            if !monitor.voicePillConfirmation.isEmpty {
+            if !monitor.voicePillUndoStatus.isEmpty {
+                Text(monitor.voicePillUndoStatus)
+                    .font(.system(size: 9, weight: .regular))
+                    .foregroundColor(.orange.opacity(0.85))
+                    .padding(.leading, 18)
+            } else if !monitor.voicePillConfirmation.isEmpty {
                 Text(monitor.voicePillConfirmation)
                     .font(.system(size: 9, weight: .regular))
                     .foregroundColor(.white.opacity(0.6))

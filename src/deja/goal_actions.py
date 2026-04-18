@@ -73,6 +73,50 @@ def execute_all(actions: list[dict]) -> int:
 
 
 # ---------------------------------------------------------------------------
+# Artifact tracking — for undo support on voice-command dispatch.
+# ---------------------------------------------------------------------------
+#
+# When an executor creates a real-world artifact (calendar event, Gmail
+# draft, Google Tasks row, goals.md line), it can call
+# ``_record_artifact`` with a descriptor that the caller stores and uses
+# later to undo the action. The sink is a contextvar so concurrent
+# FastAPI requests don't clobber each other's artifacts.
+
+from contextvars import ContextVar
+
+_artifact_sink: ContextVar[list[dict] | None] = ContextVar(
+    "_artifact_sink", default=None,
+)
+
+
+def _record_artifact(artifact: dict) -> None:
+    """Record a created artifact in the current sink if one is active.
+
+    No-op when called outside a ``collect_artifacts`` scope — existing
+    callers (integrate cycles, cos subprocess) don't set a sink, so
+    executors keep running unchanged.
+    """
+    sink = _artifact_sink.get()
+    if sink is not None:
+        sink.append(artifact)
+
+
+def execute_with_artifacts(actions: list[dict]) -> tuple[int, list[dict]]:
+    """Execute actions while capturing undo descriptors from each.
+
+    Returns ``(executed_count, artifacts)``. Artifacts are in dispatch
+    order; callers can hand them to an undo endpoint with a short TTL.
+    """
+    sink: list[dict] = []
+    token = _artifact_sink.set(sink)
+    try:
+        count = execute_all(actions)
+    finally:
+        _artifact_sink.reset(token)
+    return count, sink
+
+
+# ---------------------------------------------------------------------------
 # Service helpers
 # ---------------------------------------------------------------------------
 
@@ -198,12 +242,21 @@ def _calendar_create(params: dict, reason: str) -> None:
         }
 
     try:
-        svc.events().insert(calendarId="primary", body=event_body).execute()
+        created = svc.events().insert(
+            calendarId="primary", body=event_body,
+        ).execute()
     except Exception as e:
         log.warning("calendar_create failed: %s", type(e).__name__)
         return
     log.info("calendar_create: '%s' at %s — %s", summary, start, reason)
     _log_action("calendar_create", f"{summary} at {start}")
+    event_id = (created or {}).get("id", "")
+    if event_id:
+        _record_artifact({
+            "kind": "calendar_event",
+            "id": event_id,
+            "summary": summary,
+        })
 
 
 def _calendar_update(params: dict, reason: str) -> None:
@@ -287,12 +340,20 @@ def _send_email_to_self(params: dict, reason: str) -> None:
     email to prevent accidental outreach. Intended use: the chief-of-
     staff agent pinging the user with "here's what I noticed / did"
     summaries that are readable on mobile.
+
+    Threading: pass ``in_reply_to`` (the original RFC822 Message-Id) and
+    ``thread_id`` (Gmail's opaque thread id) when replying in-thread to
+    a user message. Gmail needs BOTH — ``threadId`` on the send body
+    keeps it in the thread, while ``In-Reply-To`` + ``References``
+    headers keep native mail clients happy.
     """
     import base64
     from email.message import EmailMessage
 
     subject = params.get("subject", "")
     body = params.get("body", "")
+    in_reply_to = params.get("in_reply_to", "")
+    thread_id = params.get("thread_id", "")
     if not subject:
         log.warning("send_email_to_self: missing subject")
         return
@@ -305,18 +366,18 @@ def _send_email_to_self(params: dict, reason: str) -> None:
         return
 
     # Prefix the subject so the user can filter/rule on these in Gmail.
-    if not subject.startswith("[Deja]"):
+    # Check for [Deja] anywhere in the subject — replies will have
+    # "Re: [Deja] ..." and shouldn't get a second prefix.
+    if "[Deja]" not in subject:
         subject = f"[Deja] {subject}"
 
-    # Build via EmailMessage so non-ASCII in subject + body are encoded
-    # correctly (RFC 2047 for headers, MIME charset declared for body).
-    # A previous version built the raw RFC 822 by string concatenation
-    # and emitted naked UTF-8 bytes for the Subject header, which Gmail
-    # rendered as mojibake ("Ã¢Â€Â\"" in place of an em-dash).
     msg = EmailMessage()
     msg["From"] = user_email
     msg["To"] = user_email
     msg["Subject"] = subject
+    if in_reply_to:
+        msg["In-Reply-To"] = in_reply_to
+        msg["References"] = in_reply_to
     msg.set_content(body or "")
     encoded = base64.urlsafe_b64encode(msg.as_bytes()).decode()
 
@@ -325,16 +386,38 @@ def _send_email_to_self(params: dict, reason: str) -> None:
         log.warning("send_email_to_self: skipped (no service)")
         return
 
+    send_body: dict = {"raw": encoded}
+    if thread_id:
+        send_body["threadId"] = thread_id
+
     try:
         svc.users().messages().send(
             userId="me",
-            body={"raw": encoded},
+            body=send_body,
         ).execute()
     except Exception as e:
         log.warning("send_email_to_self failed: %s", type(e).__name__)
         return
-    log.info("send_email_to_self: sent '%s' — %s", subject, reason)
-    _log_action("send_email_to_self", f"to self: {subject}")
+    log.info(
+        "send_email_to_self: sent '%s'%s — %s",
+        subject, " (threaded)" if thread_id else "", reason,
+    )
+    _log_action(
+        "send_email_to_self",
+        f"to self: {subject}" + (" [threaded]" if thread_id else ""),
+    )
+
+    try:
+        from deja.chief_of_staff import log_dialogue_turn
+        log_dialogue_turn(
+            role="cos",
+            subject=subject,
+            body=body or "",
+            thread_id=thread_id,
+            in_reply_to=in_reply_to,
+        )
+    except Exception:
+        log.debug("dialogue log write failed", exc_info=True)
 
 
 def _create_task(params: dict, reason: str) -> None:
