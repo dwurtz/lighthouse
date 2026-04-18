@@ -49,14 +49,18 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
+import tempfile
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
-from deja.config import DEJA_HOME
+import yaml
+
+from deja.config import DEJA_HOME, WIKI_DIR
 
 log = logging.getLogger(__name__)
 
@@ -65,9 +69,216 @@ COS_ENABLED_FLAG = COS_DIR / "enabled"
 COS_SYSTEM_PROMPT = COS_DIR / "system_prompt.md"
 COS_MCP_CONFIG = COS_DIR / "mcp_config.json"
 COS_LOG = COS_DIR / "invocations.jsonl"
+# Legacy single-file dialogue log. Superseded by per-conversation Markdown
+# files under ``~/Deja/conversations/``; kept as a constant so the
+# migration helper can find and rename it.
 COS_DIALOGUE = COS_DIR / "conversations.jsonl"
+CONVERSATIONS_DIR = WIKI_DIR / "conversations"
 _SUBPROCESS_TIMEOUT_SEC = 600  # 10 min hard cap
-_DIALOGUE_CONTEXT_TURNS = 8  # how many prior turns cos sees on entry
+
+
+# ---------------------------------------------------------------------------
+# Conversation file helpers — per-thread Markdown pages under
+# ``~/Deja/conversations/YYYY-MM-DD/<slug>.md``. Mirrors the events layout
+# so the same QMD index + MCP tools (search_deja, get_page) surface
+# conversation history alongside wiki pages.
+# ---------------------------------------------------------------------------
+
+
+_SUBJECT_SLUG_RE = re.compile(r"[^a-z0-9]+")
+_FRONTMATTER_RE = re.compile(r"\A---\s*\n(.*?)\n---\s*\n?", re.DOTALL)
+
+
+def _slugify_subject_hint(subject: str) -> str:
+    """Derive a short human-readable slug hint from an email subject.
+
+    Strips ``Re:`` prefixes and the ``[Deja]`` tag, lowercases, and
+    collapses non-alphanumeric runs into ``-``. Truncates to 6 words so
+    slugs stay filesystem-friendly. Empty subject → ``"conversation"``.
+    """
+    s = (subject or "").strip()
+    while True:
+        low = s.lower()
+        if low.startswith("re:"):
+            s = s[3:].strip()
+            continue
+        if low.startswith("fwd:") or low.startswith("fw:"):
+            s = s.split(":", 1)[1].strip()
+            continue
+        break
+    s = s.replace("[Deja]", "").replace("[deja]", "").strip()
+    s = _SUBJECT_SLUG_RE.sub("-", s.lower()).strip("-")
+    words = [w for w in s.split("-") if w]
+    if not words:
+        return "conversation"
+    return "-".join(words[:6])
+
+
+def _conversation_slug(subject: str, thread_id: str) -> str:
+    """Deterministic slug: ``<subject-hint>--thread-<first-4-hex>``.
+
+    Same ``thread_id`` + ``subject`` always produces the same slug so
+    appends to a thread land in the same file. Threads without an id
+    fall back to a date-stamped hint so each one-off message still gets
+    its own file.
+    """
+    hint = _slugify_subject_hint(subject)
+    tid = (thread_id or "").strip().lower()
+    if tid:
+        short = re.sub(r"[^0-9a-f]", "", tid)[:4] or "xxxx"
+        return f"{hint}--thread-{short}"
+    # No thread id — stable on subject alone, tagged with date so a
+    # later ad-hoc turn with the same subject doesn't collide.
+    stamp = datetime.now().strftime("%Y%m%d%H%M%S")
+    return f"{hint}--solo-{stamp}"
+
+
+def _parse_frontmatter(text: str) -> tuple[dict, str]:
+    """Split ``text`` into (parsed_frontmatter_dict, body). Tolerant."""
+    m = _FRONTMATTER_RE.match(text)
+    if not m:
+        return {}, text
+    try:
+        meta = yaml.safe_load(m.group(1)) or {}
+    except yaml.YAMLError:
+        meta = {}
+    if not isinstance(meta, dict):
+        meta = {}
+    return meta, text[m.end():]
+
+
+def _serialize_frontmatter(meta: dict) -> str:
+    """Stable, human-editable YAML for the conversation header."""
+    lines = ["---"]
+    if meta.get("thread_id"):
+        lines.append(f'thread_id: "{meta["thread_id"]}"')
+    if meta.get("subject"):
+        subj = str(meta["subject"]).replace('"', '\\"')
+        lines.append(f'subject: "{subj}"')
+    participants = meta.get("participants") or []
+    if participants:
+        lines.append("participants: [" + ", ".join(participants) + "]")
+    lines.append(f'channel: {meta.get("channel", "email")}')
+    if meta.get("started_at"):
+        lines.append(f'started_at: "{meta["started_at"]}"')
+    if meta.get("updated_at"):
+        lines.append(f'updated_at: "{meta["updated_at"]}"')
+    lines.append("---")
+    return "\n".join(lines)
+
+
+def _atomic_write(path: Path, content: str) -> None:
+    """Write ``content`` to ``path`` via tempfile + rename (same dir)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(prefix=f".{path.name}.", dir=str(path.parent))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(content)
+        os.replace(tmp, path)
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def _find_existing_conversation(slug: str) -> Path | None:
+    """Look up an existing conversation file by slug across all date dirs.
+
+    Conversations live under ``conversations/<date>/<slug>.md``. The
+    ``<date>`` is the thread's start date — unknown to later turns.
+    Walks the dir newest-first and returns the first match.
+    """
+    if not CONVERSATIONS_DIR.exists():
+        return None
+    try:
+        subdirs = sorted(
+            (p for p in CONVERSATIONS_DIR.iterdir() if p.is_dir()),
+            reverse=True,
+        )
+    except OSError:
+        return None
+    target = f"{slug}.md"
+    for d in subdirs:
+        candidate = d / target
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def _role_label(role: str) -> str:
+    """Normalize role keys to the heading labels we write into files."""
+    r = (role or "").strip().lower()
+    if r in ("user", "human", "david"):
+        return "user"
+    if r in ("cos", "assistant", "deja", "deja-cos"):
+        return "cos"
+    return r or "unknown"
+
+
+def _now_iso_utc() -> str:
+    return (
+        datetime.now(timezone.utc)
+        .isoformat(timespec="seconds")
+        .replace("+00:00", "Z")
+    )
+
+
+def _now_local_heading() -> str:
+    return datetime.now().astimezone().strftime("%Y-%m-%d %H:%M")
+
+
+def _format_turn_section(role: str, body: str) -> str:
+    """One turn = ``## <role> — <local timestamp>`` + body."""
+    return f"## {_role_label(role)} — {_now_local_heading()}\n\n{(body or '').strip()}\n"
+
+
+def _append_turn_to_file(
+    path: Path,
+    *,
+    role: str,
+    subject: str,
+    body: str,
+    thread_id: str,
+) -> None:
+    """Read ``path``, append a new turn section, refresh ``updated_at``.
+
+    If the file doesn't exist, creates it with full frontmatter and the
+    first turn. Atomic write throughout.
+    """
+    now = _now_iso_utc()
+    if path.exists():
+        raw = path.read_text(encoding="utf-8")
+        meta, body_text = _parse_frontmatter(raw)
+        meta["updated_at"] = now
+        if thread_id and not meta.get("thread_id"):
+            meta["thread_id"] = thread_id
+        if subject and not meta.get("subject"):
+            meta["subject"] = subject
+        new_section = _format_turn_section(role, body)
+        new_body = body_text.rstrip() + "\n\n" + new_section
+        content = _serialize_frontmatter(meta) + "\n" + new_body.lstrip("\n")
+    else:
+        meta = {
+            "thread_id": thread_id or "",
+            "subject": subject or "",
+            "participants": ["david-wurtz", "deja-cos"],
+            "channel": "email",
+            "started_at": now,
+            "updated_at": now,
+        }
+        title = subject.strip() or "Conversation"
+        body_text = f"# {title}\n\n" + _format_turn_section(role, body)
+        content = _serialize_frontmatter(meta) + "\n" + body_text
+    _atomic_write(path, content)
+    # Touch mtime explicitly — the wiki_catalog recency sort keys off it
+    # and a tempfile+rename keeps the FS mtime of the new inode, which
+    # is already "now", but make it explicit so the intent is clear.
+    try:
+        os.utime(path, None)
+    except OSError:
+        pass
 
 
 def log_dialogue_turn(
@@ -79,33 +290,58 @@ def log_dialogue_turn(
     in_reply_to: str = "",
     message_id: str = "",
 ) -> None:
-    """Append one user↔cos exchange to the dialogue log.
+    """Append one user↔cos exchange to its per-thread conversation file.
 
     Both sides write here: the email observer logs user replies, and
-    _send_email_to_self logs cos's outbound responses. Future cos
-    invocations read the tail so context carries across turns.
+    ``_send_email_to_self`` logs cos's outbound responses. Each thread
+    lives in its own Markdown file under
+    ``~/Deja/conversations/<date>/<slug>.md``; subsequent turns on the
+    same thread append to it. QMD then indexes the files so future cos
+    invocations can retrieve by topic via ``search_deja`` — the single
+    append-only JSONL log couldn't support that.
     """
     try:
-        COS_DIR.mkdir(parents=True, exist_ok=True)
-        entry = {
-            "ts": datetime.now(timezone.utc)
-                .isoformat(timespec="seconds")
-                .replace("+00:00", "Z"),
-            "role": role,
-            "subject": subject,
-            "body": (body or "")[:4000],
-            "thread_id": thread_id,
-            "in_reply_to": in_reply_to,
-            "message_id": message_id,
-        }
-        with COS_DIALOGUE.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(entry) + "\n")
+        _maybe_auto_migrate()
+        CONVERSATIONS_DIR.mkdir(parents=True, exist_ok=True)
+        slug = _conversation_slug(subject, thread_id)
+        existing = _find_existing_conversation(slug)
+        if existing is not None:
+            path = existing
+        else:
+            date_dir = CONVERSATIONS_DIR / datetime.now().strftime("%Y-%m-%d")
+            path = date_dir / f"{slug}.md"
+        _append_turn_to_file(
+            path,
+            role=role,
+            subject=subject,
+            body=body or "",
+            thread_id=thread_id,
+        )
     except Exception:
         log.debug("dialogue log write failed", exc_info=True)
 
 
-def _recent_dialogue_turns(limit: int = _DIALOGUE_CONTEXT_TURNS) -> list[dict]:
-    """Return the last ``limit`` dialogue turns, oldest first."""
+def conversation_slug_for(subject: str, thread_id: str) -> tuple[str, str] | None:
+    """Return ``(date, slug)`` for an existing conversation file, else None.
+
+    Used by ``_build_user_reply_payload`` to hand cos a pointer to the
+    exact conversation file so it can ``get_page("conversations",
+    "<date>/<slug>")`` for full history.
+    """
+    slug = _conversation_slug(subject, thread_id)
+    path = _find_existing_conversation(slug)
+    if path is None:
+        return None
+    date = path.parent.name
+    return date, slug
+
+
+# ---------------------------------------------------------------------------
+# One-shot migration from the legacy ``conversations.jsonl``.
+# ---------------------------------------------------------------------------
+
+
+def _iter_legacy_turns() -> list[dict]:
     if not COS_DIALOGUE.exists():
         return []
     try:
@@ -113,12 +349,129 @@ def _recent_dialogue_turns(limit: int = _DIALOGUE_CONTEXT_TURNS) -> list[dict]:
     except OSError:
         return []
     turns: list[dict] = []
-    for line in raw[-limit:]:
+    for line in raw:
+        line = line.strip()
+        if not line:
+            continue
         try:
             turns.append(json.loads(line))
         except Exception:
             continue
     return turns
+
+
+def _parse_iso(ts: str) -> datetime:
+    try:
+        return datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    except Exception:
+        return datetime.now(timezone.utc)
+
+
+def migrate_dialogue_log() -> int:
+    """Migrate ``conversations.jsonl`` into per-thread Markdown files.
+
+    Groups legacy turns by ``thread_id`` (empty → each turn stands
+    alone), writes the new layout under ``~/Deja/conversations/``, and
+    renames the old log to ``conversations.jsonl.migrated`` so the user
+    can still inspect it. Returns the number of conversation files
+    written. Safe to call repeatedly — no-op when the log is missing,
+    empty, or already migrated.
+    """
+    turns = _iter_legacy_turns()
+    if not turns:
+        return 0
+
+    groups: dict[str, list[dict]] = {}
+    for t in turns:
+        key = t.get("thread_id") or f"__solo__:{t.get('message_id') or t.get('ts', '')}"
+        groups.setdefault(key, []).append(t)
+
+    CONVERSATIONS_DIR.mkdir(parents=True, exist_ok=True)
+    written = 0
+    for _, group in groups.items():
+        group.sort(key=lambda t: _parse_iso(t.get("ts", "")))
+        first = group[0]
+        last = group[-1]
+        subject = (first.get("subject") or "").strip()
+        thread_id = (first.get("thread_id") or "").strip()
+        slug = _conversation_slug(subject, thread_id)
+        first_dt = _parse_iso(first.get("ts", "")).astimezone()
+        date_dir = CONVERSATIONS_DIR / first_dt.strftime("%Y-%m-%d")
+        path = date_dir / f"{slug}.md"
+
+        participants: list[str] = []
+        for t in group:
+            r = _role_label(t.get("role", ""))
+            who = "david-wurtz" if r == "user" else "deja-cos"
+            if who not in participants:
+                participants.append(who)
+
+        meta = {
+            "thread_id": thread_id,
+            "subject": subject,
+            "participants": participants or ["david-wurtz", "deja-cos"],
+            "channel": "email",
+            "started_at": _parse_iso(first.get("ts", ""))
+                .astimezone(timezone.utc)
+                .isoformat(timespec="seconds")
+                .replace("+00:00", "Z"),
+            "updated_at": _parse_iso(last.get("ts", ""))
+                .astimezone(timezone.utc)
+                .isoformat(timespec="seconds")
+                .replace("+00:00", "Z"),
+        }
+
+        sections: list[str] = [f"# {subject or 'Conversation'}"]
+        for t in group:
+            local_ts = _parse_iso(t.get("ts", "")).astimezone().strftime(
+                "%Y-%m-%d %H:%M"
+            )
+            body = (t.get("body") or "").strip()
+            sections.append(
+                f"## {_role_label(t.get('role', ''))} — {local_ts}\n\n{body}"
+            )
+
+        content = (
+            _serialize_frontmatter(meta)
+            + "\n"
+            + "\n\n".join(sections)
+            + "\n"
+        )
+        _atomic_write(path, content)
+        written += 1
+
+    try:
+        COS_DIALOGUE.replace(
+            COS_DIALOGUE.with_suffix(COS_DIALOGUE.suffix + ".migrated")
+        )
+    except OSError:
+        log.debug("migration: failed to rename legacy jsonl", exc_info=True)
+
+    log.info("cos: migrated %d legacy conversations into %s",
+             written, CONVERSATIONS_DIR)
+    return written
+
+
+def _maybe_auto_migrate() -> None:
+    """Run the migration lazily if the legacy log has content and the new
+    directory is empty. Called from ``log_dialogue_turn`` so a fresh
+    install that upgrades mid-thread doesn't lose prior turns.
+    """
+    try:
+        if not COS_DIALOGUE.exists():
+            return
+        # Empty legacy file → skip.
+        if COS_DIALOGUE.stat().st_size == 0:
+            return
+        # New dir already has content → skip.
+        if CONVERSATIONS_DIR.exists() and any(CONVERSATIONS_DIR.iterdir()):
+            return
+    except OSError:
+        return
+    try:
+        migrate_dialogue_log()
+    except Exception:
+        log.debug("auto-migration failed", exc_info=True)
 
 
 DEFAULT_SYSTEM_PROMPT = """\
@@ -430,7 +783,9 @@ The payload carries:
   - ``user_message``: what the user wrote, quoted history stripped
   - ``thread_id``: Gmail thread id for in-thread replies
   - ``in_reply_to``: RFC822 Message-Id for threading headers
-  - ``prior_turns``: the last N turns of user↔cos dialogue for context
+  - ``conversation_slug``: ``"<YYYY-MM-DD>/<slug>"`` of the conversation
+    file that contains the full user↔cos history for this thread (may be
+    empty on the very first turn)
 
 Your procedure:
 
@@ -467,9 +822,15 @@ Your procedure:
      bottom if you'd prefer. Text me back your call." The user stays
      in control of their own operating manual.
 
-4. **Carry context.** ``prior_turns`` is the last 8 turns of dialogue.
-   If this is a multi-turn exchange, don't re-ask what you already
-   learned two turns ago.
+4. **Carry context.** The payload's ``conversation_slug`` points at a
+   Markdown file at ``~/Deja/conversations/<conversation_slug>.md``
+   containing the full user↔cos history on this thread. Read it with
+   ``get_page("conversations", "<conversation_slug>")`` before replying
+   so you don't re-ask what was already answered two turns ago. For
+   cross-thread context on a topic or person (e.g. "have I talked with
+   David about roofing before?"), call
+   ``search_deja("<topic or person>")`` — it searches conversations
+   alongside wiki pages and events, so related past threads surface.
 
 **Tone.** Same as notify mode — terse, specific, no pleasantries. The
 user is replying from their phone; respect their attention.
@@ -834,6 +1195,8 @@ def _build_user_reply_payload(
     message_id: str,
 ) -> dict[str, Any]:
     """Payload for a user-initiated reply to a prior cos email."""
+    slug_ref = conversation_slug_for(subject, thread_id)
+    conversation_slug = f"{slug_ref[0]}/{slug_ref[1]}" if slug_ref else ""
     return {
         "mode": "user_reply",
         "subject": subject,
@@ -841,7 +1204,7 @@ def _build_user_reply_payload(
         "thread_id": thread_id,
         "in_reply_to": in_reply_to,
         "message_id": message_id,
-        "prior_turns": _recent_dialogue_turns(),
+        "conversation_slug": conversation_slug,
         "ts": datetime.now(timezone.utc)
             .isoformat(timespec="seconds")
             .replace("+00:00", "Z"),
@@ -861,7 +1224,8 @@ def invoke_user_reply_sync(
     Called from the email observer when it detects a user reply to a
     ``[Deja]`` self-email. The observer has already logged the user's
     turn via ``log_dialogue_turn(role="user", ...)`` before calling
-    this, so ``prior_turns`` in the payload will include it.
+    this, so the conversation file the payload's ``conversation_slug``
+    points at will already contain it.
     """
     if not is_enabled():
         return (0, "(cos disabled)", "")
@@ -971,6 +1335,7 @@ __all__ = [
     "COS_MCP_CONFIG",
     "COS_LOG",
     "COS_DIALOGUE",
+    "CONVERSATIONS_DIR",
     "DEFAULT_SYSTEM_PROMPT",
     "REFLECTIVE_APPENDIX",
     "USER_REPLY_APPENDIX",
@@ -983,4 +1348,6 @@ __all__ = [
     "invoke_user_reply",
     "invoke_user_reply_sync",
     "log_dialogue_turn",
+    "migrate_dialogue_log",
+    "conversation_slug_for",
 ]

@@ -192,6 +192,10 @@ def main() -> None:
     cos_sub.add_parser("disable", help="Disable the chief-of-staff loop")
     cos_sub.add_parser("test", help="Fire the loop once with a synthetic payload — good for verifying claude CLI + MCP wiring")
     cos_sub.add_parser("tail", help="Tail the invocations log to see what Claude has been deciding and doing")
+    cos_sub.add_parser(
+        "migrate-conversations",
+        help="One-shot: migrate legacy conversations.jsonl into per-thread Markdown under ~/Deja/conversations/",
+    )
     wh_p = sub.add_parser(
         "webhooks",
         help="Manage outbound webhooks (Claude Code Routines, Slack, etc.) that fire after each integrate cycle",
@@ -473,7 +477,32 @@ def _run_cos(sub_command: str | None) -> None:
             print()
         return
 
-    print("unknown cos subcommand — try: status | enable | disable | test | reflect | tail")
+    if sub_command == "migrate-conversations":
+        # Always resync the on-disk system prompt so the new
+        # USER_REPLY_APPENDIX lands without a re-install. Customizations
+        # outside the default body are preserved by hand-editing; this
+        # matches how we've shipped prompt changes before.
+        try:
+            cos.COS_SYSTEM_PROMPT.write_text(
+                cos.DEFAULT_SYSTEM_PROMPT, encoding="utf-8",
+            )
+        except OSError:
+            pass
+        written = cos.migrate_dialogue_log()
+        if written == 0:
+            print(f"(nothing to migrate — {cos.COS_DIALOGUE} empty or missing)")
+        else:
+            print(f"migrated {written} conversation(s) → {cos.CONVERSATIONS_DIR}")
+            print(f"legacy log renamed to {cos.COS_DIALOGUE}.migrated")
+        # Refresh QMD so the new conversation files are immediately searchable.
+        try:
+            from deja.llm.search import refresh_index
+            refresh_index()
+        except Exception:
+            pass
+        return
+
+    print("unknown cos subcommand — try: status | enable | disable | test | reflect | tail | migrate-conversations")
 
 
 def _run_webhooks(sub_command: str | None, args) -> None:

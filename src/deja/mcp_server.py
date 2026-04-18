@@ -284,12 +284,18 @@ def create_server() -> Server:
                 inputSchema={
                     "type": "object",
                     "properties": {
-                        "category": {"type": "string", "enum": ["people", "projects", "events"]},
+                        "category": {
+                            "type": "string",
+                            "enum": ["people", "projects", "events", "conversations"],
+                        },
                         "slug": {
                             "type": "string",
                             "description": (
                                 "For people/projects: the kebab slug "
-                                "('jon-sturos'). For events: 'YYYY-MM-DD/slug'."
+                                "('jon-sturos'). For events and "
+                                "conversations: 'YYYY-MM-DD/slug' — "
+                                "conversations store full user↔cos "
+                                "thread history, indexed per-thread."
                             ),
                         },
                     },
@@ -1020,10 +1026,10 @@ def _search_deja(query: str, limit: int = 10) -> str:
 def _get_page(category: str, slug: str) -> str:
     """Read one wiki page by category + slug."""
     from deja.config import WIKI_DIR
-    if category not in ("people", "projects", "events"):
+    if category not in ("people", "projects", "events", "conversations"):
         return f"(unknown category: {category})"
-    if category == "events" and "/" in slug:
-        path = WIKI_DIR / "events" / f"{slug}.md"
+    if category in ("events", "conversations") and "/" in slug:
+        path = WIKI_DIR / category / f"{slug}.md"
     else:
         path = WIKI_DIR / category / f"{slug}.md"
     if not path.exists():
