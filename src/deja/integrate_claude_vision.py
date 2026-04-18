@@ -71,11 +71,30 @@ _SYSTEM_PROMPT = (
     "You are an observation integrator for a personal AI memory system. "
     "Follow the instructions in the user message exactly. Return ONLY the "
     "JSON object specified — no preamble, no postscript, no code fences. "
-    "Do not use any tools; answer from the prompt text and attached images "
-    "alone. Screenshots are authoritative visual context — use them to "
+    "Screenshots are authoritative visual context — use them to "
     "distinguish active-reading from inbox-list-preview, to resolve "
     "ambiguous pronouns to what's currently on screen, and to reject text "
-    "that appears only as a background preview."
+    "that appears only as a background preview. "
+    "\n\n"
+    "READ-ONLY TOOLS are available via the deja MCP server. Use them "
+    "SPARINGLY — only when you're uncertain about a fact that would "
+    "change your wiki writes. Budget ~3 tool calls max per cycle. Useful "
+    "patterns:\n"
+    "  • Before creating a people/ page: `mcp__deja__search_deja` to "
+    "    check if one already exists under a different slug/alias.\n"
+    "  • Before updating a page: `mcp__deja__get_page` to read the full "
+    "    current body (the wiki_text excerpt may be truncated).\n"
+    "  • Before writing an event that references an appointment: "
+    "    `mcp__deja__search_events` for the same entity in a nearby "
+    "    time window to avoid duplicates.\n"
+    "  • When a signal is ambiguous: `mcp__deja__recent_activity` to "
+    "    correlate across sources.\n"
+    "\n"
+    "DO NOT call any write tool (update_wiki, add_task, execute_action, "
+    "resolve_*, archive_*). Your contract is to PROPOSE writes in the "
+    "JSON output — the agent loop applies them. Calling write tools "
+    "bypasses the wiki guardrails and corrupts the audit trail. On a "
+    "clear routine cycle, make ZERO tool calls and go straight to JSON."
 )
 
 _CLAUDE_FALLBACK_PATHS = (
@@ -231,6 +250,30 @@ def _run_claude_vision_sync(
     images = _collect_screenshot_images(signal_items)
     stdin = _build_stream_json_input(prompt_text, images)
 
+    # Attach the Deja MCP server so Claude has read-only tool access
+    # (search_deja, get_page, list_goals, search_events, recent_activity,
+    # daily_briefing). Write tools are in the server but we whitelist only
+    # the read ones via --allowedTools; Claude refuses to call anything
+    # outside the list. Config lives at ~/.deja/chief_of_staff/mcp_config.json
+    # (same file cos uses — one source of truth for the integrator's MCP
+    # surface).
+    from deja.chief_of_staff import COS_MCP_CONFIG
+    mcp_flags: list[str] = []
+    if COS_MCP_CONFIG.exists():
+        mcp_flags = [
+            "--mcp-config", str(COS_MCP_CONFIG),
+            "--allowedTools",
+            ",".join([
+                "mcp__deja__search_deja",
+                "mcp__deja__get_page",
+                "mcp__deja__list_goals",
+                "mcp__deja__search_events",
+                "mcp__deja__recent_activity",
+                "mcp__deja__daily_briefing",
+                "mcp__deja__get_context",
+            ]),
+        ]
+
     cmd = [
         claude_bin,
         "-p",
@@ -240,6 +283,7 @@ def _run_claude_vision_sync(
         "--model", "claude-opus-4-7",
         "--system-prompt", _SYSTEM_PROMPT,
         "--dangerously-skip-permissions",
+        *mcp_flags,
     ]
     try:
         proc = subprocess.run(
