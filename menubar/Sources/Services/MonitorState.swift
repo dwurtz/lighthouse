@@ -957,11 +957,12 @@ class MonitorState: ObservableObject {
         voicePillBadge = ""
         voicePillConfirmation = ""
 
-        // Stop recording and run the transcript through the command
-        // classifier (backend routes mic transcripts through the same
-        // /api/command dispatch path, so voice can emit goal_actions —
-        // calendar/email/task — not just observations).
-        localAPICall("/api/mic/stop", method: "POST", timeoutInterval: 60) { [weak self] data, error in
+        // Stop recording and route the transcript straight to cos —
+        // cos (Claude Opus) decides what to do (calendar_create, wiki
+        // update, reminder, answer, conversational reply) and returns
+        // a short pill-facing reply. Longer timeout because cos runs
+        // a full subprocess with tool use and may take 60s+.
+        localAPICall("/api/mic/stop", method: "POST", timeoutInterval: 180) { [weak self] data, error in
             guard let self = self else { return }
 
             if let error = error {
@@ -1016,20 +1017,28 @@ class MonitorState: ObservableObject {
                 return
             }
 
-            let confirmation = (obj["confirmation"] as? String) ?? ""
+            // Cos-does-everything: the response carries a single
+            // ``cos_response`` string — cos's final message, meant to
+            // render directly in the pill. Legacy classifier shape
+            // (type + confirmation + details.undo_token) is still
+            // parsed as a fallback for /api/command text submissions.
+            let cosResponse = (obj["cos_response"] as? String) ?? ""
+            let legacyConfirmation = (obj["confirmation"] as? String) ?? ""
+            let pillConfirmation = cosResponse.isEmpty ? legacyConfirmation : cosResponse
             let cmdType = (obj["type"] as? String) ?? ""
             let badge: String
-            switch cmdType {
-            case "action":     badge = "📅"
-            case "goal":       badge = "✓"
-            case "automation": badge = "🔁"
-            case "context":    badge = "🧠"
-            default:           badge = ""
+            if !cosResponse.isEmpty {
+                badge = "💬"
+            } else {
+                switch cmdType {
+                case "action":     badge = "📅"
+                case "goal":       badge = "✓"
+                case "automation": badge = "🔁"
+                case "context":    badge = "🧠"
+                default:           badge = ""
+                }
             }
 
-            // Undo token — the backend registers one for action/goal
-            // dispatches that created a reversible artifact (calendar
-            // event, goals.md line). Nested in details.undo_token.
             let details = obj["details"] as? [String: Any] ?? [:]
             let undoToken = (details["undo_token"] as? String) ?? ""
 
@@ -1037,7 +1046,7 @@ class MonitorState: ObservableObject {
                 self.voicePillProcessing = false
                 self.voicePillTranscript = transcript
                 self.voicePillBadge = badge
-                self.voicePillConfirmation = confirmation
+                self.voicePillConfirmation = pillConfirmation
                 self.voicePillUndoToken = undoToken
                 self.voicePillUndoStatus = ""
 
@@ -1046,13 +1055,13 @@ class MonitorState: ObservableObject {
                 // cycle will correlate the voice context with it).
                 self.captureScreenshot(force: true)
 
-                // Show the transcript + badge + confirmation for 3s, then
-                // collapse the pill back to idle. The Undo button stops
-                // offering itself at 5s (longer than 3s so the button
-                // outlasts the transcript briefly). If the user
-                // re-triggers push-to-talk in the interim,
-                // startVoiceCapture() clears the echo state itself.
-                DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+                // Cos responses are often multi-line and worth reading
+                // in full; keep the echo pill up longer (8s) when the
+                // response came from cos, versus the legacy 3s for
+                // classifier-style confirmations. Undo still expires
+                // at 5s.
+                let displaySeconds = cosResponse.isEmpty ? 3.0 : 8.0
+                DispatchQueue.main.asyncAfter(deadline: .now() + displaySeconds) {
                     self.voicePillTranscript = ""
                     self.voicePillBadge = ""
                     self.voicePillConfirmation = ""
@@ -1069,11 +1078,11 @@ class MonitorState: ObservableObject {
                 // the user dismisses it (the answer is worth reading).
                 // Everything else (action/goal/automation) auto-collapses
                 // after ~4 seconds.
-                if !confirmation.isEmpty && cmdType != "context" {
+                if !pillConfirmation.isEmpty && cmdType != "context" {
                     self.showResponse(
                         type: cmdType,
-                        message: confirmation,
-                        isQuery: cmdType == "query"
+                        message: pillConfirmation,
+                        isQuery: cmdType == "query" || !cosResponse.isEmpty
                     )
                 }
 

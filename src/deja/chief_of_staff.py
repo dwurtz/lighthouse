@@ -996,6 +996,10 @@ def _run_claude(payload: dict) -> tuple[int, str, str]:
         system_prompt_text = (
             system_prompt_text.rstrip() + "\n\n" + USER_REPLY_APPENDIX
         )
+    elif mode == "command":
+        system_prompt_text = (
+            system_prompt_text.rstrip() + "\n\n" + COMMAND_APPENDIX
+        )
 
     cmd = [
         claude_bin,
@@ -1211,6 +1215,155 @@ def _build_user_reply_payload(
     }
 
 
+COMMAND_APPENDIX = """\
+
+## COMMAND MODE
+
+When the payload has ``mode: "command"`` the user just spoke or
+typed something directly at you — voice push-to-talk (Option hold)
+or the notch-panel text input. This is a live request, not an
+email; they're waiting for your response RIGHT NOW in the pill.
+
+The payload carries:
+  - ``user_message``: what the user said (voice) or typed (chat),
+    polished for grammar.
+  - ``source``: ``"voice"`` or ``"text"``.
+  - ``conversation_slug``: the per-session conversation file this
+    turn was logged into.
+
+Your job is to route AND respond. Choose the right action based on
+the content:
+
+1. **Unambiguous action request** ("put dentist on my calendar
+   tomorrow 3pm", "remind me to reply to Matt", "draft a reply to
+   Jon"): call the appropriate MCP write tool — ``execute_action``,
+   ``add_reminder``, ``add_task``, ``add_waiting_for``,
+   ``update_wiki``, etc. — then confirm in your final message
+   ("Added: Dentist, Fri 3pm").
+
+2. **Instruction / correction / preference** ("actually Dominique
+   handles school logistics", "remember that Coach Rob needs 3
+   gymnasts"): update the wiki via ``update_wiki`` so the fact
+   becomes durable context, then confirm ("Noted on
+   miles-gymnastics.md — Safe sport rule added").
+
+3. **Context note** ("Ruby said her foot still hurts"): promote to
+   the right entity page via ``update_wiki`` if it's a durable
+   fact, or just acknowledge ("Noted.") if it's ephemeral.
+
+4. **Question** ("what did Jon say about the casita?"): look it up
+   via ``search_deja`` / ``get_page`` / ``gmail_search`` / other
+   read tools, then answer in your final message — concise, direct.
+
+5. **Ambiguous** — ask for clarification in your final message.
+   Don't guess.
+
+**Your final message is what shows in the pill.** It's the only
+thing the user will see unless they open the conversations file.
+Keep it SHORT (1-3 lines max, phone-readable), lead with the
+result. No preamble, no "I'll help you with that," no asking if
+they want more.
+
+Good: "Added: Dentist, Fri Apr 19 3-3:30pm."
+Good: "Noted on miles-gymnastics.md — Safe sport rule added."
+Good: "Jon (Apr 16): quote coming next week; flashing is fine."
+Bad: "I've gone ahead and added that event to your calendar. Let
+me know if there's anything else!"
+
+The user's utterance is already logged to the conversation file
+``get_page("conversations", "<conversation_slug>")`` — no need to
+write it yourself. You CAN call ``update_wiki`` on the conversation
+file to append YOUR response as a section, but the pill-display is
+the main channel for voice/text.
+
+**Verification still matters.** If the user gave you a fact that
+contradicts the wiki, re-read the wiki page first. If the user
+asked about a date/time, check the calendar. Cost of a tool call:
+~2s. Cost of a wrong confirmation: they stop trusting the pill.
+"""
+
+
+def _build_command_payload(
+    *,
+    user_message: str,
+    source: str,
+    conversation_slug: str,
+) -> dict[str, Any]:
+    """Payload for a voice-or-text command routed directly to cos."""
+    return {
+        "mode": "command",
+        "user_message": user_message,
+        "source": source,
+        "conversation_slug": conversation_slug,
+        "ts": datetime.now(timezone.utc)
+            .isoformat(timespec="seconds")
+            .replace("+00:00", "Z"),
+    }
+
+
+def invoke_command_sync(
+    *,
+    user_message: str,
+    source: str = "voice",
+) -> tuple[int, str, str]:
+    """Fire cos in command mode and block until done.
+
+    Called from ``/api/mic/stop`` and ``/api/command`` when a voice
+    utterance or chat message needs routing. Logs the user's turn to
+    the conversations/ store, then spawns cos. Returns
+    ``(rc, cos_reply_text, stderr)`` where ``cos_reply_text`` is the
+    claude subprocess's stdout (used for pill display).
+
+    The caller is responsible for bubbling ``cos_reply_text`` into the
+    HTTP response so the notch pill can render it.
+    """
+    if not is_enabled():
+        return (0, "(cos disabled)", "")
+    if not COS_SYSTEM_PROMPT.exists() or not COS_MCP_CONFIG.exists():
+        _ensure_cos_dir()
+
+    subject = f"{source.capitalize()} — {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+    thread_id = f"{source}-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+    log_dialogue_turn(
+        role="user",
+        subject=subject,
+        body=user_message,
+        thread_id=thread_id,
+    )
+    ds = conversation_slug_for(subject, thread_id)
+    conversation_slug = f"{ds[0]}/{ds[1]}" if ds else ""
+
+    payload = _build_command_payload(
+        user_message=user_message,
+        source=source,
+        conversation_slug=conversation_slug,
+    )
+    rc, stdout, stderr = _run_claude(payload)
+    _log_invocation(
+        cycle_id=f"command/{thread_id}",
+        payload=payload,
+        rc=rc,
+        stdout=stdout,
+        stderr=stderr,
+    )
+    # Append cos's reply to the conversation file so future cos cycles
+    # see it in context. Also trim final claude stdout to the last
+    # substantive line — claude -p output format "text" puts the final
+    # response on the last non-empty line.
+    reply_text = (stdout or "").strip()
+    if reply_text:
+        try:
+            log_dialogue_turn(
+                role="cos",
+                subject=subject,
+                body=reply_text,
+                thread_id=thread_id,
+            )
+        except Exception:
+            log.debug("command: cos reply log failed", exc_info=True)
+    return rc, reply_text, stderr
+
+
 def invoke_user_reply_sync(
     *,
     subject: str,
@@ -1339,6 +1492,7 @@ __all__ = [
     "DEFAULT_SYSTEM_PROMPT",
     "REFLECTIVE_APPENDIX",
     "USER_REPLY_APPENDIX",
+    "COMMAND_APPENDIX",
     "is_enabled",
     "enable",
     "disable",
@@ -1347,6 +1501,7 @@ __all__ = [
     "invoke_reflective_sync",
     "invoke_user_reply",
     "invoke_user_reply_sync",
+    "invoke_command_sync",
     "log_dialogue_turn",
     "migrate_dialogue_log",
     "conversation_slug_for",

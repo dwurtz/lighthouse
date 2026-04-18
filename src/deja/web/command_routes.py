@@ -591,81 +591,63 @@ async def _handle_command_inner(
     if not (body.input or "").strip():
         raise HTTPException(400, "Command input is empty")
 
+    # Route every command straight to cos — no intermediate classifier.
+    # Cos decides what to do (action, wiki update, reminder, answer,
+    # reply) and its short final message is the pill-facing reply.
+    from deja import chief_of_staff
+
+    if not chief_of_staff.is_enabled():
+        raise HTTPException(
+            503,
+            "Chief of staff is disabled. Run `deja cos enable` to "
+            "route commands through cos."
+        )
+
+    loop = asyncio.get_running_loop()
     try:
-        parsed, cost, latency_ms = await _classify(body.input)
-    except HTTPException:
-        raise
+        rc, cos_reply, stderr = await loop.run_in_executor(
+            None,
+            lambda: chief_of_staff.invoke_command_sync(
+                user_message=body.input,
+                source=body.source or "text",
+            ),
+        )
     except Exception as e:
-        log.exception("command classifier failed")
-        raise HTTPException(500, f"Classifier failed: {e}") from e
+        log.exception("command: cos invocation failed")
+        raise HTTPException(500, f"Cos invocation failed: {e}") from e
 
-    cmd_type = parsed.get("type")
-    payload = parsed.get("payload") or {}
-    confirmation = parsed.get("confirmation", "") or ""
+    if rc != 0:
+        raise HTTPException(
+            500,
+            f"Cos returned non-zero: rc={rc} stderr={stderr[-200:] if stderr else ''}",
+        )
 
-    if cmd_type == "action":
-        details = _dispatch_action(payload)
-    elif cmd_type == "goal":
-        details = _dispatch_goal(payload)
-    elif cmd_type == "automation":
-        details = _dispatch_automation(payload)
-    elif cmd_type == "context":
-        details = _dispatch_context(payload)
-    elif cmd_type == "query":
-        details = await _dispatch_query(payload)
-        # Overwrite the classifier's placeholder confirmation with the
-        # synthesized answer so the chat surface shows the actual reply.
-        confirmation = details.get("answer", confirmation)
-    else:
-        raise HTTPException(400, f"Unknown command type: {cmd_type!r}")
-
-    # Record every dispatched command in the audit log.
     try:
         from deja import audit
-
         audit.record(
             "user_command",
-            target=f"command/{cmd_type}",
-            reason=confirmation or body.input[:200],
+            target="command/cos",
+            reason=(cos_reply or body.input)[:200],
             trigger={"kind": "user_cmd", "detail": body.source or "command"},
         )
     except Exception:
         log.debug("audit.record failed for command", exc_info=True)
 
-    # Business-intelligence telemetry — proxy sees cmd type + source
-    # (voice vs typed) + input length. No input content.
     try:
         from deja.telemetry import track
-
         track("command_dispatched", {
-            "cmd_type": cmd_type or "unknown",
+            "cmd_type": "cos",
             "source": body.source or "command",
             "input_chars": len(body.input or ""),
-            "latency_ms": latency_ms,
-            "cost_usd": round(cost, 6),
         })
     except Exception:
         log.debug("command telemetry failed", exc_info=True)
 
-    # Context-type commands fire an immediate integrate trigger with
-    # cross-modal batch merging so the new signal gets processed against
-    # any other unprocessed signals on the current cycle.
-    if cmd_type == "context":
-        from deja.agent.analysis_cycle import trigger_integrate_now
-
-        try:
-            asyncio.create_task(trigger_integrate_now(reason="command_context"))
-        except Exception:
-            log.debug(
-                "immediate integrate trigger failed for command_context",
-                exc_info=True,
-            )
-
     return CommandResponse(
         ok=True,
-        type=cmd_type,
-        confirmation=confirmation,
-        details=details,
-        cost_usd=round(cost, 6),
-        latency_ms=latency_ms,
+        type="cos",
+        confirmation=cos_reply,
+        details={"cos_response": cos_reply},
+        cost_usd=0.0,
+        latency_ms=0,
     )

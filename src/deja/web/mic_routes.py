@@ -563,139 +563,74 @@ async def _mic_stop_inner(reason: str = "manual") -> dict:
     )
     save_conversation(messages)
 
-    # 2. Route through the command classifier — every voice utterance
-    #    becomes a classifier call. The classifier decides if it's a
-    #    one-off action (calendar/email/task/notify), a goal/waiting-for
-    #    item, an automation rule, or pure "context" (in which case the
-    #    context dispatch appends to observations.jsonl + fires
-    #    integrate, preserving the old "voice → observation" behavior
-    #    for notes-style dictations). This is the ONE code path that
-    #    can turn "put a test on my calendar" into a calendar_create.
+    # 2. Route directly to cos (Claude Opus) — the single most powerful
+    #    routing step, no separate classifier. Cos reads the transcript,
+    #    decides what to do (action, goal, wiki update, context, query),
+    #    executes via MCP, and returns a short reply that we surface in
+    #    the pill. The user's utterance + cos's reply land in the
+    #    conversations/ store so future cos cycles have continuity.
     try:
-        from deja.web.command_routes import (
-            _classify,
-            _dispatch_action,
-            _dispatch_automation,
-            _dispatch_context,
-            _dispatch_goal,
-            CommandResponse,
-        )
+        from deja import chief_of_staff
     except Exception:
-        log.exception("mic_stop: failed to import command_routes")
+        log.exception("mic_stop: failed to import chief_of_staff")
         raise
 
-    try:
-        parsed, cost, latency_ms = await _classify(transcript)
-    except DejaError as err:
-        err.details.setdefault("phase", "classify")
-        report_error(err, visible_to_user=True)
+    if not chief_of_staff.is_enabled():
         return {
             "ok": False,
             "recording": False,
-            "reason": "classifier_failed",
-            "detail": err.user_message,
-            "request_id": err.request_id,
-            "code": err.code,
+            "reason": "cos_disabled",
+            "detail": "Chief of staff is disabled. Run `deja cos enable`.",
             "transcript": transcript,
         }
+
+    loop = asyncio.get_running_loop()
+    try:
+        rc, cos_reply, stderr = await loop.run_in_executor(
+            None,
+            lambda: chief_of_staff.invoke_command_sync(
+                user_message=transcript,
+                source="voice",
+            ),
+        )
     except Exception as e:
-        log.exception("mic_stop: classifier failed")
+        log.exception("mic_stop: cos command invocation failed")
         wrapped = LLMError(
-            f"classifier failed: {type(e).__name__}: {e}",
-            details={"phase": "classify", "exception_type": type(e).__name__},
+            f"cos command failed: {type(e).__name__}: {e}",
+            details={"phase": "cos_command", "exception_type": type(e).__name__},
         )
         report_error(wrapped, visible_to_user=True)
         return {
             "ok": False,
             "recording": False,
-            "reason": "classifier_failed",
-            "detail": f"Classifier failed: {e}",
+            "reason": "cos_command_failed",
+            "detail": f"Cos invocation failed: {e}",
             "transcript": transcript,
         }
 
-    cmd_type = parsed.get("type")
-    payload = parsed.get("payload") or {}
-    confirmation = parsed.get("confirmation", "") or ""
-
-    try:
-        if cmd_type == "action":
-            details = _dispatch_action(payload)
-        elif cmd_type == "goal":
-            details = _dispatch_goal(payload)
-        elif cmd_type == "automation":
-            details = _dispatch_automation(payload)
-        elif cmd_type == "context":
-            details = _dispatch_context(payload)
-        else:
-            return {
-                "ok": False,
-                "recording": False,
-                "reason": "classifier_unknown_type",
-                "detail": f"Unknown command type: {cmd_type!r}",
-                "transcript": transcript,
-            }
-    except Exception as e:
-        log.exception("mic_stop: dispatch failed for type=%s", cmd_type)
-        return {
-            "ok": False,
-            "recording": False,
-            "reason": "dispatch_failed",
-            "detail": f"Dispatch failed: {e}",
-            "transcript": transcript,
-        }
-
-    # Audit — mirror command_routes behavior for text commands
     try:
         from deja import audit
-
         audit.record(
             "voice_transcript",
-            target=f"command/{cmd_type}",
-            reason=confirmation or transcript[:200],
+            target="command/cos",
+            reason=(cos_reply or transcript)[:200],
             trigger={"kind": "user_cmd", "detail": "voice"},
         )
     except Exception:
         log.debug("audit.record failed for voice command", exc_info=True)
 
-    # Context-type commands fire an immediate integrate trigger so the
-    # new signal gets processed against any other unprocessed signals.
-    # (Non-context types already wrote their own state — tasks, actions
-    # execute synchronously — and don't need an integrate cycle.)
-    if cmd_type == "context":
-        try:
-            from deja.agent.analysis_cycle import trigger_integrate_now
-
-            asyncio.create_task(
-                trigger_integrate_now(reason="voice_transcript_context")
-            )
-        except Exception:
-            log.debug(
-                "immediate integrate trigger failed for voice context",
-                exc_info=True,
-            )
-
-    response = CommandResponse(
-        ok=True,
-        type=cmd_type,
-        confirmation=confirmation,
-        details=details,
-        cost_usd=round(cost, 6),
-        latency_ms=latency_ms,
-    )
-
-    # Successful transcription + dispatch — clean up the WAV.
     try:
         wav_path.unlink(missing_ok=True)
     except Exception:
         log.debug("mic_stop: wav cleanup failed", exc_info=True)
 
-    # Return the CommandResponse fields PLUS the transcript + recording
-    # metadata the existing UI code expects.
     return {
-        **response.model_dump(),
+        "ok": rc == 0,
         "recording": False,
         "started_at": started_at,
         "transcript": transcript,
+        "cos_response": cos_reply,
+        "stderr": stderr[-400:] if stderr else "",
     }
 
 
