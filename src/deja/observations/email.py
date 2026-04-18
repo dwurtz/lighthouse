@@ -483,6 +483,105 @@ def _get_thread(thread_id: str) -> list[dict]:
     return data.get("messages", []) or []
 
 
+_PROCESSED_REPLIES_PATH = DEJA_HOME / "chief_of_staff" / "processed_replies"
+
+
+def _is_reply_processed(message_id: str) -> bool:
+    """True iff this Gmail Message-Id has already been dispatched to cos."""
+    if not message_id:
+        return False
+    try:
+        if not _PROCESSED_REPLIES_PATH.exists():
+            return False
+        return message_id in _PROCESSED_REPLIES_PATH.read_text(encoding="utf-8").splitlines()
+    except Exception:
+        return False
+
+
+def _mark_reply_processed(message_id: str) -> None:
+    if not message_id:
+        return
+    try:
+        _PROCESSED_REPLIES_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with _PROCESSED_REPLIES_PATH.open("a", encoding="utf-8") as f:
+            f.write(message_id + "\n")
+    except Exception:
+        log.debug("email: failed to mark reply processed", exc_info=True)
+
+
+def _handle_user_reply_to_cos(
+    *,
+    thread_messages: list[dict],
+    per_msg: list[dict],
+    subject: str,
+) -> None:
+    """Route a user reply to a [Deja]-prefixed email directly to cos.
+
+    Called from _build_observation_from_thread when the thread's latest
+    message is From=user + To=user + subject contains "[Deja]" and
+    starts with "Re:". Extracts the user's reply body (already
+    quote-stripped by per_msg rendering), pulls Message-Id + threadId
+    for threading, dedupes on Message-Id, logs the turn, and fires cos
+    in user_reply mode.
+
+    Dedupe matters because the Gmail history-API collector re-scans
+    recent threads on catch-up — a reply could land here multiple
+    times. We store processed Message-Ids in
+    ``~/.deja/chief_of_staff/processed_replies``.
+    """
+    if not thread_messages or not per_msg:
+        return
+
+    latest_raw = thread_messages[-1]
+    latest_msg = per_msg[-1]
+
+    headers = {
+        h.get("name", "").lower(): h.get("value", "")
+        for h in latest_raw.get("payload", {}).get("headers", [])
+    }
+    reply_message_id = headers.get("message-id", "").strip()
+    thread_id = latest_raw.get("threadId", "") or ""
+
+    if reply_message_id and _is_reply_processed(reply_message_id):
+        log.debug(
+            "email: user reply already processed: %s", reply_message_id[:80],
+        )
+        return
+
+    user_message = (latest_msg.get("body") or "").strip()
+    if not user_message:
+        log.info("email: user reply had empty body after strip; dropping")
+        return
+
+    try:
+        from deja import chief_of_staff
+
+        chief_of_staff.log_dialogue_turn(
+            role="user",
+            subject=subject,
+            body=user_message,
+            thread_id=thread_id,
+            in_reply_to=headers.get("in-reply-to", "").strip(),
+            message_id=reply_message_id,
+        )
+        chief_of_staff.invoke_user_reply(
+            subject=subject,
+            user_message=user_message,
+            thread_id=thread_id,
+            in_reply_to=reply_message_id,
+            message_id=reply_message_id,
+        )
+    except Exception:
+        log.exception("email: failed to dispatch user reply to cos")
+        return
+
+    _mark_reply_processed(reply_message_id)
+    log.info(
+        "email: dispatched user reply to cos: %r (msg_id=%s)",
+        subject[:80], reply_message_id[:60],
+    )
+
+
 def _build_observation_from_thread(
     msg_id: str,
     thread_messages: list[dict],
@@ -545,24 +644,36 @@ def _build_observation_from_thread(
     if any(n.lower() in subject.lower() for n in _SYSTEM_NOISE):
         return None
 
-    # Filter [Deja]-prefixed self-emails — those are cos notifications
-    # written BY the agent TO the user. If we let them through, they'd
-    # appear as [SENT] outbound signals, integrate would write events
-    # about them, cos on the next cycle would re-email about those
-    # events, and the loop never converges. This filter cuts the loop
-    # at the observer layer. Only affects emails where the user is
-    # both sender and recipient AND the subject is [Deja]-prefixed —
-    # so legitimate self-notes stay in.
+    # Handle [Deja]-tagged self-emails — two kinds:
+    #
+    #   1. Outbound cos notifications (From=user, To=user, subject
+    #      starts with "[Deja]"). Drop — integrate would write events
+    #      about cos's own emails and the loop wouldn't converge.
+    #
+    #   2. User replies to cos (From=user, To=user, subject contains
+    #      "[Deja]" and starts with "Re:"). User is TALKING to cos.
+    #      Route to cos.invoke_user_reply directly (first-class reply
+    #      channel, works from phone where vision can't see the screen)
+    #      and drop from the normal observation log — don't feed
+    #      integrate with generic email noise.
     try:
         from deja.identity import load_user
         user_email = (load_user().email or "").lower()
     except Exception:
         user_email = ""
-    if user_email and subject.strip().startswith("[Deja]"):
+    if user_email and "[deja]" in subject.lower():
         from_lower = (latest_from or "").lower()
         to_lower = (latest_to or "").lower()
         if user_email in from_lower and user_email in to_lower:
-            log.debug("email: skipping cos self-email loopback: %s", subject[:60])
+            is_reply = subject.strip().lower().startswith("re:")
+            if is_reply:
+                _handle_user_reply_to_cos(
+                    thread_messages=thread_messages,
+                    per_msg=per_msg,
+                    subject=subject.strip(),
+                )
+            else:
+                log.debug("email: skipping cos self-email loopback: %s", subject[:60])
             return None
 
     n = len(thread_messages)
