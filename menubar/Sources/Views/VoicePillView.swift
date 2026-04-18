@@ -133,27 +133,82 @@ struct VoicePillView: View {
 
     // MARK: - Processing
 
+    /// Pill shown while the backend is busy (mic stopped → cos response
+    /// returned). A continuous left-right sweep bar fills the capsule
+    /// so the user never wonders if it's frozen — even when cos takes
+    /// 30-90 s. The status text is phase-aware: "Transcribing…" for the
+    /// first few seconds while Whisper runs, then "Deja is thinking…"
+    /// once we've handed off to the cos subprocess.
     private var processingPill: some View {
-        HStack(spacing: 6) {
-            ProgressView()
-                .scaleEffect(0.5)
-                .frame(width: 12, height: 12)
-            Text(monitor.voicePillStatus.isEmpty ? "…" : monitor.voicePillStatus)
-                .font(.system(size: 10, weight: .medium))
-                .foregroundColor(.white.opacity(0.7))
-                .lineLimit(1)
-                .truncationMode(.tail)
+        TimelineView(.animation) { ctx in
+            let startedAt = monitor.voicePillProcessingStartedAt ?? ctx.date
+            let elapsed = ctx.date.timeIntervalSince(startedAt)
+            let phaseLabel: String = {
+                if !monitor.voicePillStatus.isEmpty
+                    && monitor.voicePillStatus != "Transcribing..."
+                    && monitor.voicePillStatus != "Transcribing…" {
+                    return monitor.voicePillStatus
+                }
+                if elapsed < 4.5 {
+                    return "Transcribing…"
+                }
+                return "Deja is thinking…"
+            }()
+
+            ZStack(alignment: .leading) {
+                Color.clear
+                sweepBar(elapsed: elapsed)
+                HStack {
+                    Text(phaseLabel)
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundColor(.white.opacity(0.75))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .padding(.leading, 10)
+                    Spacer(minLength: 6)
+                }
+            }
+            .frame(width: Self.hoverCapsuleWidth, height: Self.hoverCapsuleHeight)
+            .background(
+                RoundedRectangle(cornerRadius: Self.hoverCornerRadius)
+                    .fill(Color.black.opacity(0.92))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: Self.hoverCornerRadius)
+                    .stroke(Color.white.opacity(0.3), lineWidth: 1)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: Self.hoverCornerRadius))
         }
-        .frame(width: Self.hoverCapsuleWidth, height: Self.hoverCapsuleHeight)
-        .background(
-            RoundedRectangle(cornerRadius: Self.hoverCornerRadius)
-                .fill(Color.black.opacity(0.92))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: Self.hoverCornerRadius)
-                .stroke(Color.white.opacity(0.3), lineWidth: 1)
-        )
         .transition(.scale(scale: 0.8).combined(with: .opacity))
+    }
+
+    /// Continuous left-to-right sweep bar. 2 pt tall, 28% of pill width,
+    /// travels on a 1.4 s loop. Phase is driven by wall-clock elapsed
+    /// seconds so adjacent re-renders stay coherent.
+    private func sweepBar(elapsed: TimeInterval) -> some View {
+        let barWidthFrac: CGFloat = 0.28
+        let period: TimeInterval = 1.4
+        let phase = (elapsed.truncatingRemainder(dividingBy: period)) / period
+        return GeometryReader { geo in
+            let barWidth = geo.size.width * barWidthFrac
+            let travel = geo.size.width + barWidth
+            let x = CGFloat(phase) * travel - barWidth
+            Rectangle()
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            Color.white.opacity(0.0),
+                            Color.white.opacity(0.55),
+                            Color.white.opacity(0.0),
+                        ],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                )
+                .frame(width: barWidth, height: 2)
+                .offset(x: x, y: geo.size.height - 3)
+        }
+        .allowsHitTesting(false)
     }
 
     // MARK: - Transcript

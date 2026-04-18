@@ -65,6 +65,11 @@ class MonitorState: ObservableObject {
     @Published var voicePillActive: Bool = false
     @Published var voicePillProcessing: Bool = false
     @Published var voicePillStatus: String = ""  // "Listening..." or "Transcribing..."
+    /// Wall clock when the processing pill was last shown — used to
+    /// drive phase-aware labels ("Transcribing…" for the first few
+    /// seconds, "Deja is thinking…" after that) inside a TimelineView.
+    /// Cleared when a response lands or the user triggers a new capture.
+    @Published var voicePillProcessingStartedAt: Date?
     @Published var voicePillTranscript: String = ""
     /// Emoji badge for the post-dispatch echo in the pill — mapped from
     /// the classification type returned by /api/mic/stop. Empty string
@@ -895,6 +900,7 @@ class MonitorState: ObservableObject {
         voicePillConfirmation = ""
         voicePillUndoToken = ""
         voicePillUndoStatus = ""
+        voicePillProcessingStartedAt = nil
 
         // Reset the bar history so the pill starts at rest. New RMS
         // samples will flow in via recordVoiceLevel() as VoiceRecorder's
@@ -952,7 +958,8 @@ class MonitorState: ObservableObject {
 
         // Show processing state
         voicePillProcessing = true
-        voicePillStatus = "Transcribing..."
+        voicePillStatus = ""  // phase-aware label is driven by elapsed time
+        voicePillProcessingStartedAt = Date()
         voicePillTranscript = ""
         voicePillBadge = ""
         voicePillConfirmation = ""
@@ -968,6 +975,7 @@ class MonitorState: ObservableObject {
             if let error = error {
                 DispatchQueue.main.async {
                     self.voicePillProcessing = false
+                self.voicePillProcessingStartedAt = nil
                     self.voicePillTranscript = ""
                     self.commandToast = Toast(
                         style: .error,
@@ -982,6 +990,7 @@ class MonitorState: ObservableObject {
                   let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
                 DispatchQueue.main.async {
                     self.voicePillProcessing = false
+                self.voicePillProcessingStartedAt = nil
                     self.voicePillTranscript = ""
                     self.commandToast = Toast(
                         style: .error,
@@ -1001,6 +1010,7 @@ class MonitorState: ObservableObject {
                     ?? "Voice command failed."
                 DispatchQueue.main.async {
                     self.voicePillProcessing = false
+                self.voicePillProcessingStartedAt = nil
                     self.voicePillTranscript = ""
                     self.commandToast = Toast(style: .error, text: detail)
                     self.scheduleToastDismiss()
@@ -1012,6 +1022,7 @@ class MonitorState: ObservableObject {
             guard !transcript.isEmpty else {
                 DispatchQueue.main.async {
                     self.voicePillProcessing = false
+                self.voicePillProcessingStartedAt = nil
                     self.voicePillTranscript = ""
                 }
                 return
@@ -1044,6 +1055,7 @@ class MonitorState: ObservableObject {
 
             DispatchQueue.main.async {
                 self.voicePillProcessing = false
+                self.voicePillProcessingStartedAt = nil
                 self.voicePillTranscript = transcript
                 self.voicePillBadge = badge
                 self.voicePillConfirmation = pillConfirmation
