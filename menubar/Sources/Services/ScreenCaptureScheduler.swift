@@ -80,6 +80,14 @@ final class ScreenCaptureScheduler {
     // Floor interval (seconds of no event → force a capture).
     private let floorInterval: TimeInterval = 60.0
 
+    /// If set to a future date, all capture fires are skipped until
+    /// then. Used to step out of the way of macOS's built-in screenshot
+    /// shortcuts (Cmd+Shift+3/4/5/6) — holding an SCStream session
+    /// while screencaptureui wakes up introduces perceptible lag on
+    /// the user's own screenshots.
+    private var pausedUntil: Date?
+    private let screenshotHotkeyPauseDuration: TimeInterval = 2.0
+
     private var started = false
 
     // MARK: - Lifecycle
@@ -153,6 +161,20 @@ final class ScreenCaptureScheduler {
         keystrokeMonitor.onTypingPause = { [weak self] in
             self?.scheduleCapture(after: self?.typingPauseDebounce ?? 0, reason: "typing-pause")
         }
+        keystrokeMonitor.onScreenshotHotkey = { [weak self] in
+            self?.pauseForUserScreenshot()
+        }
+    }
+
+    /// Pause captures for ~2s so the user's Cmd-Shift-3 screenshot
+    /// isn't slowed by us holding an SCStream. Also cancels any
+    /// pending capture so it doesn't fire the moment we unpause.
+    private func pauseForUserScreenshot() {
+        pausedUntil = Date().addingTimeInterval(screenshotHotkeyPauseDuration)
+        pendingCapture?.cancel()
+        pendingCapture = nil
+        NSLog("deja: ScreenCaptureScheduler paused %.1fs (user screenshot hotkey)",
+              screenshotHotkeyPauseDuration)
     }
 
     // MARK: - Debounced capture dispatch
@@ -167,6 +189,10 @@ final class ScreenCaptureScheduler {
         let work = DispatchWorkItem { [weak self] in
             guard let self = self else { return }
             guard let state = self.monitorState else { return }
+            if self.isPaused {
+                NSLog("deja: ScreenCaptureScheduler skipped capture (paused, reason=\(reason))")
+                return
+            }
             NSLog("deja: ScreenCaptureScheduler firing capture (reason=\(reason))")
             state.captureScreenshot()
             // captureScreenshot defers silently while the user is
@@ -185,6 +211,15 @@ final class ScreenCaptureScheduler {
         }
     }
 
+    /// True iff we're inside an active pause window. Reads and lazily
+    /// clears ``pausedUntil`` when it expires.
+    private var isPaused: Bool {
+        guard let until = pausedUntil else { return false }
+        if Date() < until { return true }
+        pausedUntil = nil
+        return false
+    }
+
     // MARK: - Floor timer
 
     private func startFloorTimer() {
@@ -197,6 +232,11 @@ final class ScreenCaptureScheduler {
         timer.schedule(deadline: .now() + floorInterval, repeating: .never)
         timer.setEventHandler { [weak self] in
             guard let self = self else { return }
+            if self.isPaused {
+                NSLog("deja: ScreenCaptureScheduler skipped capture (paused, reason=floor)")
+                self.restartFloorTimer()
+                return
+            }
             NSLog("deja: ScreenCaptureScheduler firing capture (reason=floor)")
             self.monitorState?.captureScreenshot()
             // Re-arm for the next quiet window. If an event-driven

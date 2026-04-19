@@ -35,6 +35,13 @@ class KeystrokeMonitor {
     /// callback entirely (no work item is scheduled).
     var onTypingPause: (() -> Void)?
 
+    /// Fired on the main queue the instant the user presses one of
+    /// macOS's system screenshot shortcuts (Cmd+Shift+3/4/5/6). The
+    /// scheduler uses this to briefly pause its own SCStream captures
+    /// so the user's Cmd-Shift-3 doesn't contend with ours for the
+    /// ScreenCaptureKit session.
+    var onScreenshotHotkey: (() -> Void)?
+
     /// Delay from the last keystroke before ``onTypingPause`` fires. Also
     /// serves as the minimum idle before the callback actually invokes —
     /// we re-check at fire time to defend against races where a late
@@ -84,6 +91,14 @@ class KeystrokeMonitor {
     fileprivate func recordKeystroke() {
         _lastKeystrokeTime = Date().timeIntervalSince1970
         scheduleTypingPauseFire()
+    }
+
+    /// Called from the C tap when a Cmd+Shift+3/4/5/6 keyDown is seen.
+    /// Hops to main for safe callback dispatch.
+    fileprivate func fireScreenshotHotkey() {
+        DispatchQueue.main.async { [weak self] in
+            self?.onScreenshotHotkey?()
+        }
     }
 
     /// Cancel-and-reschedule the typing-pause fire. Called on every
@@ -144,6 +159,17 @@ private func keystrokeTapCallback(
             // work-item scheduling can use per-instance state (the
             // cancel-and-reschedule DispatchWorkItem).
             monitor.scheduleTypingPauseFire()
+
+            // Detect macOS's built-in screenshot shortcuts so the
+            // capture scheduler can pause briefly and not contend with
+            // screencaptureui for the SCStream. Virtual key codes:
+            // 3→20, 4→21, 5→23, 6→22 (touch bar screenshot).
+            let kc = event.getIntegerValueField(.keyboardEventKeycode)
+            let flags = event.flags
+            let isCmdShift = flags.contains(.maskCommand) && flags.contains(.maskShift)
+            if isCmdShift && (kc == 20 || kc == 21 || kc == 22 || kc == 23) {
+                monitor.fireScreenshotHotkey()
+            }
         }
     }
     return Unmanaged.passUnretained(event)
