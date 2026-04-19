@@ -18,10 +18,10 @@ pattern: parse candidates → batched Flash confirm → apply directly.
     it's busy writing events + entity pages. This pass sweeps the
     still-open items against the last 48h of event bodies with
     slower, more thorough reasoning (full Flash, not Flash-Lite) and
-    catches what integrate missed. Canonical miss: Jon Sturos's
-    ``Waiting for — builder contact for detached garage`` is resolved
-    by a Davin Tarnanen email referring back to Jon; integrate wrote
-    the event and the people list but didn't flip the waiting_for.
+    catches what integrate missed. Canonical miss: a ``Waiting for —
+    builder contact for detached garage`` from Joe is resolved by a
+    Jane email referring back to Joe; integrate wrote the event and
+    the people list but didn't flip the waiting_for.
 
 There's no wasted work because goals_reconcile only processes items
 still open at sweep time — anything integrate already closed is gone

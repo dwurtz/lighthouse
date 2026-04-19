@@ -18,7 +18,7 @@ What does **NOT** count as a contradiction:
 - Something you personally doubt — only flag when the two pages literally cannot both be true.
 - **Complementary views of the same event from different participants.** A recruiter's page describing their role in a hiring process is not a contradiction of the self-page describing the resulting role. A realtor's page about listing a property is not a contradiction of the property page about rental plans. A doctor's page mentioning an appointment is not a contradiction of the patient's page recording the same appointment. Same event, different vantage point — both true.
 - **"X is involved with Y" vs. "Y is ongoing" are not in conflict.** Involvement and status are orthogonal facts.
-- **A later event on the same topic is not a contradiction of an earlier statement unless it literally denies it.** "David accepted the Google role April 20" and "Audrey (recruiter) finalized details about the role in March" are both true; the March work *led to* the April acceptance. Only flag if the later page says the acceptance was withdrawn, postponed, or different.
+- **A later event on the same topic is not a contradiction of an earlier statement unless it literally denies it.** "Joe accepted the role on April 20" and "Jane (recruiter) finalized details about the role in March" are both true; the March work *led to* the April acceptance. Only flag if the later page says the acceptance was withdrawn, postponed, or different.
 
 ## Which claim is current?
 

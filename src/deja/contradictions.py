@@ -2,8 +2,8 @@
 
 Dedup handles pages that describe the *same* entity. Contradictions live
 between pages that describe *different* entities whose content happens to
-reference the same subject (Amanda's page vs. the Blade & Rose project
-page mentioning Amanda's new Google email). Those pages may never get
+reference the same subject (a person's page vs. a project page that
+mentions that person's new email). Those pages may never get
 co-retrieved by the same integrate batch, so contradictions between them
 drift silently.
 

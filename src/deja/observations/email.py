@@ -493,7 +493,7 @@ def _verify_reply_auth(raw_message: dict, user_email: str) -> tuple[bool, str]:
 
       1. The parsed ``From:`` email MUST exactly match ``user_email``
          (the Google-authenticated identity from ``load_user()``).
-         Substring match would let a spoofed ``david@davidwurtz.com.evil.tld``
+         Substring match would let a spoofed ``user@example.com.evil.tld``
          pass through. We accept only the exact address.
 
       2. Gmail's ``Authentication-Results`` header MUST show

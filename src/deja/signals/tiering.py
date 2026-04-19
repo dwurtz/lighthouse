@@ -357,9 +357,10 @@ def classify_tier(obs: dict) -> int:
     For threaded messaging (iMessage / WhatsApp) the classifier keys on
     ``speaker`` — the single participant who authored the turn — not on
     ``sender``, which is the joined chat label. In group chats this is
-    the difference between "Dominique sent this in the chat" (Tier 1,
-    inner-circle) and "some turn happened in a chat that also contains
-    Dominique" (not necessarily Tier 1). Legacy observations without a
+    the difference between "<inner-circle person> sent this in the
+    chat" (Tier 1, inner-circle) and "some turn happened in a chat
+    that also contains <that person>" (not necessarily Tier 1).
+    Legacy observations without a
     ``speaker`` field fall back to ``sender`` for back-compat.
     """
     source = (obs.get("source") or "").lower()
@@ -387,8 +388,8 @@ def classify_tier(obs: dict) -> int:
             return 1
         # [ENGAGED] prefix means: an incoming reply on a thread the user
         # has already responded to. Engagement is a stronger signal than
-        # who's in the inner circle — if David hit Reply once, every
-        # subsequent message in that thread matters.
+        # who's in the inner circle — if the user hit Reply once,
+        # every subsequent message in that thread matters.
         if text.startswith("[ENGAGED]"):
             return 1
         if "→" in sender:
@@ -401,10 +402,10 @@ def classify_tier(obs: dict) -> int:
 
     # Inner-circle inbound: messages FROM an inner-circle person.
     # For messaging this must be the SPEAKER of this specific turn —
-    # not just someone who happens to be in the chat. A group chat with
-    # Dominique gets Tier 1 only on Dominique's own turns, never on
-    # Laura's or anyone else's. Email keeps the sender-based match
-    # (email's "speaker" is already the sender).
+    # not just someone who happens to be in the chat. A group chat
+    # with an inner-circle member gets Tier 1 only on that person's
+    # own turns, never on anyone else's. Email keeps the sender-based
+    # match (email's "speaker" is already the sender).
     if source in ("imessage", "whatsapp"):
         if _sender_matches_inner_circle(messaging_identity):
             return 1

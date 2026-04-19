@@ -127,7 +127,7 @@ def _mentions_catalog(obs: dict, slugs: set[str]) -> bool:
     if not haystack.strip():
         return False
     # Compare against slug text AND against the hyphen-free form so
-    # "amanda-peffer" matches "amanda peffer".
+    # "jane-doe" matches "jane doe".
     for slug in slugs:
         if slug in haystack:
             return True

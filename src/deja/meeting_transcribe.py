@@ -247,10 +247,10 @@ Create a polished event page with:
 1. **YAML frontmatter**: date, time, people (slugs from wiki index), projects (slugs)
 
 2. **AI-generated title as H1** — a concise, descriptive title based on what was actually discussed. NOT the calendar invite title. Examples:
-   - "Ruby's spring schedule planning with Sara"
-   - "Blade & Rose theme review"
+   - "A kid's spring schedule planning with co-parent"
+   - "<project> design review"
    - "Quick check-in about the roof project"
-   - "David thinking through relocation timeline"
+   - "User thinking through relocation timeline"
 
 3. **Summary section** — 3-5 bullet points at the top covering:
    - Key topics discussed

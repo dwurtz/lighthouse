@@ -1,8 +1,9 @@
 """Free-reign wiki tool surface for the chat agent.
 
-When the user types a structural request into the notch chat ("delete the
-terafab page", "rename coach-rob-robert-toy to robert-toy", "merge
-tom-peffer into tom-thurlow"), the chat endpoint hands Pro a set of wiki
+When the user types a structural request into the notch chat ("delete
+the <vendor> page", "rename <old-slug> to <new-slug>", "merge
+<dup-slug> into <canonical-slug>"), the chat endpoint hands Pro a set
+of wiki
 tools it can call directly. Pro plans the edits, executes them as tool
 calls, and narrates what it did in the stream — no Flash-Lite integration
 cycle in the loop, no structured `wiki_updates` JSON to squeeze through.

@@ -455,8 +455,8 @@ def get_open_loops() -> dict:
 
     Reads ``~/Deja/goals.md`` (via ``deja.goals._parse_sections``) and
     projects each section into a flat list the notch 'Open loops' tab
-    can render directly. This is the full "what does David still owe
-    the world" view — distinct from ``/api/briefing`` which only
+    can render directly. This is the full "what does the user still
+    owe the world" view — distinct from ``/api/briefing`` which only
     surfaces the deadline-hot subset (overdue / due soon / stale).
 
     Return shape:

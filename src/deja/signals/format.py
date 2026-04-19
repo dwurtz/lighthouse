@@ -253,9 +253,9 @@ def _inject_thread_context(obs: dict) -> dict:
     # path) can unambiguously attribute every line. Without this the
     # new-cycle block is bare body text and text integrators must
     # guess who said what. Caused a real miss: a T1 inner-circle
-    # WhatsApp from Nie ("maybe we need to raise au pair pay") went
-    # unattributed → Gemini skipped it; vision-path (which sees the
-    # chat bubble visually) caught it.
+    # WhatsApp turn with substantive content went unattributed →
+    # Gemini skipped it; vision-path (which sees the chat bubble
+    # visually) caught it.
     speaker_for_new = obs.get("speaker") or obs.get("sender") or ""
     speaker_prefix = f"{speaker_for_new}: " if speaker_for_new else ""
     new_body_prefixed = "\n".join(

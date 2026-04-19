@@ -22,13 +22,13 @@ Schema (one JSON object per line):
               | "goal_action" | "dedup_merge" | "user_command"
               | "voice_transcript" | "automation_add" | "onboarding_step"
               | "health_check",
-      "target": "people/amanda-peffer" | "goals/tasks" | ...,
+      "target": "people/jane-doe" | "goals/tasks" | ...,
       "reason": "<verbatim LLM reason or deterministic justification>"
     }
 
 Grep examples:
 
-    jq 'select(.target == "people/amanda-peffer")' ~/.deja/audit.jsonl
+    jq 'select(.target == "people/jane-doe")' ~/.deja/audit.jsonl
     jq 'select(.trigger.kind == "reminder")' ~/.deja/audit.jsonl
     jq 'select(.cycle == "c_abc123")' ~/.deja/audit.jsonl
 

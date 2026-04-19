@@ -139,8 +139,8 @@ def create_server() -> Server:
                             "description": (
                                 "What you need context about — a person's name, "
                                 "project name, keyword, or question. Examples: "
-                                "'Amanda Peffer', 'soccer carpool', 'Palo Alto "
-                                "relocation', 'what did I promise Sara'"
+                                "'Jane Doe', 'kids carpool', 'house relocation', "
+                                "'what did I promise Joe'"
                             ),
                         },
                     },
@@ -187,7 +187,7 @@ def create_server() -> Server:
                             "type": "string",
                             "description": (
                                 "kebab-case page identifier. For people and "
-                                "projects: just the name, e.g. 'amanda-peffer'. "
+                                "projects: just the name, e.g. 'jane-doe'. "
                                 "For events: date-prefixed, e.g. "
                                 "'2026-04-07/david-invited-to-llm-kinsol-update'."
                             ),
@@ -318,7 +318,7 @@ def create_server() -> Server:
                     "Search timestamped event pages only (events/YYYY-MM-DD/). "
                     "Scoped to last N days with optional person/project "
                     "filters. Use for questions like 'what happened with "
-                    "Jon this week' or 'activity on home-roof'."
+                    "<person> this week' or 'activity on <project>'."
                 ),
                 inputSchema={
                     "type": "object",
@@ -613,6 +613,81 @@ def create_server() -> Server:
                     "required": ["prompt"],
                 },
             ),
+            types.Tool(
+                name="draft_imessage",
+                description=(
+                    "Stage a draft iMessage in the compose field of a "
+                    "conversation without sending. Opens Messages in "
+                    "the background (user's current window focus is "
+                    "preserved), populates the conversation with the "
+                    "target handle, and pre-fills the text via the "
+                    "imessage:// URL body parameter. The user reviews "
+                    "on their next switch to Messages and either hits "
+                    "Return to send or deletes to discard. Use this "
+                    "as the DEFAULT for outbound iMessages to anyone "
+                    "except the user's own self-chat. "
+                    "\n\n"
+                    "Handle accepts any iMessage-capable phone "
+                    "(with country code) or email address. Since "
+                    "this is non-disruptive, YOU must tell the user "
+                    "you drafted something — in your final message "
+                    "/ self-ack — so they know to check Messages. "
+                    "Example: 'Drafted to <person> — review and "
+                    "send in Messages.'"
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "handle": {
+                            "type": "string",
+                            "description": "iMessage handle of the recipient — phone (with +country) or email address.",
+                        },
+                        "text": {
+                            "type": "string",
+                            "description": "Draft message body. Pasted verbatim into the compose field.",
+                        },
+                    },
+                    "required": ["handle", "text"],
+                },
+            ),
+            types.Tool(
+                name="send_imessage",
+                description=(
+                    "Send an iMessage immediately to the target "
+                    "handle via AppleScript. No review step — the "
+                    "message leaves your phone number the moment this "
+                    "is called. "
+                    "\n\n"
+                    "Reserve for cases where the user's directive "
+                    "unambiguously says send (e.g. 'text X that I'm "
+                    "running late', 'ping X the Tuesday confirm') or "
+                    "it's an ack in the user's own self-chat (a push "
+                    "confirmation of work you just did). For anything "
+                    "else — third-party outreach where the user said "
+                    "'draft' or was unclear — use draft_imessage "
+                    "instead and let them review. "
+                    "\n\n"
+                    "Handle accepts any iMessage-capable phone "
+                    "(with country code) or email address. Other "
+                    "humans cannot distinguish a cos-sent text from "
+                    "one the user typed themselves — act with that "
+                    "in mind."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "handle": {
+                            "type": "string",
+                            "description": "iMessage handle of the recipient — phone (with +country) or email address.",
+                        },
+                        "text": {
+                            "type": "string",
+                            "description": "Message body. Sent verbatim, immediately.",
+                        },
+                    },
+                    "required": ["handle", "text"],
+                },
+            ),
         ]
 
     @app.call_tool()
@@ -733,7 +808,7 @@ def _qmd_query(topic: str, collection: str | None = None, limit: int = 5) -> str
 
     Deliberately NOT ``qmd query`` — that path runs HyDE rerank, which
     issues an LLM call per search and takes ~10s on this wiki. BM25
-    alone scores named-entity matches at 85%+ (Amanda → amanda-peffer.md)
+    alone scores named-entity matches at 85%+ (first-name → slug)
     and returns in ~0.3s. HyDE's conceptual-query edge isn't worth the
     30x latency for any caller we have today: command classification,
     query synthesis, and MCP get_context all need fast entity lookup,
@@ -741,8 +816,8 @@ def _qmd_query(topic: str, collection: str | None = None, limit: int = 5) -> str
 
     Raises ``RuntimeError`` on any failure so callers surface the
     problem instead of silently running against a blank wiki — that
-    was the root cause of the "draft email to Amanda" dispatch
-    failing with missing ``to``.
+    was the root cause of a draft-email dispatch failing with
+    missing ``to``.
     """
     import subprocess
 
@@ -765,9 +840,9 @@ def _get_context(topic: str) -> str:
     Uses QMD's hybrid search (BM25 + vector + HyDE) across the entire
     Deja wiki — people, projects, AND events — in a single query.
     QMD returns the most semantically relevant chunks regardless of
-    category, so a search for "Amanda Peffer" can return her person page,
-    the Blade & Rose project page, AND timestamped event pages like
-    "amanda-shared-sales-data" — all ranked by relevance.
+    category, so a search for a person's name can return their person
+    page, related project pages, AND timestamped event pages — all
+    ranked by relevance.
 
     Also includes:
     - User profile (always)
@@ -1414,6 +1489,100 @@ def _browser_ask(prompt: str, timeout_sec: int = 180) -> str:
     if not out:
         return f"(browser_ask: empty stdout, stderr={(proc.stderr or '')[-200:]})"
     return out
+
+
+def _draft_imessage(handle: str, text: str) -> str:
+    """Stage an iMessage draft via imessage:// URL without focus steal.
+
+    ``open -g`` (background) + URL body param lands the text in the
+    target conversation's compose field without bringing Messages to
+    the foreground. The user reviews on their next switch and hits
+    Return to send.
+    """
+    import subprocess
+    from urllib.parse import quote
+
+    if not handle or not handle.strip():
+        return "(draft_imessage: handle required)"
+    if not text or not text.strip():
+        return "(draft_imessage: text required)"
+
+    url = f"imessage://{handle.strip()}?body={quote(text)}"
+    try:
+        proc = subprocess.run(
+            ["open", "-g", url],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except subprocess.TimeoutExpired:
+        return "(draft_imessage: open timed out)"
+    except Exception as e:
+        return f"(draft_imessage failed: {type(e).__name__}: {e})"
+    if proc.returncode != 0:
+        return (
+            f"(draft_imessage rc={proc.returncode}: "
+            f"{(proc.stderr or '')[-200:]})"
+        )
+    return f"ok — drafted to {handle.strip()} in Messages (background). Tell the user to review."
+
+
+def _send_imessage(handle: str, text: str) -> str:
+    """Send an iMessage immediately via AppleScript.
+
+    Uses ``tell application "Messages" ... send`` against the iMessage
+    service. Text is passed to AppleScript via clipboard to dodge
+    AppleScript string-escape quirks with quotes / newlines.
+    """
+    import subprocess
+
+    if not handle or not handle.strip():
+        return "(send_imessage: handle required)"
+    if not text or not text.strip():
+        return "(send_imessage: text required)"
+
+    handle_s = handle.strip()
+
+    # Stuff text into the clipboard, then let AppleScript read it
+    # back. This avoids escaping the message body into AppleScript
+    # source and handles multi-line / unicode cleanly.
+    try:
+        pbcopy = subprocess.run(
+            ["pbcopy"],
+            input=text,
+            text=True,
+            timeout=5,
+        )
+        if pbcopy.returncode != 0:
+            return f"(send_imessage: pbcopy rc={pbcopy.returncode})"
+    except Exception as e:
+        return f"(send_imessage: pbcopy failed: {type(e).__name__}: {e})"
+
+    script = (
+        'set msgText to (the clipboard as text)\n'
+        'tell application "Messages"\n'
+        '  set targetService to 1st service whose service type = iMessage\n'
+        f'  set targetBuddy to buddy "{handle_s}" of targetService\n'
+        '  send msgText to targetBuddy\n'
+        'end tell\n'
+    )
+    try:
+        proc = subprocess.run(
+            ["osascript", "-e", script],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+    except subprocess.TimeoutExpired:
+        return "(send_imessage: osascript timed out)"
+    except Exception as e:
+        return f"(send_imessage failed: {type(e).__name__}: {e})"
+    if proc.returncode != 0:
+        return (
+            f"(send_imessage rc={proc.returncode}: "
+            f"{(proc.stderr or '')[-400:]})"
+        )
+    return f"ok — sent to {handle_s}"
 
 
 def _gmail_get_message(message_id: str) -> str:

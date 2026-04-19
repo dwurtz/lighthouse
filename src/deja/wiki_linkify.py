@@ -71,8 +71,8 @@ class Entity:
 
     ``slug`` is the filename stem (what goes inside ``[[ ]]``). ``phrases``
     is the full match set: title, slug-with-spaces, and every alias from
-    frontmatter. The linkifier sorts these longest-first so "Blade & Rose
-    USA" matches before "Rose".
+    frontmatter. The linkifier sorts these longest-first so "Acme Co.
+    USA" matches before "Acme".
     """
     slug: str
     category: str
@@ -237,7 +237,7 @@ def _escape_phrase(phrase: str) -> str:
     """Regex-escape a phrase, then wrap with boundary assertions.
 
     Uses lookahead/lookbehind for non-word characters so phrases containing
-    punctuation (``Blade & Rose``, ``Molly's Dad``) still bound correctly.
+    punctuation (``Alice & Bob``, ``Chris's Dad``) still bound correctly.
     Standard ``\\b`` fails on & and ' because those are non-word chars.
     """
     escaped = re.escape(phrase)
@@ -343,10 +343,10 @@ def linkify_body(
 def _normalize_link_key(s: str) -> str:
     """Lowercase + strip non-alphanumerics for loose link comparison.
 
-    Obsidian resolves ``[[Ship New Blade & Rose Theme]]`` to a page with
-    slug ``ship-new-blade-rose-theme``. To replicate that resolution we
-    collapse both sides to the same alnum-only key: "shipnewbladeandrosetheme"
-    vs "shipnewbladerosetheme". Not identical, so we also try a second
+    Obsidian resolves ``[[Ship the Acme & Co Theme]]`` to a page with
+    slug ``ship-the-acme-co-theme``. To replicate that resolution we
+    collapse both sides to the same alnum-only key: "shiptheacmeandcotheme"
+    vs "shiptheacmecotheme". Not identical, so we also try a second
     normalization that drops the word "and" (since ``&`` expands to "and"
     in some slugifiers but is dropped entirely in others).
     """
@@ -364,7 +364,7 @@ def find_broken_refs(
       - page title (``Jane Doe``)
       - any frontmatter alias
       - loose normalization (alnum-only, lowercase) — handles Obsidian
-        title-style links with punctuation like ``Ship New Blade & Rose Theme``
+        title-style links with punctuation like ``Ship the Acme & Co Theme``
 
     Returns (source_page_relpath, target_as_written) pairs, sorted.
     """

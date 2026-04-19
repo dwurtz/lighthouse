@@ -13,8 +13,8 @@ which:
           call) and excellent at exact keyword match.
        b. **Vector on the concatenated signal text** — one
           embedding-based call that catches semantic matches where
-          keywords don't overlap (e.g. "Zillow listing Palo Alto" →
-          `projects/palo-alto-relocation`). Requires `qmd embed` to
+          keywords don't overlap (e.g. "Zillow listing <city>" →
+          `projects/<city>-relocation`). Requires `qmd embed` to
           have been run.
   3. Merges results with a minimum-score cut, reads matched pages
      from disk, and returns focused context.
@@ -24,15 +24,15 @@ which:
 They have complementary failure modes — each catches what the other
 misses on the canonical eight-case benchmark:
 
-- **BM25's strength:** exact keyword matching. "Tom Peffer" → `tom-peffer.md`
+- **BM25's strength:** exact keyword matching. "Jane Doe" → `jane-doe.md`
   deterministically in ~100ms. Fast, zero setup, no embedding model needed.
 - **BM25's weakness:** long natural-language queries over-rank meta
   files (`index.md`, `log.md` contain every entity). You have to feed
   it short entity-shaped queries, not raw signal prose.
 - **Vector's strength:** semantic bridging when the signal doesn't
-  mention the slug verbatim. "configuring a Shopify theme for kids
-  clothing" → the Blade & Rose page (provided the page actually says
-  so — see wiki-content caveat below).
+  mention the slug verbatim. "configuring a <platform> theme for a
+  <vertical>" → the matching brand project page (provided the page
+  actually says so — see wiki-content caveat below).
 - **Vector's weakness:** flat score distributions on weak-signal
   queries, and sensitivity to the 300M embedding model's world
   knowledge gaps.
@@ -165,12 +165,12 @@ _INTEGRATE_INDEX_HEAD_LINES = 300
 
 
 # Capitalized words or multi-word proper-noun phrases. Handles names
-# ("Tom Peffer"), places ("Palo Alto"), and brand fragments ("Blade",
-# "Rose"). Deliberately greedy — we'd rather query BM25 five times
-# with loose candidates than miss the one phrase that matches.
+# ("Jane Doe"), places ("San Francisco"), and brand fragments.
+# Deliberately greedy — we'd rather query BM25 five times with loose
+# candidates than miss the one phrase that matches.
 _PROPER_NOUN_RE = re.compile(r"\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,3}\b")
 
-# Host stem from a URL — "bladeandrose.com" → "bladeandrose". Domain
+# Host stem from a URL — "example.com" → "example". Domain
 # stems are surprisingly good BM25 queries because project pages
 # often mention the domain verbatim.
 _DOMAIN_RE = re.compile(r"\b([a-z][a-z0-9-]{2,})\.(?:com|org|io|co|net|app|dev|ai)\b")
@@ -192,10 +192,10 @@ _BASE_STOP_TOKENS = {
 def _stop_tokens_for_user() -> set[str]:
     """Return base stop tokens plus the current user's name variants.
 
-    The user's own name appears in almost every signal ("David sent...",
-    "from David") and is useless as a search token — every entity page
-    would match. Adding the user's name dynamically means this works
-    for any installer, not just the original developer.
+    The user's own name appears in almost every signal ("<user> sent
+    ...", "from <user>") and is useless as a search token — every
+    entity page would match. Adding the user's name dynamically means
+    this works for any installer, not just the original developer.
     """
     tokens = set(_BASE_STOP_TOKENS)
     try:
@@ -220,19 +220,19 @@ def _extract_entity_tokens(signal_items: list[dict]) -> list[str]:
     """Pull short entity-shaped tokens out of the signal batch for BM25.
 
     Extracts:
-      - Proper-noun phrases ("Tom Peffer", "Palo Alto", "Blade Rose")
+      - Proper-noun phrases ("Jane Doe", "San Francisco", "Acme")
         from signal text AND sender fields
-      - Domain stems from URLs ("bladeandrose", "alfredcapital")
-      - Sender email local-parts ("mike@alfredcapital.com" → "alfredcapital")
+      - Domain stems from URLs ("example", "acme")
+      - Sender email local-parts ("joe@example.com" → "example")
 
     Deduplicated case-insensitive. Stop-tokens (common capitalized
     words that aren't entities) are filtered out.
 
-    **Outbound signals (David's own messages) are iterated first.**
+    **Outbound signals (the user's own messages) are iterated first.**
     The total token budget is capped at 10 per cycle, so extracting
-    from outbound first means the people and projects David himself
-    just mentioned claim the limited slots ahead of tokens pulled
-    from promotional inbound.
+    from outbound first means the people and projects the user just
+    mentioned claim the limited slots ahead of tokens pulled from
+    promotional inbound.
     """
     from deja.observations.types import is_outbound
 
@@ -260,7 +260,7 @@ def _extract_entity_tokens(signal_items: list[dict]) -> list[str]:
             raw.append(m.group(1))
 
         # Email local-parts and the second half (company domain stem)
-        # "mike@alfredcapital.com" → "mike", "alfredcapital"
+        # "jane@example.com" → "jane", "example"
         for email_m in re.finditer(r"\b([a-z0-9._-]+)@([a-z0-9-]+)\.", blob.lower()):
             local = email_m.group(1)
             host = email_m.group(2)
@@ -292,7 +292,7 @@ def _build_query(signal_items: list[dict]) -> str:
 
     For message-like sources (email, imessage, whatsapp) we prepend the
     sender to the body — email addresses and contact names contain
-    literal identity tokens (`mike@alfredcapital.com` → "alfred") that
+    literal identity tokens (`jane@example.com` → "example") that
     the embedder uses as strong discriminative signal, pulling the
     right person's page into the top results even when the body text
     itself is generic.
@@ -304,21 +304,28 @@ def _build_query(signal_items: list[dict]) -> str:
 
     **Outbound signals are upweighted two ways.** They (1) appear
     first in the concatenated query and (2) get prefixed with the
-    literal marker "David said:" which pulls the embedding vector
-    toward content about what David is actively talking about. Every
-    outbound message is also an open entry in the attention budget —
-    the batch retrieval query should pull hardest on David's own
-    words, since those are the ones most tightly coupled to "what
-    wiki page should get updated this cycle".
+    literal marker "<user_first_name> said:" which pulls the
+    embedding vector toward content about what the user is actively
+    talking about. Every outbound message is also an open entry in
+    the attention budget — the batch retrieval query should pull
+    hardest on the user's own words, since those are the ones most
+    tightly coupled to "what wiki page should get updated this
+    cycle".
 
     Drops very short signals (screenshot descriptions like "background
     activity") that carry no content. Strips wiki-link syntax,
     collapses whitespace, and caps total length.
     """
     from deja.observations.types import is_outbound
+    from deja.identity import load_user
 
     outbound_pieces: list[str] = []
     inbound_pieces: list[str] = []
+
+    try:
+        user_first = (load_user().name or "").split()[0] or "user"
+    except Exception:
+        user_first = "user"
 
     for d in signal_items:
         text = (d.get("text", "") or "").strip()
@@ -328,12 +335,12 @@ def _build_query(signal_items: list[dict]) -> str:
         sender = (d.get("sender") or "").strip()
 
         if is_outbound(d):
-            # David's own words — tag with a literal marker so the
-            # embedder pulls on "David said X" as strong intent signal.
-            # Strip the [SENT] email prefix if present since we're
-            # replacing it with a cleaner marker.
+            # User's own words — tag with a literal marker so the
+            # embedder pulls on "<first_name> said X" as strong intent
+            # signal. Strip the [SENT] email prefix if present since
+            # we're replacing it with a cleaner marker.
             body = text[6:].lstrip() if text.startswith("[SENT]") else text
-            piece = f"David said: {body}"
+            piece = f"{user_first} said: {body}"
         elif source in _INFORMATIVE_SENDER_SOURCES and sender and sender != "system":
             piece = f"from {sender}: {text}"
         else:
@@ -353,8 +360,8 @@ def _build_query(signal_items: list[dict]) -> str:
     # Outbound goes first. When outbound exists, we also include it
     # twice — crude but effective upweighting: the embedder is
     # length-weighted, so repetition pulls the query vector toward
-    # David's words. Inbound follows, contributing context without
-    # dominating.
+    # the user's words. Inbound follows, contributing context
+    # without dominating.
     parts = outbound_pieces + outbound_pieces + inbound_pieces if outbound_pieces else inbound_pieces
     combined = " / ".join(parts)
     return combined[:_MAX_QUERY_CHARS]
@@ -431,7 +438,7 @@ def _retrieve_bm25(entity_tokens: list[str]) -> list[tuple[str, str]]:
     """Run a BM25 search per entity token and merge the hits.
 
     BM25 wants short, keyword-shaped queries — single entity tokens
-    ("peffer", "bladeandrose", "Palo Alto") are its sweet spot. Each
+    ("doe", "acme", "San Francisco") are its sweet spot. Each
     call is ~100ms, and we cap at 10 tokens per cycle, so total BM25
     overhead is ≤1s. Results are deterministic and zero-setup.
 

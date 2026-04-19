@@ -94,7 +94,7 @@ def _format_project_hint() -> str:
 #
 #   Pass 0 (OCR):      raw text extraction — names, tickers, URLs, timestamps
 #   Pass 1 (people):   who is on screen, grounded by wiki people list
-#   Pass 2 (activity): what David is doing — app, task, project context
+#   Pass 2 (activity): what the user is doing — app, task, project context
 #
 # Total time: ~5s for all 3 passes at 1200px on Apple Silicon.
 # See the 2026-04-12 eval session for the full A/B history.
@@ -332,9 +332,9 @@ def _build_pass_prompts(
         f"screen? For each person visible, quote what they said or "
         f"what content is associated with them. Match names to the "
         f"key people list when possible.",
-        # Pass 2: Activity — what David is doing
-        f"{pre}{ocr_block}What is David doing right now? Describe "
-        f"the activity: what app, what task, what content is he "
+        # Pass 2: Activity — what the user is doing
+        f"{pre}{ocr_block}What is the user doing right now? Describe "
+        f"the activity: what app, what task, what content are they "
         f"looking at or working on? Name specific projects, files, "
         f"websites, or tools visible.",
     ]
@@ -375,7 +375,7 @@ _load_attempted = False
 
 def _format_app_sentence(ax_context: dict | None) -> str:
     """Turn AX context into a natural-language sentence like
-    ``" He has Messages open, showing 'Molly/Ruby Carpool'."``.
+    ``" The user has Messages open, showing '<chat-label>'."``.
 
     If AX context is empty (no accessibility access, or no frontmost
     app detected), returns an empty string — never a dangling partial
@@ -388,8 +388,8 @@ def _format_app_sentence(ax_context: dict | None) -> str:
     if not app:
         return ""
     if title:
-        return f" He has {app} open, showing \"{title}\"."
-    return f" He has {app} open."
+        return f" The user has {app} open, showing \"{title}\"."
+    return f" The user has {app} open."
 
 
 def _build_prompt(
@@ -407,8 +407,8 @@ def _build_prompt(
       - App sentence — frontmost app + window title from the macOS
         Accessibility API, woven into the prompt as natural language
         so FastVLM doesn't waste attention identifying the app from
-        pixels. E.g. "He has Messages open, showing 'Molly/Ruby
-        Carpool'."
+        pixels. E.g. "The user has Messages open, showing '<chat-
+        label>'."
       - Project hint — one-sentence list of the top 8 projects from
         the wiki index. Disambiguation cue, not a catalog dump.
     """

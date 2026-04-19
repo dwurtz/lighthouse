@@ -25,8 +25,8 @@ Each file is a single JSON object:
     {
       "id": "a1b2c3",
       "created_ts": "2026-04-17T22:00:00Z",
-      "summary": "Draft reply to Jon Sturos re: underlayment quote",
-      "reason": "Jon asked about whole-house vs partial underlayment; David hasn't replied",
+      "summary": "Draft reply to Joe re: quote question",
+      "reason": "Joe asked about whole-house vs partial option; user hasn't replied",
       "action_type": "draft_email",
       "action_params": {"to": "...", "subject": "...", "body": "..."},
       "cycle_id": "c_abc123",

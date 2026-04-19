@@ -21,14 +21,14 @@ Merge rules:
   - **Append new values** to list fields (``phones``, ``aliases``) if
     they're not already present. Phones are normalized to digits-only for
     dedupe comparison; the display form is whatever the source returned.
-  - **Ambiguous match = skip.** If two macOS contacts both named "Justin"
-    match a page titled "Justin (Molly's Dad)", don't guess — log the
-    ambiguity so nightly thoughts can surface it to the user.
+  - **Ambiguous match = skip.** If two macOS contacts with the same
+    first name both match a disambiguated page title, don't guess —
+    log the ambiguity so nightly thoughts can surface it to the user.
   - **Preserve all non-contact frontmatter fields** verbatim (``aliases``,
     ``keywords``, ``domains``, ``self``, etc.).
 
 The enrichment report is logged to ``deja.log`` and a summary entry
-is appended to ``log.md`` so David can see what changed in Obsidian.
+is appended to ``log.md`` so the user can see what changed in Obsidian.
 """
 
 from __future__ import annotations
@@ -184,7 +184,7 @@ def _name_candidates(page_name: str, aliases: list[str]) -> set[str]:
     """Produce the set of lowercase candidate forms to match against Contacts.
 
     Includes the page title, each alias, and the title with any parenthetical
-    suffix stripped (so ``Justin (Molly's Dad)`` matches just ``Justin``,
+    suffix stripped (so ``Alex (Child's Parent)`` matches just ``Alex``,
     which usually isn't helpful on its own — intentionally kept last so that
     exact-full-name matches win).
     """
@@ -275,8 +275,8 @@ _GMAIL_TIMEOUT_SEC = 20
 def lookup_gmail_for_name(name: str, *, max_results: int = 8) -> ContactMatch:
     """Query Gmail for messages mentioning a person by name, return email addresses seen.
 
-    Gmail's ``from:"Tom Peffer"`` operator requires an exact header match
-    and returns 0 for most real contacts — the full-text query ``Tom Peffer``
+    Gmail's ``from:"Jane Doe"`` operator requires an exact header match
+    and returns 0 for most real contacts — the full-text query ``Jane Doe``
     (no operators, no quotes) is smarter: it matches the name in any
     indexed field, and for personal contacts it's usually narrow enough.
 
@@ -291,7 +291,7 @@ def lookup_gmail_for_name(name: str, *, max_results: int = 8) -> ContactMatch:
         return ContactMatch()
 
     # Full-text query — Gmail matches across body and header name fields.
-    # Quoted-phrase queries ("Tom Peffer") return 0 via the JSON param
+    # Quoted-phrase queries ("Jane Doe") return 0 via the JSON param
     # path even when the unquoted form finds hundreds of hits; Gmail
     # treats the quotes literally. We use the unquoted form and rely on
     # the all-tokens-in-display-name post-filter below to keep noise out.
@@ -329,7 +329,7 @@ def lookup_gmail_for_name(name: str, *, max_results: int = 8) -> ContactMatch:
         return ContactMatch()
 
     # Split the name into tokens so we can recognize a header display
-    # field like "Tom Peffer <tp@foo.com>" even when Gmail's search hit
+    # field like "Jane Doe <jd@example.com>" even when Gmail's search hit
     # was actually on the body. First+last must both be present in the
     # display name for us to trust the email address.
     name_tokens = [t.lower() for t in re.split(r"\s+", name.strip()) if t]

@@ -22,7 +22,7 @@ If no — idle scrolling, inbox glance, re-reading their own doc, another tick o
 
 **Parallel threads.** When a batch contains screenshots of multiple windows/apps in the same window of time, {user_first_name} is usually multitasking — not doing one thing. Describe each thread distinctly in the narrative rather than collapsing to the most prominent one. "{user_first_name} was drafting a reply to a vendor AND also checking the markets AND scrolling a chat thread" beats "{user_first_name} was working on the vendor reply." Every thread gets mentioned; only the ones with engagement (per the rule above) get wiki events.
 
-**Projects measure continuity, not importance.** The question is never "is this big/important enough to be a project." The question is: *will {user_first_name} encounter this again — another message, another email, another decision?* If yes, it's a project. Service coordination (find a new window cleaner), family logistics (Miles's gymnastics), trip planning, vendor searches, health threads — all projects. A 2-sentence `## Currently` page is better than orphan events nothing can retrieve next time.
+**Projects measure continuity, not importance.** The question is never "is this big/important enough to be a project." The question is: *will {user_first_name} encounter this again — another message, another email, another decision?* If yes, it's a project. Service coordination (find a new window cleaner), family logistics (a kid's activity coordination), trip planning, vendor searches, health threads — all projects. A 2-sentence `## Currently` page is better than orphan events nothing can retrieve next time.
 
 **Tier biases the creation threshold, but doesn't gate it.** [T1] signals with even a hint of continuity should usually get a project — the user is speaking or inner circle is telling us directly, that's the strongest possible grounding. [T2] focused attention on something recurring is probably a project. [T3] alone almost never creates a project (ambient noise rarely predicts continuity), but [T3] that corroborates a [T1] commitment reinforces the case. When in doubt on [T1]/[T2], lean toward creating. When in doubt on [T3] alone, skip.
 
@@ -47,7 +47,7 @@ When a message signal includes a `## Context (last N messages in this thread —
 3. **Drive-by edits need citation.** If you fix a page that isn't the direct subject of this batch (stale job title, old phone, >10 `## Recent` entries), the `reason` must name the stale claim AND the evidence making it stale.
 4. **Closure comes from the user's voice.** "Passing on this", "declined", "shipped", "signed" — rewrite the project's opening sentence so closure is visible. Inbound "congrats" is not closure.
 5. **One conversation = one event**, not one per message. Capture the arc in 4–8 sentences. Preserve specifics: who drives which days, actual pickup times, verbatim commitments.
-6. **Attribute by name.** `You` = {user_first_name}. Everyone else by name. If Kim said "no drop-off needed", write "[[kim]] confirmed no drop-off was needed" — never "{user_first_name} confirmed."
+6. **Attribute by name.** `You` = {user_first_name}. Everyone else by name. If Jane said "no drop-off needed", write "[[jane]] confirmed no drop-off was needed" — never "{user_first_name} confirmed."
 7. **Person pages require structured grounding.** Do NOT create a new `people/<slug>.md` page unless the name appears in at least one of:
      (a) a structured signal field — email From/To/Cc header, `[imessage]` / `[whatsapp]` chat_label, `[calendar]` attendee list, or the user's own voice ([T1] typed / spoken);
      (b) the same cycle's screenshot OCR alongside a visible email address or phone number for that person;
@@ -59,11 +59,11 @@ When a message signal includes a `## Context (last N messages in this thread —
 
     If the visible account is the user's canonical identity for that service, default-scoped tools (`calendar_list_events`, `gmail_search`, etc.) should see it. If it's a different identity — a work account, a secondary account, another org/tenant — the signal belongs to THAT scope, and Deja's OAuth may not reach it. Record which account owns the signal in the body; do NOT claim absence from the default scope means the thing doesn't exist. When the identity is ambiguous or not visible, say so and don't fabricate.
 
-10. **Promote durable facts to entity pages.** When a signal reveals a STANDING fact — a policy ("Coach Rob needs ≥3 gymnasts or a parent present"), a role ("Dominique handles school logistics"), an invariant ("no dogs in the rental"), a recurring schedule ("Ruby practices Tuesdays only, Thu/Fri are 2014 team"), a preference, a hard constraint, a contact's title/company/location — add it to the relevant project or people page body in the SAME batch, not just to the event page that surfaced it. Event pages record what happened; entity pages record what's true going forward.
+10. **Promote durable facts to entity pages.** When a signal reveals a STANDING fact — a policy ("coach needs ≥3 kids or a parent present"), a role ("partner handles school logistics"), an invariant ("no dogs in the rental"), a recurring schedule ("practices Tuesdays only"), a preference, a hard constraint, a contact's title/company/location — add it to the relevant project or people page body in the SAME batch, not just to the event page that surfaced it. Event pages record what happened; entity pages record what's true going forward.
 
    Test: *"Will this fact still be useful context 3 months from now when someone reasons about this person/project?"* If yes, promote. The one-line memory cost is tiny; the retrieval value compounds.
 
-   Don't promote: one-off occurrences ("Miles was at gym on Apr 18"), transient states ("Jon is reviewing the quote this week"), presence alone. Those belong only on event pages.
+   Don't promote: one-off occurrences ("attended practice on Apr 18"), transient states ("vendor is reviewing the quote this week"), presence alone. Those belong only on event pages.
 
 # Reconcile
 

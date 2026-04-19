@@ -35,8 +35,8 @@ side; the webhook exists to wake it up, not to ship state.
     {
       "cycle_id": "...",
       "ts": "2026-04-17T12:45:00Z",
-      "narrative": "David sent an email to Jon Sturos...",
-      "wiki_update_slugs": ["people/jon-sturos", "events/2026-04-17/..."],
+      "narrative": "User sent an email to Jane Doe...",
+      "wiki_update_slugs": ["people/jane-doe", "events/2026-04-17/..."],
       "goal_changes_count": 2,
       "due_reminders_count": 1,
       "new_t1_signal_count": 3
@@ -48,8 +48,8 @@ Audit
 Every emit records one ``audit.record()`` entry with ``action="webhook_emit"``
 so ``deja trail`` can correlate webhook fires to downstream
 routine actions (which come back in via MCP with ``trigger.kind=mcp``).
-This closes the loop: David can see "webhook fired at 10:23, Claude
-drafted email at 10:24" as consecutive audit entries.
+This closes the loop: the user can see "webhook fired at 10:23,
+Claude drafted email at 10:24" as consecutive audit entries.
 """
 
 from __future__ import annotations

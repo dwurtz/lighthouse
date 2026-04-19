@@ -36,13 +36,13 @@ from deja.prompts import load as load_prompt
 # Retrieval budget for the command classifier. Keep this tight: the
 # classifier is on the hot path for every typed/spoken command, and Flash-
 # Lite latency matters more than recall here. We just need enough hits to
-# disambiguate entities ("amanda" -> Amanda Peffer) and ground parameter
+# disambiguate entities ("jane" -> Jane Doe) and ground parameter
 # extraction — not a full briefing.
 _CLASSIFIER_RETRIEVAL_LIMIT = 5
 # BM25 search is ~0.3s; we deliberately avoid ``qmd query`` here
 # because its HyDE rerank issues an LLM call per search (~10s), which
 # dwarfs the whole command latency budget. BM25 disambiguates named
-# entities ("Amanda" → amanda-peffer.md) just fine — HyDE only helps
+# entities ("Jane" → jane-doe.md) just fine — HyDE only helps
 # with conceptual/fuzzy queries we don't need for command dispatch.
 _CLASSIFIER_RETRIEVAL_TIMEOUT_S = 3.0
 
@@ -89,9 +89,9 @@ async def _retrieve_relevant_pages(input_text: str) -> str:
     explicitly BM25, not the hybrid ``qmd query`` path — see the
     ``_CLASSIFIER_RETRIEVAL_TIMEOUT_S`` comment for rationale.
     Raises ``RuntimeError`` on any failure so the classifier never
-    runs blind (silent fallback was how "draft email to Amanda"
-    previously failed — the model had no wiki context to resolve
-    her email address).
+    runs blind (silent fallback was how a "draft email to <person>"
+    request previously failed — the model had no wiki context to
+    resolve the person's email address).
     """
     topic = (input_text or "").strip()
     if not topic:

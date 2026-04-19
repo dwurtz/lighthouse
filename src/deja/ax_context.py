@@ -225,9 +225,9 @@ def capture_all_windows() -> list[dict]:
     picture of what the user has open — not just the focused window.
 
     Each entry looks like:
-        {"app": "Messages", "title": "Molly/Ruby Carpool"}
+        {"app": "Messages", "title": "<chat-label>"}
         {"app": "VS Code", "title": "vision_local.py — deja"}
-        {"app": "Google Chrome", "title": "Zillow — 465 Hale St"}
+        {"app": "Google Chrome", "title": "<site> — <page>"}
 
     Returns an empty list when AX is unavailable.
     """
@@ -291,7 +291,7 @@ def format_for_prompt(ctx: dict) -> str:
         # Current UI context
 
         App: Superhuman
-        Window: Inbox — david@davidwurtz.com
+        Window: Inbox — you@example.com
         Focused: text field "Subject"
 
     """

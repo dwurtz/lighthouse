@@ -173,8 +173,8 @@ async def run_reflection() -> dict:
         # Both Flash-Lite and Flash produced too many false positives:
         # complementary mentions of the same entity were being labeled as
         # contradictions and real facts were being stripped from pages
-        # (Lei Yang interview, Archie Abrams Shopify role, Jonny irrigation
-        # confirmation, etc. — all true claims removed). Net signal-to-
+        # (interview context, role details, confirmation facts, etc.
+        # — all true claims removed). Net signal-to-
         # noise was negative across two days of audit data. Re-enable
         # only after a redesign that gates more strictly (date-stamped
         # claims required, higher similarity threshold, or a different

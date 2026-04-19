@@ -204,7 +204,7 @@ def _collect_imessages(since_minutes: int = 5, limit: int = 20) -> list[Observat
             # chat_identifier; for 1:1s, display_name is usually empty
             # and chat_identifier is just a phone. Without this lookup,
             # integrate sees the phone as the "other party" and has no
-            # grounding for who "Matt" is in "Hey Matt...". Fabrication
+            # grounding for who "Joe" is in "Hey Joe...". Fabrication
             # follows. Resolve via macOS Contacts so the recipient's
             # real name is in the signal.
             if chat_label and (

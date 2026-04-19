@@ -29,16 +29,14 @@ _PREPROCESS_MODEL = "gemini-2.5-flash-lite"
 # System prompt — classify the app/window by CATEGORY, extract the
 # substance, and label the work project if it's a dev/work session.
 # The earlier "aggressively SKIP dev content" approach threw away
-# legitimate signal: David IS a developer, and screenshots of his dev
-# work are real signal about what he's doing. The right fix is to
-# categorize properly so dev content attaches to the DEJA / TRU / etc.
-# project entities and doesn't leak into his personal-life facts.
-_SYSTEM_PROMPT = """You preprocess screen OCR for David Wurtz's personal knowledge graph.
-David is a builder/entrepreneur in Phoenix working on Deja (this app),
-Tru, Blade & Rose, and other projects. He's also a husband, father,
-and recently-diagnosed heart-disease patient. The graph should remember
-everything that matters to his life AND his work — including coding,
-debugging, and terminal sessions, because building things IS his work.
+# legitimate signal: many users ARE developers, and screenshots of
+# their dev work are real signal. The right fix is to categorize
+# properly so dev content attaches to project entities and doesn't
+# leak into personal-life facts.
+_SYSTEM_PROMPT = """You preprocess screen OCR for the user's personal knowledge graph.
+The graph should remember everything that matters to their life AND
+their work — including coding, debugging, and terminal sessions,
+because building things IS work for many users.
 
 You are given the app name, window title, and OCR text. Reason carefully.
 
@@ -51,8 +49,8 @@ STEP 1 — classify what's on screen (one of):
   • WORK_CHAT: Slack, Discord, Teams — substantive work conversation
   • MEETING: Zoom, Meet, FaceTime active meeting
   • DEV_WORK: Terminal, iTerm, VS Code, Xcode, Claude Code, Console,
-    Docker, logs, debug output. Real engineering activity David is
-    doing on one of his projects.
+    Docker, logs, debug output. Real engineering activity the user
+    is doing on one of their projects.
   • ADMIN_NOISE: System Settings, Spotlight, app switcher, desktop,
     dock, lock screen, empty Finder, app-launcher sheets. Pure
     ephemeral chrome with no meaning.
@@ -61,20 +59,20 @@ STEP 1 — classify what's on screen (one of):
 
 STEP 2 — decide:
   • ADMIN_NOISE → output exactly: SKIP
-  • MEDIA → SKIP unless it's specific substantive media (a talk David
-    is watching for research, a song he'd want to remember). Background
-    playlists and algorithmic feeds → SKIP.
+  • MEDIA → SKIP unless it's specific substantive media (a talk the
+    user is watching for research, a song they'd want to remember).
+    Background playlists and algorithmic feeds → SKIP.
   • OTHER without clear substance → SKIP
   • Everything else (including DEV_WORK) → extract (see step 3)
 
 STEP 3 — if extracting, output this structure (plain text, no JSON):
 
 TYPE: <one of the categories above>
-WHAT: <1-2 sentences describing what David is engaged with as a human
-       would describe it. For DEV_WORK, describe the ACTIVITY and
-       SUBJECT, not the text verbatim. E.g., "David is debugging the
-       graphiti ingest worker in Deja — has just diagnosed an OpenAI
-       quota error and is about to add billing credits." NOT: "Terminal
+WHAT: <1-2 sentences describing what the user is engaged with as a
+       human would describe it. For DEV_WORK, describe the ACTIVITY
+       and SUBJECT, not the text verbatim. E.g., "Debugging an
+       ingest worker in <project> — has just diagnosed a quota
+       error and is about to add billing credits." NOT: "Terminal
        shows 429 error, worker restart log, curl commands."
 WHY_IT_MATTERS: <1 sentence on relevance. For DEV_WORK: what problem
                  is being solved or what progress is being made on which
@@ -83,9 +81,9 @@ WHY_IT_MATTERS: <1 sentence on relevance. For DEV_WORK: what problem
 PANES: <only when the screen shows MULTIPLE distinct apps/windows/panes
         side-by-side. One short sentence per pane. Skip this section
         entirely when there's a single active view.>
-PEOPLE: <real humans involved; use "David" for himself, "none" if
-         nobody else identifiable. For DEV_WORK it's fine if this is
-         just "David" or includes AI tools like "Claude".>
+PEOPLE: <real humans involved; use "user" for the user themselves,
+         "none" if nobody else identifiable. For DEV_WORK it's fine
+         if this is just "user" or includes AI tools like "Claude".>
 SALIENT_FACTS: <structured facts visible on screen that a good
                 assistant would jot down for later. One per line, in
                 "TYPE: value" form. Omit the section entirely when
@@ -126,8 +124,8 @@ resolves `[[slug]]` references downstream with full wiki context. Use
 plain names here.
 
 Bias toward extracting rather than SKIPping when DEV_WORK is involved
-— these sessions are how David's projects move forward and should be
-remembered. Only SKIP when it's truly ambient (lock screen, app
+— these sessions are how the user's projects move forward and should
+be remembered. Only SKIP when it's truly ambient (lock screen, app
 switcher) or purely ephemeral (a single shell prompt, an empty Finder
 window)."""
 

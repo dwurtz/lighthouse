@@ -453,8 +453,8 @@ async def _run_analysis_cycle_body(
     # independent of whether any wiki update fired this cycle.
     #
     # Run the narrative through linkify_body so entity mentions
-    # ("Jon Sturos", "Dominique") become [[jon-sturos|Jon Sturos]]
-    # links. Integrate's prompt rule ("wrap entity names in [[slug]]")
+    # ("Jane Doe", "Joe Smith") become [[jane-doe|Jane Doe]] links.
+    # Integrate's prompt rule ("wrap entity names in [[slug]]")
     # applies to entity prose and event bodies; narratives skip that
     # step in the model, and wiki_linkify's regular sweep only covers
     # people/ and projects/ pages. Post-processing here is the
