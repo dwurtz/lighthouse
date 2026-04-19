@@ -69,15 +69,19 @@ struct ExpandedNotchPanel: View {
     var body: some View {
         VStack(spacing: 0) {
             if !monitor.lastResponseMessage.isEmpty {
+                // Response-only mode: when cos (or a query) has just
+                // replied, the panel shows ONLY the response. Hitting
+                // the X in the banner clears the message and the panel
+                // falls back to the normal Now/Open-loops view. This
+                // keeps the user focused on what they just asked about
+                // instead of a crowded dashboard.
                 ResponseBanner(monitor: monitor)
-                Divider().background(Color.white.opacity(0.08))
+                    .frame(width: 460)
+                    .frame(minHeight: 140)
+            } else {
+                PopoverContentView(monitor: monitor)
+                    .frame(width: 460, height: 540)
             }
-
-            PopoverContentView(monitor: monitor)
-                .frame(
-                    width: 460,
-                    height: monitor.lastResponseMessage.isEmpty ? 540 : 420
-                )
         }
         .frame(width: 460)
         .background(
@@ -131,13 +135,14 @@ private struct ResponseBanner: View {
                             )
                     )
                 Spacer()
-                Button(action: { monitor.setPillExpanded(false) }) {
+                Button(action: { monitor.dismissResponse() }) {
                     Image(systemName: "xmark")
                         .font(.system(size: 9, weight: .semibold))
                         .foregroundColor(.white.opacity(0.4))
                         .frame(width: 16, height: 16)
                 }
                 .buttonStyle(.plain)
+                .help("Dismiss response (keeps panel open)")
             }
 
             if monitor.lastResponseIsQuery {

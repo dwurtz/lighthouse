@@ -1481,6 +1481,18 @@ class MonitorState: ObservableObject {
         }
     }
 
+    /// Clear the response banner but keep the panel expanded so the
+    /// user falls through to the normal Now/Open-loops view without
+    /// having to click the pill again.
+    func dismissResponse() {
+        lastResponseType = ""
+        lastResponseMessage = ""
+        lastResponseIsQuery = false
+        lastResponseAt = nil
+        cancelAutoCollapse()
+        fetchActivity()
+    }
+
     /// Cancel an in-flight auto-collapse (called on hover / focus /
     /// typing in the expanded panel).
     func markEngagement() {
