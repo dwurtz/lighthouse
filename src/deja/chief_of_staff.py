@@ -1316,6 +1316,15 @@ The payload carries:
   - ``source``: ``"voice"`` or ``"text"``.
   - ``conversation_slug``: the per-session conversation file this
     turn was logged into.
+  - ``recent_screens``: a freshness-gated snapshot of what's on
+    each display RIGHT NOW — ``{display_id: {app, window_title,
+    ocr, age_sec}}``. Unlike other cos modes (email/iMessage/
+    WhatsApp) where the user is typically on their phone, notch
+    input means the user is AT the screen. When they say "that
+    thing," "this email," "what I'm looking at," "the person on
+    the left" — resolve the referent from this block before
+    fetching anything. Empty dict means no display had a fresh
+    capture (≤5 min), so don't assume screen context in that case.
 
 Your job is to route AND respond. Choose the right action based on
 the content:
@@ -1519,6 +1528,66 @@ def sync_bagel_prompt(
     return claude_md, mcp_json
 
 
+def _recent_screens_snapshot(max_age_sec: int = 300, ocr_char_cap: int = 4000) -> dict:
+    """Return freshest OCR+AX per display for command-mode preload.
+
+    The notch chat/voice input is the one channel where the user is
+    verifiably AT the screen at the moment of speaking — often
+    referencing something visible ("that thing"). Preloading the
+    latest OCR text + AX frontmost-window metadata lets cos ground
+    pronouns without calling `recent_activity` first.
+
+    Only returns displays whose latest raw_ocr file is fresh
+    (``<= max_age_sec`` old); stale screens are omitted entirely
+    rather than silently fed as current.
+    """
+    from deja.config import DEJA_HOME
+
+    out: dict[str, dict] = {}
+    try:
+        day = datetime.now().strftime("%Y-%m-%d")
+        ocr_dir = DEJA_HOME / "raw_ocr" / day
+        if not ocr_dir.exists():
+            return out
+        now = datetime.now().timestamp()
+        # Group files by display prefix; pick the newest per prefix.
+        latest_by_display: dict[str, Path] = {}
+        for f in ocr_dir.iterdir():
+            if not f.is_file() or not f.name.endswith(".txt"):
+                continue
+            prefix = f.name.split("-", 1)[0]
+            if not prefix.startswith("display"):
+                continue
+            display_id = "-".join(f.name.split("-")[:2])  # "display-1"
+            existing = latest_by_display.get(display_id)
+            if existing is None or f.stat().st_mtime > existing.stat().st_mtime:
+                latest_by_display[display_id] = f
+        for display_id, path in latest_by_display.items():
+            age = now - path.stat().st_mtime
+            if age > max_age_sec:
+                continue
+            try:
+                ocr = path.read_text(encoding="utf-8")[:ocr_char_cap]
+            except OSError:
+                continue
+            ax_path = DEJA_HOME / f"screen_{display_id.split('-')[1]}_ax.json"
+            ax: dict = {}
+            if ax_path.exists():
+                try:
+                    ax = json.loads(ax_path.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError):
+                    ax = {}
+            out[display_id] = {
+                "age_sec": round(age, 1),
+                "app": ax.get("app", ""),
+                "window_title": ax.get("window_title", ""),
+                "ocr": ocr,
+            }
+    except Exception:
+        log.debug("recent_screens snapshot failed", exc_info=True)
+    return out
+
+
 def _build_command_payload(
     *,
     user_message: str,
@@ -1531,6 +1600,7 @@ def _build_command_payload(
         "user_message": user_message,
         "source": source,
         "conversation_slug": conversation_slug,
+        "recent_screens": _recent_screens_snapshot(),
         "ts": datetime.now(timezone.utc)
             .isoformat(timespec="seconds")
             .replace("+00:00", "Z"),

@@ -55,6 +55,99 @@ def collect_whatsapp(since_minutes: int = 5, limit: int = 20) -> list[Observatio
     return _collect_whatsapp(since_minutes=since_minutes, limit=limit)
 
 
+# ---------------------------------------------------------------------------
+# Self-WhatsApp routing — user's "Message yourself" chat routes to cos.
+# Mirrors the iMessage self-chat path in observations/imessage.py.
+# ---------------------------------------------------------------------------
+
+
+_PROCESSED_SELF_WA = DEJA_HOME / "chief_of_staff" / "processed_self_whatsapp"
+
+
+def _is_self_chat_turn_wa(
+    raw_speaker: str | None,
+    chat_label: str | None,
+) -> bool:
+    """True iff this turn is the user WhatsApp-ing themselves.
+
+    WhatsApp's "Message yourself" chat is identified by chat_identifier
+    == user's phone; after contact resolution it usually renders as the
+    user's name. Match either against chat_label.
+    """
+    if raw_speaker != "me":
+        return False
+    try:
+        from deja.identity import load_user
+        user = load_user()
+        email = (user.email or "").lower()
+        name = (user.name or "").lower()
+    except Exception:
+        return False
+    label = (chat_label or "").lower()
+    if not label:
+        return False
+    if email and email in label:
+        return True
+    if name and name in label:
+        return True
+    return False
+
+
+def _mark_self_wa_processed(id_key: str) -> None:
+    try:
+        _PROCESSED_SELF_WA.parent.mkdir(parents=True, exist_ok=True)
+        with _PROCESSED_SELF_WA.open("a", encoding="utf-8") as f:
+            f.write(id_key + "\n")
+    except Exception:
+        log.debug("self-whatsapp dedupe write failed", exc_info=True)
+
+
+def _is_self_wa_processed(id_key: str) -> bool:
+    if not _PROCESSED_SELF_WA.exists():
+        return False
+    try:
+        return id_key in _PROCESSED_SELF_WA.read_text().splitlines()
+    except Exception:
+        return False
+
+
+def _dispatch_self_whatsapp_to_cos(text: str, id_key: str, ts: datetime) -> None:
+    """Route a self-WhatsApp turn straight to cos in user_reply mode.
+
+    Suppresses the normal observation flow — integrate never sees these.
+    One conversation file per day so a day's self-notes cluster.
+    """
+    if _is_self_wa_processed(id_key):
+        return
+    body = (text or "").strip()
+    if not body:
+        return
+    day = ts.strftime("%Y%m%d")
+    thread_id = f"whatsapp-self-{day}"
+    subject = f"Self-WhatsApp — {ts.strftime('%Y-%m-%d')}"
+    try:
+        from deja import chief_of_staff
+        chief_of_staff.log_dialogue_turn(
+            role="user",
+            subject=subject,
+            body=body,
+            thread_id=thread_id,
+            message_id=id_key,
+        )
+        chief_of_staff.invoke_user_reply(
+            subject=subject,
+            user_message=body,
+            thread_id=thread_id,
+            in_reply_to=id_key,
+            message_id=id_key,
+        )
+    except Exception:
+        log.exception("self-whatsapp → cos dispatch failed (id=%s)", id_key)
+        return
+    _mark_self_wa_processed(id_key)
+    log.info("self-whatsapp → cos: %r (id=%s)", body[:80], id_key[:40])
+
+
 def _collect_whatsapp(since_minutes: int = 5, limit: int = 20) -> list[Observation]:
     """Read recent WhatsApp messages from the JSON buffer written by the Swift app.
 
@@ -126,6 +219,10 @@ def _collect_whatsapp(since_minutes: int = 5, limit: int = 20) -> list[Observati
                 ts = datetime.strptime(dt, "%Y-%m-%d %H:%M:%S")
             except (ValueError, TypeError):
                 ts = datetime.now()
+
+            if _is_self_chat_turn_wa(raw_speaker, chat_label):
+                _dispatch_self_whatsapp_to_cos(text=text, id_key=id_key, ts=ts)
+                continue
 
             results.append(
                 Observation(

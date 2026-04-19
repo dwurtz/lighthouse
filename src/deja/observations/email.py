@@ -717,37 +717,38 @@ def _build_observation_from_thread(
     if any(n.lower() in subject.lower() for n in _SYSTEM_NOISE):
         return None
 
-    # Handle [Deja]-tagged self-emails — two kinds:
-    #
-    #   1. Outbound cos notifications (From=user, To=user, subject
-    #      starts with "[Deja]"). Drop — integrate would write events
-    #      about cos's own emails and the loop wouldn't converge.
-    #
-    #   2. User replies to cos (From=user, To=user, subject contains
-    #      "[Deja]" and starts with "Re:"). User is TALKING to cos.
-    #      Route to cos.invoke_user_reply directly (first-class reply
-    #      channel, works from phone where vision can't see the screen)
-    #      and drop from the normal observation log — don't feed
-    #      integrate with generic email noise.
+    # Any user-to-user email is a conversation with cos, with ONE
+    # exception: cos's own outbound notifications (subject starts with
+    # "[Deja]" and NOT a reply) — dropping those prevents cos-talking-
+    # to-itself loops. Everything else the user sends themselves —
+    # arbitrary memos, questions, directives, replies to cos — routes
+    # straight to cos.invoke_user_reply so the user has a single
+    # "email myself anything" channel that works from phone, desktop,
+    # or any client. Cos decides whether it's a note-to-wiki, a
+    # question, or a directive it should act on.
     try:
         from deja.identity import load_user
         user_email = (load_user().email or "").lower()
     except Exception:
         user_email = ""
-    if user_email and "[deja]" in subject.lower():
-        from_lower = (latest_from or "").lower()
-        to_lower = (latest_to or "").lower()
-        if user_email in from_lower and user_email in to_lower:
-            is_reply = subject.strip().lower().startswith("re:")
-            if is_reply:
-                _handle_user_reply_to_cos(
-                    thread_messages=thread_messages,
-                    per_msg=per_msg,
-                    subject=subject.strip(),
-                )
-            else:
-                log.debug("email: skipping cos self-email loopback: %s", subject[:60])
+    from_lower = (latest_from or "").lower()
+    to_lower = (latest_to or "").lower()
+    if user_email and user_email in from_lower and user_email in to_lower:
+        subj_stripped = subject.strip()
+        subj_lower = subj_stripped.lower()
+        is_cos_outbound = (
+            "[deja]" in subj_lower
+            and not subj_lower.startswith("re:")
+        )
+        if is_cos_outbound:
+            log.debug("email: skipping cos self-email loopback: %s", subject[:60])
             return None
+        _handle_user_reply_to_cos(
+            thread_messages=thread_messages,
+            per_msg=per_msg,
+            subject=subj_stripped,
+        )
+        return None
 
     n = len(thread_messages)
 
