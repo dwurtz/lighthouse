@@ -191,6 +191,10 @@ def main() -> None:
         "--label", default="iphone",
         help="Human label stored with the key so it's distinguishable if we add revocation UX later (default: iphone)",
     )
+    mkey_p.add_argument(
+        "--qr", action="store_true",
+        help="Also render an ASCII QR code encoding https://deja-api.onrender.com/mobile/setup?k=<key>&label=<label>. Scan with iPhone Camera → Safari opens a page with the key + copy button + Shortcut setup steps.",
+    )
     mobile_sub.add_parser(
         "poll",
         help="Foreground drain-loop — polls /v1/inbox/drain every 5s and hands each item to cos in command mode",
@@ -563,6 +567,7 @@ def _run_mobile(sub_command: str | None, args) -> None:
 
     if sub_command == "create-key":
         label = getattr(args, "label", "iphone") if args else "iphone"
+        want_qr = bool(getattr(args, "qr", False)) if args else False
         try:
             plaintext = mobile_poll.create_mobile_key(label=label)
         except Exception as e:
@@ -577,9 +582,29 @@ def _run_mobile(sub_command: str | None, args) -> None:
         print(f"  {plaintext}")
         print("─" * 72)
         print()
-        print("Copy into iOS Shortcuts as a password / secret text field.")
-        print("This is shown ONCE — we only store the hash server-side.")
-        print("Add it to the Shortcut as header ``X-Deja-Mobile-Key``.")
+        if want_qr:
+            try:
+                import segno
+                from urllib.parse import quote
+                from deja.llm_client import DEJA_API_URL
+                url = (
+                    f"{DEJA_API_URL}/mobile/setup"
+                    f"?k={quote(plaintext)}&label={quote(label)}"
+                )
+                q = segno.make(url, error="m")
+                print("Scan this QR with your iPhone Camera — opens a setup page")
+                print("with the key + copy button + Shortcut instructions.")
+                print()
+                q.terminal(compact=True)
+                print()
+                print(f"(URL: {url})")
+                print()
+            except Exception as e:
+                print(f"(QR rendering failed: {e})")
+                print()
+        print("Paste the key into your iOS Shortcut as the value of the")
+        print("``X-Deja-Mobile-Key`` header. Shown ONCE — we only store")
+        print("the hash server-side.")
         return
 
     if sub_command == "poll":

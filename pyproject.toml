@@ -23,6 +23,7 @@ dependencies = [
     "mlx-vlm>=0.1",
     "huggingface-hub>=0.24",
     "sqlite-vec>=0.1",
+    "segno>=1.5",
 ]
 
 [project.scripts]

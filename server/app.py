@@ -381,6 +381,88 @@ async def transcribe_endpoint(
     return {"text": text}
 
 
+@app.get("/mobile/setup")
+async def mobile_setup_page(k: str = "", label: str = "mobile"):
+    """Tiny landing page for iPhone Camera scans of the setup QR.
+
+    The ``deja mobile create-key --qr`` command generates a QR code
+    encoding ``https://deja-api.onrender.com/mobile/setup?k=<key>&label=<label>``.
+    The user's iPhone Camera recognizes it as a URL, offers to open in
+    Safari, and this page then shows the key + copy button + the
+    instructions for setting up the Shortcut.
+
+    No auth — the key in the URL is the capability. Whoever has the
+    link has the key; this is the same trust boundary as the terminal
+    printing it in plaintext. Don't share the URL.
+    """
+    from fastapi.responses import HTMLResponse
+    safe_k = (k or "").replace("<", "").replace(">", "").replace('"', "")[:200]
+    safe_label = (label or "mobile").replace("<", "").replace(">", "").replace('"', "")[:40]
+    if not safe_k.startswith("deja_"):
+        return HTMLResponse(
+            "<h1>Invalid or missing key</h1>"
+            "<p>Run <code>deja mobile create-key --qr</code> on your Mac.</p>",
+            status_code=400,
+        )
+    html = f"""<!doctype html>
+<html><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Deja mobile key</title>
+<style>
+  :root {{ color-scheme: dark light; }}
+  body {{ font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+          margin: 0; padding: 24px; max-width: 560px; line-height: 1.45; }}
+  h1 {{ font-size: 20px; margin-top: 0; }}
+  .label {{ color: #888; font-size: 13px; text-transform: uppercase;
+            letter-spacing: 0.5px; margin-bottom: 4px; }}
+  .key {{ font-family: ui-monospace, Menlo, monospace; font-size: 13px;
+          padding: 12px; background: rgba(127,127,127,0.12); border-radius: 8px;
+          word-break: break-all; margin-bottom: 8px; user-select: all; }}
+  button {{ font-size: 16px; padding: 12px 20px; border-radius: 8px;
+            border: 1px solid rgba(127,127,127,0.3); background: #007aff;
+            color: white; font-weight: 600; cursor: pointer; width: 100%;
+            margin-bottom: 16px; }}
+  button.copied {{ background: #34c759; }}
+  ol {{ padding-left: 20px; }}
+  code {{ background: rgba(127,127,127,0.15); padding: 2px 6px;
+          border-radius: 4px; font-size: 90%; }}
+  .footer {{ margin-top: 32px; font-size: 12px; color: #888; }}
+</style>
+</head><body>
+<h1>Deja — mobile key for <em>{safe_label}</em></h1>
+<div class="label">API key (tap to copy)</div>
+<div class="key" id="k">{safe_k}</div>
+<button id="copy" onclick="copyKey()">Copy key</button>
+<ol>
+  <li>Open <b>Shortcuts</b> on iPhone → create new Shortcut.</li>
+  <li>Add <b>Dictate Text</b>.</li>
+  <li>Add <b>Get Contents of URL</b>:
+    <ul>
+      <li>URL: <code>https://deja-api.onrender.com/v1/inbox</code></li>
+      <li>Method: <b>POST</b></li>
+      <li>Headers: <code>Content-Type: application/json</code>, <code>X-Deja-Mobile-Key: &lt;paste from above&gt;</code></li>
+      <li>Body (JSON): <code>text</code> ← Dictated Text, <code>source</code> ← <code>ios-shortcut</code></li>
+    </ul>
+  </li>
+  <li>Name it <b>"Note to Deja"</b>. Bind to Action Button / Back Tap / Siri.</li>
+</ol>
+<div class="footer">Key shown once. Keep secret. Revocation CLI coming.</div>
+<script>
+  function copyKey() {{
+    const k = document.getElementById('k').textContent;
+    navigator.clipboard.writeText(k).then(() => {{
+      const b = document.getElementById('copy');
+      b.textContent = 'Copied ✓';
+      b.classList.add('copied');
+      setTimeout(() => {{ b.textContent = 'Copy key'; b.classList.remove('copied'); }}, 2000);
+    }});
+  }}
+</script>
+</body></html>"""
+    return HTMLResponse(html)
+
+
 @app.post("/v1/inbox/keys")
 @limiter.limit("20/hour")
 async def mobile_key_create_endpoint(
