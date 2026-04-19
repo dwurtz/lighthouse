@@ -16,7 +16,46 @@ Three design commitments shape everything:
 
 ## 2. The 30-second mental model
 
-There are three pipelines running on different cadences:
+Deja is a **two-tier system**: a Swift menubar app hosts two Python subprocesses that together drive three pipelines and two reactive agents. Everything reads and writes the same substrate — the wiki at `~/Deja/` and the state dir at `~/.deja/`.
+
+```
+                          ┌──────────────────────────────┐
+                          │   /Applications/Deja.app     │
+                          │   (Swift menubar, notch UI)  │
+                          │                              │
+                          │  ScreenCapture  HotkeyMgr    │
+                          │  KeystrokeMon   VoicePill    │
+                          └────────┬─────────────────────┘
+                                   │ spawns + HTTP-over-unix-socket
+                   ┌───────────────┴──────────────────┐
+                   ▼                                  ▼
+         ┌──────────────────┐               ┌──────────────────┐
+         │   deja monitor   │               │    deja web      │
+         │   (three loops)  │               │ (FastAPI/socket) │
+         └──┬────┬──────┬───┘               └────────┬─────────┘
+            │    │      │                            │ voice / setup /
+            ▼    ▼      ▼                            │ command / mic
+         OBSERVE INTEGRATE REFLECT                   │
+          (3s)   (5min)    (3×/day)                  │
+            │    │      │                            │
+            │    │      │    ┌────────────────┐      │
+            │    │      │    │ chief of staff │◄─────┤ (command mode)
+            │    │      └───►│     (cos)      │      │
+            │    └──────────►│  spawns fresh  │      │
+            │                │  claude CLI,   │      │
+            │                │  MCP attached  │      │
+            │                └───────┬────────┘      │
+            ▼                        ▼               ▼
+         ┌─────────────────────────────────────────────────┐
+         │  ~/Deja/          (wiki: people, projects,      │
+         │                    events, goals.md, convos)    │
+         │  ~/.deja/         (state: observations.jsonl,   │
+         │                    audit.jsonl, sockets,        │
+         │                    cos config, buffers)         │
+         └─────────────────────────────────────────────────┘
+```
+
+Three pipelines running on different cadences, sharing the same storage:
 
 ```
 OBSERVE (every 3s)
@@ -24,15 +63,15 @@ OBSERVE (every 3s)
 INTEGRATE (every 5min)
    ↓ reads new signals + retrieves wiki context → LLM → writes wiki pages,
    ↓ event pages, goal mutations; emits observation_narrative
-REFLECT (3x/day, 02/11/18 local)
+REFLECT (3×/day, 02/11/18 local)
    ↓ housekeeping: entity dedup, event→project materialization,
    ↓ goals reconcile, audit trim — plus a genuine LLM reflective pass
 ```
 
 Plus two reactive layers on top:
 
-- **Chief of staff (cos)** fires in three modes: after each substantive integrate cycle (cycle mode), at clock slots (reflective mode), and when you reply to a `[Deja]` email (user_reply mode). Each mode spawns a fresh Claude subprocess with the Deja MCP attached.
-- **Voice + command** classifier: hold Option and speak (or type in the notch panel); an LLM classifies the utterance into action / goal / automation / context / query and dispatches accordingly.
+- **Chief of staff (cos)** fires in four modes: cycle (after substantive integrate), reflective (clock slots), user_reply (email/iMessage/WhatsApp self-message in), command (notch chat/voice). Each mode spawns a fresh Claude subprocess with the Deja MCP attached.
+- **Voice + command** classifier: hold Option and speak (or type in the notch panel); cos receives the utterance directly and routes it.
 
 Both reactive layers write back into the same substrate the pipelines read: the wiki, `goals.md`, and `observations.jsonl`.
 
@@ -187,6 +226,42 @@ Rows older than 7 days are trimmed during each reflect pass.
 
 ## 5. The observe pipeline
 
+Signals flow through three stages before becoming wiki content. The first stage (observe) happens every 3 seconds; the second (integrate) every 5 minutes; the third (reflect/cos) on demand or on a clock.
+
+```
+  SOURCES                    observe (3s)             integrate (5 min)
+┌──────────────┐          ┌─────────────────┐       ┌────────────────┐
+│ iMessage     │          │  Observation    │       │ Flash-Lite /   │
+│ WhatsApp     │─────────►│  collect()      │       │ Flash LLM      │
+│ Email        │  raw     │  per source     │       │ reads new      │
+│ Screenshot   │  rows    │                 │       │ signals +      │
+│ Calendar     │          │  → Observation  │       │ retrieved wiki │
+│ Drive        │          │    object       │       │ context        │
+│ Browser      │          │                 │       │                │
+│ Clipboard    │          │  dedupe by      │       │ emits:         │
+│ Voice        │          │  id_key         │       │  - wiki writes │
+└──────────────┘          │                 │       │  - events      │
+                          │  tier (T1/T2/T3)│       │  - goal muts   │
+                          │                 │       │  - narrative   │
+                          │  persist →      │       │                │
+                          │  ~/.deja/       │       │                │
+                          │  observations   │──────►│  reads offset, │
+                          │  .jsonl         │       │  advances it   │
+                          └─────────────────┘       └────────┬───────┘
+                                                             │
+                                                             ▼
+                                                 ┌────────────────────┐
+                                                 │ substantive cycle? │
+                                                 └────────┬───────────┘
+                                                          │ yes
+                                                          ▼
+                                                   cos (cycle mode)
+                                                   — MCP attached,
+                                                   reads wiki + goals,
+                                                   decides: NOTIFY /
+                                                   ACT / SILENT
+```
+
 `src/deja/agent/loop.py` orchestrates three async loops:
 
 1. **Signal loop** (`_signal_loop`, `observation_cycle.py:150-354`) — every 3 seconds.
@@ -297,23 +372,49 @@ The contradictions sweep (step 2 in earlier versions) is currently **disabled** 
 
 ## 8. Chief of Staff (cos)
 
-Cos is Deja's reflex layer. It's Claude (via the `claude` CLI subprocess), fired on three triggers, reading state via the Deja MCP, deciding whether to notify you, take action, or stay silent.
+Cos is Deja's reflex layer. It's Claude (via the `claude` CLI subprocess), fired on four trigger types, reading state via the Deja MCP, deciding whether to notify you, take action, or stay silent.
 
-### 8.1 Three invocation modes
+### 8.1 Invocation modes
+
+```
+                       ┌────────────────────────────────┐
+                       │        claude -p               │
+                       │ (fresh subprocess per call,    │
+                       │  --mcp-config → Deja MCP,      │
+                       │  10-min hard timeout)          │
+                       └──────────────▲─────────────────┘
+                                      │ invoke_*_sync()
+             ┌────────────┬───────────┼───────────┬──────────────┐
+             │            │           │           │              │
+         ┌───┴───┐  ┌─────┴────┐  ┌───┴──────┐  ┌─┴────────────┐
+         │ cycle │  │reflective│  │user_reply│  │  command     │
+         └───▲───┘  └────▲─────┘  └────▲─────┘  └──────▲───────┘
+             │           │             │               │
+    substantive     clock slots    self-addressed   notch chat /
+    integrate       (02/11/18)     email, iMessage, voice  push-
+    cycle                          WhatsApp in       to-talk
+             │           │             │               │
+        DEFAULT    + REFLECTIVE   + USER_REPLY    + COMMAND
+        SYSTEM      APPENDIX       APPENDIX        APPENDIX
+        PROMPT                                     (+ recent_screens
+                                                     preloaded)
+```
 
 | Mode | Trigger | Payload | System-prompt appendix |
 |---|---|---|---|
 | `cycle` | After a substantive integrate cycle | `{mode, cycle_id, narrative, wiki_update_slugs, goal_changes_count, due_reminders_count, new_t1_signal_count}` | DEFAULT_SYSTEM_PROMPT |
 | `reflective` | Clock slot (02/11/18, runs inside `run_reflection`) | `{mode: "reflective", slot, horizon, ts}` | + REFLECTIVE_APPENDIX |
-| `user_reply` | User replies to a `[Deja]` self-email | `{mode: "user_reply", subject, user_message, thread_id, in_reply_to, conversation_slug}` | + USER_REPLY_APPENDIX |
+| `user_reply` | Any self-addressed message — email, iMessage self-chat, WhatsApp self-chat — routes to cos | `{mode: "user_reply", subject, user_message, thread_id, in_reply_to, conversation_slug}` | + USER_REPLY_APPENDIX |
+| `command` | Notch chat / voice push-to-talk (`/api/command`, `/api/mic/stop`) | `{mode: "command", user_message, source, conversation_slug, recent_screens, ts}` | + COMMAND_APPENDIX |
 
 Entry points in `src/deja/chief_of_staff.py`:
 
-- `invoke()` / `invoke_sync()` — cycle mode, ~line 922.
-- `invoke_reflective_sync()` — reflective mode, ~line 791.
-- `invoke_user_reply_sync()` — user_reply mode, ~line 889.
+- `invoke()` / `invoke_sync()` — cycle mode.
+- `invoke_reflective_sync()` — reflective mode.
+- `invoke_user_reply_sync()` — user_reply mode (called by self-channel observers).
+- `invoke_command_sync()` — command mode (called by `/api/command` and mic stop).
 
-All three spawn `claude -p` with `--mcp-config` pointing at `~/.deja/chief_of_staff/mcp_config.json`, a 10-minute hard timeout, and the system prompt appended inline per mode.
+All spawn `claude -p` with `--mcp-config` pointing at `~/.deja/chief_of_staff/mcp_config.json`, a 10-minute hard timeout, and the system prompt appended inline per mode. Command mode also preloads `recent_screens` — per-display OCR + AX frontmost-window metadata — so cos can ground pronouns like "this email" or "that person" when the user is verifiably at their screen.
 
 ### 8.2 Decision tree (disposition)
 
