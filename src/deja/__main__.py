@@ -192,6 +192,20 @@ def main() -> None:
     cos_sub.add_parser("disable", help="Disable the chief-of-staff loop")
     cos_sub.add_parser("test", help="Fire the loop once with a synthetic payload — good for verifying claude CLI + MCP wiring")
     cos_sub.add_parser("tail", help="Tail the invocations log to see what Claude has been deciding and doing")
+    sync_bagel_p = cos_sub.add_parser(
+        "sync-bagel",
+        help="Regenerate ~/projects/nanoclaw/groups/whatsapp_main/CLAUDE.md + .mcp.json so Bagel on WhatsApp shares cos's identity, prompt, and MCP tool surface",
+    )
+    sync_bagel_p.add_argument(
+        "--nanoclaw-path",
+        default=None,
+        help="Override the path to the nanoclaw/groups/ directory (default: ~/projects/nanoclaw/groups)",
+    )
+    sync_bagel_p.add_argument(
+        "--group",
+        default="whatsapp_main",
+        help="Which nanoclaw group to sync (default: whatsapp_main)",
+    )
     cos_sub.add_parser(
         "migrate-conversations",
         help="One-shot: migrate legacy conversations.jsonl into per-thread Markdown under ~/Deja/conversations/",
@@ -258,7 +272,7 @@ def main() -> None:
     elif command == "webhooks":
         _run_webhooks(getattr(args, "wh_command", None), args)
     elif command == "cos":
-        _run_cos(getattr(args, "cos_command", None))
+        _run_cos(getattr(args, "cos_command", None), args)
     elif command in ("trail", "hermes-trail"):
         _run_trail(hours=args.hours, limit=args.limit)
     else:
@@ -384,7 +398,7 @@ def _run_health(indent: str = "") -> None:
         sys.exit(1)
 
 
-def _run_cos(sub_command: str | None) -> None:
+def _run_cos(sub_command: str | None, sub_args=None) -> None:
     """Manage the chief-of-staff loop."""
     import shutil as _shutil
     from deja import chief_of_staff as cos
@@ -475,6 +489,25 @@ def _run_cos(sub_command: str | None) -> None:
             if stderr and rc != 0:
                 print(f"  stderr: {stderr[:300]}")
             print()
+        return
+
+    if sub_command == "sync-bagel":
+        from pathlib import Path
+        override = getattr(sub_args, "nanoclaw_path", None) if sub_args else None
+        default = Path.home() / "projects" / "nanoclaw" / "groups"
+        groups_dir = Path(override) if override else default
+        group = getattr(sub_args, "group", "whatsapp_main") if sub_args else "whatsapp_main"
+        try:
+            claude_md, mcp_json = cos.sync_bagel_prompt(groups_dir, group=group)
+        except FileNotFoundError as e:
+            print(f"error: {e}")
+            return
+        print(f"wrote {claude_md} ({claude_md.stat().st_size} bytes)")
+        print(f"wrote {mcp_json} ({mcp_json.stat().st_size} bytes)")
+        print()
+        print("Bagel will now use cos's system prompt + Deja MCP tools on the")
+        print("next @Bagel message. Test: message `@Bagel what's my calendar")
+        print("tomorrow` in your self-chat and check for a Deja-aware reply.")
         return
 
     if sub_command == "migrate-conversations":

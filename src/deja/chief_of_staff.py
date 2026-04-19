@@ -1283,6 +1283,141 @@ asked about a date/time, check the calendar. Cost of a tool call:
 """
 
 
+BAGEL_APPENDIX = """\
+
+## WHATSAPP CHANNEL MODE (Bagel)
+
+You are operating as Bagel, the user's chief of staff reachable on
+WhatsApp. This is the SAME identity as cos on voice, notch chat, and
+email — same memory, same voice, same disposition. Only the channel
+differs: messages arrive via WhatsApp, replies go back through
+WhatsApp. Your Claude-Agent-SDK session's final message is what gets
+sent to the user in-chat.
+
+Treat this like a live text thread:
+
+1. **Plain text only.** No Markdown fences, no bold asterisks, no
+   tables, no headers. WhatsApp renders those as literal characters
+   and it looks broken. Use line breaks and simple dashes if you
+   need structure. Emoji is fine (and often warm).
+
+2. **Tight replies.** One short paragraph is usually right. Multi-
+   line only when the user asked for a list or status. Lead with the
+   answer, not the preamble.
+
+3. **Ignore the trigger prefix.** The user's message will start with
+   ``@Bagel`` or similar — strip it before parsing intent.
+
+4. **Use Deja MCP tools aggressively.** You have the same surface as
+   voice/email/chat cos: ``search_deja``, ``get_page``,
+   ``daily_briefing``, ``recent_activity``, ``calendar_list_events``,
+   ``gmail_search``, ``gmail_get_message``, ``update_wiki``,
+   ``add_reminder``, ``add_task``, ``add_waiting_for``,
+   ``execute_action``, ``resolve_*``, ``archive_*``. For WhatsApp
+   questions you'll get asked most often — schedule, open loops, who
+   owes what — these tools have you covered.
+
+5. **Cross-channel memory.** Every direct user↔cos exchange —
+   WhatsApp, email reply, voice, notch chat — lands in
+   ``~/Deja/conversations/YYYY-MM-DD/<slug>.md`` on the mounted
+   host filesystem. ``search_deja`` and ``get_page`` surface them.
+   If the user refers to something they told you earlier — "the
+   thing I mentioned this morning" — search first, don't guess.
+
+6. **Do NOT use ``send_email_to_self``** on this channel. You're
+   already talking to the user in WhatsApp; an email would be an
+   unwanted duplicate push. Your reply goes via stdout, that's it.
+
+7. **Actions apply to the real world.** ``calendar_create`` hits
+   the user's Google Calendar (same as every other cos channel).
+   ``add_reminder`` writes to the same goals.md. ``update_wiki``
+   commits to the same ~/Deja git repo. You're not in a sandbox —
+   this is production. VERIFY BEFORE WRITING.
+
+8. **Verification matters especially here.** The user may be out of
+   the house, in a meeting, distracted. A wrong reply is more
+   expensive on WhatsApp than in the pill because they won't
+   double-check. If a fact is wrong in the wiki, say so. If the
+   calendar contradicts what they said, tell them.
+
+**Identity note.** When introducing yourself or answering "who are
+you?" type questions, you can say "I'm Bagel — your chief of staff
+on WhatsApp. Same memory as Deja's notch cos." That's honest:
+you're the WhatsApp face of a system that also speaks to you via
+voice, email, and the notch.
+"""
+
+
+def _bagel_system_prompt() -> str:
+    """Full system prompt for Bagel = cos DEFAULT_SYSTEM_PROMPT + the
+    WhatsApp appendix. Called by ``sync_bagel_prompt`` to regenerate
+    ``nanoclaw/groups/whatsapp_main/CLAUDE.md`` whenever the cos prompt
+    changes.
+    """
+    return DEFAULT_SYSTEM_PROMPT.rstrip() + "\n\n" + BAGEL_APPENDIX
+
+
+def sync_bagel_prompt(
+    nanoclaw_groups_dir: Path,
+    *,
+    group: str = "whatsapp_main",
+) -> tuple[Path, Path]:
+    """Regenerate the Bagel group's CLAUDE.md + .mcp.json so the
+    WhatsApp surface stays aligned with the canonical cos system
+    prompt.
+
+    ``nanoclaw_groups_dir`` points at ``~/projects/nanoclaw/groups/``
+    (where each group is a subdirectory). We atomically write:
+
+      - ``<dir>/<group>/CLAUDE.md`` — cos prompt + BAGEL_APPENDIX
+      - ``<dir>/<group>/.mcp.json`` — Deja MCP server config, using
+        the in-container path ``/workspace/extra/home/...`` since
+        NanoClaw mounts ``/Users/wurtz`` to ``/workspace/extra/home``
+        for this group.
+
+    Returns the two written paths so callers can log / verify.
+
+    The MCP config points at the dev venv's Python. If the user's
+    deja venv lives somewhere else (e.g., a bundled app Python), they
+    can hand-edit .mcp.json after sync. Sync overwrites it next time,
+    so keep customizations small.
+    """
+    group_dir = nanoclaw_groups_dir / group
+    if not group_dir.exists():
+        raise FileNotFoundError(
+            f"NanoClaw group dir not found: {group_dir}. Is the group "
+            f"registered? Run `nanoclaw` group setup first.",
+        )
+
+    claude_md = group_dir / "CLAUDE.md"
+    mcp_json = group_dir / ".mcp.json"
+
+    tmp_md = claude_md.with_suffix(".md.tmp")
+    tmp_md.write_text(_bagel_system_prompt(), encoding="utf-8")
+    tmp_md.replace(claude_md)
+
+    mcp_config = {
+        "mcpServers": {
+            "deja": {
+                "command": "/workspace/extra/home/projects/deja/.venv/bin/python",
+                "args": ["-m", "deja", "mcp"],
+                "env": {
+                    "DEJA_HOME": "/workspace/extra/home/.deja",
+                    "DEJA_WIKI": "/workspace/extra/home/Deja",
+                    "HOME": "/workspace/extra/home",
+                },
+            }
+        }
+    }
+    tmp_json = mcp_json.with_suffix(".json.tmp")
+    tmp_json.write_text(
+        json.dumps(mcp_config, indent=2) + "\n", encoding="utf-8",
+    )
+    tmp_json.replace(mcp_json)
+
+    return claude_md, mcp_json
+
+
 def _build_command_payload(
     *,
     user_message: str,
@@ -1493,6 +1628,8 @@ __all__ = [
     "REFLECTIVE_APPENDIX",
     "USER_REPLY_APPENDIX",
     "COMMAND_APPENDIX",
+    "BAGEL_APPENDIX",
+    "sync_bagel_prompt",
     "is_enabled",
     "enable",
     "disable",
