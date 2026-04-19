@@ -44,8 +44,135 @@ def _get_db() -> sqlite3.Connection:
     """)
     db.execute("CREATE INDEX IF NOT EXISTS idx_diagnostics_user_email ON diagnostics(user_email)")
     db.execute("CREATE INDEX IF NOT EXISTS idx_diagnostics_timestamp ON diagnostics(timestamp)")
+
+    # Mobile signal channel — notes sent from iOS Shortcuts (Action Button,
+    # Back Tap, etc.) land here, get drained by local Deja on its next poll,
+    # and feed into the chief-of-staff command pipeline.
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS mobile_inbox (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_email TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            source TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            text TEXT,
+            delivered_at TEXT
+        )
+    """)
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_inbox_pending ON mobile_inbox(user_email, delivered_at)"
+    )
+
+    # Long-lived mobile API keys. iOS Shortcuts store these as a
+    # password field; paired with user_email on create so we can route
+    # inbound posts to the right user without re-authenticating Google
+    # on every call.
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS mobile_keys (
+            key_hash TEXT PRIMARY KEY,
+            user_email TEXT NOT NULL,
+            label TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            last_used_at TEXT
+        )
+    """)
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_mkeys_user ON mobile_keys(user_email)"
+    )
+
     db.commit()
     return db
+
+
+# ---------------------------------------------------------------------------
+# Mobile inbox helpers
+# ---------------------------------------------------------------------------
+
+
+def _hash_key(plaintext: str) -> str:
+    import hashlib
+    return hashlib.sha256(plaintext.encode("utf-8")).hexdigest()
+
+
+def mobile_key_create(user_email: str, label: str) -> str:
+    """Generate a fresh mobile API key, store its hash, return the plaintext.
+
+    Plaintext is returned ONCE to the caller — only the hash persists.
+    """
+    import secrets
+    plaintext = "deja_" + secrets.token_urlsafe(32)
+    db = _get_db()
+    db.execute(
+        """INSERT INTO mobile_keys (key_hash, user_email, label, created_at)
+           VALUES (?, ?, ?, ?)""",
+        (
+            _hash_key(plaintext),
+            user_email,
+            label,
+            datetime.now(timezone.utc).isoformat(),
+        ),
+    )
+    db.commit()
+    return plaintext
+
+
+def mobile_key_lookup(plaintext: str) -> str | None:
+    """Return user_email for a valid key, else None. Touches last_used_at."""
+    if not plaintext or not plaintext.startswith("deja_"):
+        return None
+    key_hash = _hash_key(plaintext)
+    db = _get_db()
+    row = db.execute(
+        "SELECT user_email FROM mobile_keys WHERE key_hash = ?",
+        (key_hash,),
+    ).fetchone()
+    if not row:
+        return None
+    db.execute(
+        "UPDATE mobile_keys SET last_used_at = ? WHERE key_hash = ?",
+        (datetime.now(timezone.utc).isoformat(), key_hash),
+    )
+    db.commit()
+    return row["user_email"]
+
+
+def mobile_inbox_put(user_email: str, source: str, kind: str, text: str) -> int:
+    db = _get_db()
+    cur = db.execute(
+        """INSERT INTO mobile_inbox (user_email, created_at, source, kind, text)
+           VALUES (?, ?, ?, ?, ?)""",
+        (
+            user_email,
+            datetime.now(timezone.utc).isoformat(),
+            source,
+            kind,
+            text,
+        ),
+    )
+    db.commit()
+    return cur.lastrowid or 0
+
+
+def mobile_inbox_drain(user_email: str) -> list[dict]:
+    """Return pending items for user_email, mark them delivered."""
+    db = _get_db()
+    rows = db.execute(
+        """SELECT id, created_at, source, kind, text
+           FROM mobile_inbox
+           WHERE user_email = ? AND delivered_at IS NULL
+           ORDER BY id ASC""",
+        (user_email,),
+    ).fetchall()
+    items = [dict(r) for r in rows]
+    if items:
+        ids = [r["id"] for r in items]
+        placeholders = ",".join("?" * len(ids))
+        db.execute(
+            f"UPDATE mobile_inbox SET delivered_at = ? WHERE id IN ({placeholders})",
+            [datetime.now(timezone.utc).isoformat(), *ids],
+        )
+        db.commit()
+    return items
 
 
 def store_diagnostic(

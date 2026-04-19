@@ -381,6 +381,114 @@ async def transcribe_endpoint(
     return {"text": text}
 
 
+@app.post("/v1/inbox/keys")
+@limiter.limit("20/hour")
+async def mobile_key_create_endpoint(
+    request: Request,
+    authorization: str = Header(...),
+):
+    """Issue a long-lived mobile API key for iOS Shortcuts.
+
+    Requires a live Google bearer (logged-in desktop app). Body may be
+    empty; an optional ``{"label": "iphone"}`` JSON body labels the key
+    so the user can distinguish between devices in case we add
+    revocation UX later. The plaintext is returned ONCE; only the hash
+    persists.
+    """
+    from server.db import mobile_key_create
+    token = authorization.removeprefix("Bearer ").strip()
+    user = await validate_token(token)
+    label = "mobile"
+    try:
+        payload = await request.json()
+        if isinstance(payload, dict) and payload.get("label"):
+            label = str(payload["label"])[:40]
+    except Exception:
+        pass
+    plaintext = mobile_key_create(user["email"], label)
+    logger.info(
+        "[rid=%s] mobile_key_create user=%s label=%s",
+        request.state.rid, user["email"], label,
+    )
+    return {"key": plaintext, "label": label}
+
+
+@app.post("/v1/inbox")
+@limiter.limit("60/minute")
+async def mobile_inbox_post(
+    request: Request,
+    x_deja_mobile_key: str | None = Header(None),
+    authorization: str | None = Header(None),
+):
+    """Queue a mobile signal for the user's Deja to pick up.
+
+    Auth accepts EITHER:
+      - ``X-Deja-Mobile-Key: deja_...`` (preferred — long-lived, for iOS)
+      - ``Authorization: Bearer <google-id-token>`` (desktop fallback)
+
+    Body: ``{"text": "...", "source": "ios-shortcut|ios-screenshot|..."}``.
+    Stored verbatim. Local Deja drains via ``/v1/inbox/drain`` every
+    few seconds and routes each item into the cos command pipeline.
+    """
+    from server.db import mobile_key_lookup, mobile_inbox_put
+
+    user_email: str | None = None
+    if x_deja_mobile_key:
+        user_email = mobile_key_lookup(x_deja_mobile_key.strip())
+    if user_email is None and authorization and authorization.startswith("Bearer "):
+        try:
+            user = await validate_token(authorization.removeprefix("Bearer ").strip())
+            user_email = user.get("email")
+        except Exception:
+            user_email = None
+    if not user_email:
+        raise HTTPException(status_code=401, detail="Unauthorized — missing or invalid mobile key")
+
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+
+    text = (body.get("text") or "").strip() if isinstance(body, dict) else ""
+    source = (body.get("source") or "ios").strip()[:40] if isinstance(body, dict) else "ios"
+    kind = (body.get("kind") or "note").strip()[:20] if isinstance(body, dict) else "note"
+    if not text:
+        raise HTTPException(status_code=400, detail="Missing text")
+    if len(text) > 10_000:
+        raise HTTPException(status_code=413, detail="Text too long (10k max)")
+
+    item_id = mobile_inbox_put(user_email, source, kind, text)
+    logger.info(
+        "[rid=%s] inbox_put user=%s source=%s kind=%s chars=%d id=%d",
+        request.state.rid, user_email, source, kind, len(text), item_id,
+    )
+    return {"ok": True, "id": item_id}
+
+
+@app.post("/v1/inbox/drain")
+@limiter.limit("120/minute")
+async def mobile_inbox_drain(
+    request: Request,
+    authorization: str = Header(...),
+):
+    """Return and delete pending inbox items for the calling user.
+
+    Uses Google bearer auth only (this is the desktop-side drain, not
+    reached from mobile). Local Deja calls this every few seconds and
+    pushes each item through ``chief_of_staff.invoke_command_sync``.
+    """
+    from server.db import mobile_inbox_drain as _drain
+    token = authorization.removeprefix("Bearer ").strip()
+    user = await validate_token(token)
+    items = _drain(user["email"])
+    if items:
+        logger.info(
+            "[rid=%s] inbox_drain user=%s n=%d",
+            request.state.rid, user["email"], len(items),
+        )
+    return {"items": items}
+
+
 @app.post("/v1/telemetry")
 @limiter.limit("120/minute")
 async def telemetry_endpoint(

@@ -178,6 +178,23 @@ def main() -> None:
         default=None,
         help="Run only one step instead of all pending steps",
     )
+    mobile_p = sub.add_parser(
+        "mobile",
+        help="Mobile signal channel — iOS Shortcuts POST notes to the Deja proxy; local Deja polls and routes them to cos",
+    )
+    mobile_sub = mobile_p.add_subparsers(dest="mobile_command")
+    mkey_p = mobile_sub.add_parser(
+        "create-key",
+        help="Request a new long-lived mobile API key from the proxy. Prints ONCE — copy into your iOS Shortcut as a secret.",
+    )
+    mkey_p.add_argument(
+        "--label", default="iphone",
+        help="Human label stored with the key so it's distinguishable if we add revocation UX later (default: iphone)",
+    )
+    mobile_sub.add_parser(
+        "poll",
+        help="Foreground drain-loop — polls /v1/inbox/drain every 5s and hands each item to cos in command mode",
+    )
     sub.add_parser(
         "briefing",
         help="Print the same daily-briefing view the MCP agent sees (profile + goals + active projects + recent narratives)",
@@ -273,6 +290,8 @@ def main() -> None:
         _run_webhooks(getattr(args, "wh_command", None), args)
     elif command == "cos":
         _run_cos(getattr(args, "cos_command", None), args)
+    elif command == "mobile":
+        _run_mobile(getattr(args, "mobile_command", None), args)
     elif command in ("trail", "hermes-trail"):
         _run_trail(hours=args.hours, limit=args.limit)
     else:
@@ -536,6 +555,43 @@ def _run_cos(sub_command: str | None, sub_args=None) -> None:
         return
 
     print("unknown cos subcommand — try: status | enable | disable | test | reflect | tail | migrate-conversations")
+
+
+def _run_mobile(sub_command: str | None, args) -> None:
+    """Mobile signal channel — iOS Shortcuts → proxy → local Deja → cos."""
+    from deja import mobile_poll
+
+    if sub_command == "create-key":
+        label = getattr(args, "label", "iphone") if args else "iphone"
+        try:
+            plaintext = mobile_poll.create_mobile_key(label=label)
+        except Exception as e:
+            print(f"error: {e}")
+            return
+        if not plaintext:
+            print("error: proxy returned no key")
+            return
+        print()
+        print("─" * 72)
+        print(f"  Mobile API key  (label: {label!r})")
+        print(f"  {plaintext}")
+        print("─" * 72)
+        print()
+        print("Copy into iOS Shortcuts as a password / secret text field.")
+        print("This is shown ONCE — we only store the hash server-side.")
+        print("Add it to the Shortcut as header ``X-Deja-Mobile-Key``.")
+        return
+
+    if sub_command == "poll":
+        print(f"Polling Deja proxy every ~{mobile_poll.POLL_INTERVAL_SEC:.0f}s. Ctrl+C to stop.")
+        try:
+            asyncio.run(mobile_poll.run_loop())
+        except KeyboardInterrupt:
+            print()
+            print("(mobile poll stopped)")
+        return
+
+    print("unknown mobile subcommand — try: create-key | poll")
 
 
 def _run_webhooks(sub_command: str | None, args) -> None:
