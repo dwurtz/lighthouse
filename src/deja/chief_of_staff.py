@@ -1308,14 +1308,34 @@ Treat this like a live text thread:
 3. **Ignore the trigger prefix.** The user's message will start with
    ``@Bagel`` or similar — strip it before parsing intent.
 
-4. **Use Deja MCP tools aggressively.** You have the same surface as
-   voice/email/chat cos: ``search_deja``, ``get_page``,
-   ``daily_briefing``, ``recent_activity``, ``calendar_list_events``,
-   ``gmail_search``, ``gmail_get_message``, ``update_wiki``,
-   ``add_reminder``, ``add_task``, ``add_waiting_for``,
-   ``execute_action``, ``resolve_*``, ``archive_*``. For WhatsApp
-   questions you'll get asked most often — schedule, open loops, who
-   owes what — these tools have you covered.
+4. **Deja's wiki + state are mounted at
+   ``/workspace/extra/home/Deja`` and ``/workspace/extra/home/.deja``
+   — read them directly with your Read / Bash / Glob / Grep tools.**
+   The full Deja MCP tool surface (``search_deja``, ``get_page``,
+   ``calendar_list_events``, ``gmail_search``, ``update_wiki``,
+   ``add_reminder``, ``execute_action``, etc.) is NOT available in
+   this channel right now — the host Python environment isn't
+   runnable inside the Linux container. Workarounds:
+
+     - Read ``/workspace/extra/home/Deja/goals.md`` for tasks +
+       waiting-fors + reminders + standing context.
+     - Read ``/workspace/extra/home/Deja/index.md`` for the full
+       catalog of people + projects, mtime-sorted.
+     - Read individual pages via
+       ``/workspace/extra/home/Deja/people/<slug>.md`` and
+       ``projects/<slug>.md`` and ``events/YYYY-MM-DD/<slug>.md``.
+     - Read ``/workspace/extra/home/.deja/observations.jsonl`` for
+       recent signals (grep / tail as needed).
+     - Read
+       ``/workspace/extra/home/Deja/conversations/<date>/<slug>.md``
+       for prior user↔cos exchanges across channels.
+     - For reminders/tasks, edit
+       ``/workspace/extra/home/Deja/goals.md`` with the Edit tool
+       (append to the right section, keep the existing formatting).
+     - You CANNOT hit Google Calendar, Gmail, or Tasks from here —
+       those require the MCP tools that aren't available. If the
+       user asks for a calendar event creation, say so and offer to
+       add it as a reminder in goals.md instead.
 
 5. **Cross-channel memory.** Every direct user↔cos exchange —
    WhatsApp, email reply, voice, notch chat — lands in
@@ -1396,19 +1416,14 @@ def sync_bagel_prompt(
     tmp_md.write_text(_bagel_system_prompt(), encoding="utf-8")
     tmp_md.replace(claude_md)
 
-    mcp_config = {
-        "mcpServers": {
-            "deja": {
-                "command": "/workspace/extra/home/projects/deja/.venv/bin/python",
-                "args": ["-m", "deja", "mcp"],
-                "env": {
-                    "DEJA_HOME": "/workspace/extra/home/.deja",
-                    "DEJA_WIKI": "/workspace/extra/home/Deja",
-                    "HOME": "/workspace/extra/home",
-                },
-            }
-        }
-    }
+    # Deja MCP intentionally NOT configured here — the host's .venv
+    # Python is a Mac ARM64 binary (symlink to /opt/homebrew/...) and
+    # can't exec inside the Linux container. Until we bake a Linux
+    # Python + `pip install -e deja` into the agent image (or add SSE
+    # MCP transport to Deja so the container can connect to a host
+    # server), Bagel gets filesystem access to ~/Deja via the mount
+    # and reads it with Read / Bash. See BAGEL_APPENDIX for workarounds.
+    mcp_config = {"mcpServers": {}}
     tmp_json = mcp_json.with_suffix(".json.tmp")
     tmp_json.write_text(
         json.dumps(mcp_config, indent=2) + "\n", encoding="utf-8",
