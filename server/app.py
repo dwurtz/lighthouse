@@ -395,7 +395,7 @@ async def mobile_key_create_endpoint(
     revocation UX later. The plaintext is returned ONCE; only the hash
     persists.
     """
-    from server.db import mobile_key_create
+    from db import mobile_key_create
     token = authorization.removeprefix("Bearer ").strip()
     user = await validate_token(token)
     label = "mobile"
@@ -430,7 +430,7 @@ async def mobile_inbox_post(
     Stored verbatim. Local Deja drains via ``/v1/inbox/drain`` every
     few seconds and routes each item into the cos command pipeline.
     """
-    from server.db import mobile_key_lookup, mobile_inbox_put
+    from db import mobile_key_lookup, mobile_inbox_put
 
     user_email: str | None = None
     if x_deja_mobile_key:
@@ -477,7 +477,7 @@ async def mobile_inbox_drain(
     reached from mobile). Local Deja calls this every few seconds and
     pushes each item through ``chief_of_staff.invoke_command_sync``.
     """
-    from server.db import mobile_inbox_drain as _drain
+    from db import mobile_inbox_drain as _drain
     token = authorization.removeprefix("Bearer ").strip()
     user = await validate_token(token)
     items = _drain(user["email"])
