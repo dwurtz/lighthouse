@@ -1349,6 +1349,7 @@ def _browser_ask(prompt: str, timeout_sec: int = 180) -> str:
       - Tabs are left open in the MCP tab group after; caller should
         instruct "close the tabs you opened" when cleanup matters.
     """
+    import os
     import shutil
     import subprocess
 

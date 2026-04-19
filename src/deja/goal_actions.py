@@ -396,7 +396,16 @@ def _send_email_to_self(params: dict, reason: str) -> None:
             body=send_body,
         ).execute()
     except Exception as e:
-        log.warning("send_email_to_self failed: %s", type(e).__name__)
+        detail = getattr(e, "content", None) or str(e)
+        if isinstance(detail, bytes):
+            try:
+                detail = detail.decode("utf-8", errors="replace")
+            except Exception:
+                detail = repr(detail)
+        log.warning(
+            "send_email_to_self failed: %s — %s",
+            type(e).__name__, str(detail)[:400],
+        )
         return
     log.info(
         "send_email_to_self: sent '%s'%s — %s",
