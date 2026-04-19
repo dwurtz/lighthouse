@@ -569,6 +569,50 @@ def create_server() -> Server:
                     "required": ["message_id"],
                 },
             ),
+            types.Tool(
+                name="browser_ask",
+                description=(
+                    "Run a natural-language query against the user's "
+                    "logged-in browser via Claude-in-Chrome. Claude "
+                    "opens tabs in the MCP tab group, navigates the "
+                    "target site, reads the DOM, and returns a "
+                    "summary. Use this to reach services that don't "
+                    "have a public API we've wired — Google Photos, "
+                    "Slack, Spotify podcasts, TeamSnap, etc. "
+                    "\n\n"
+                    "Cost: ~60-120 seconds per call, flat-fee on the "
+                    "user's Claude Pro/Max plan. Not free — don't "
+                    "fire it for things search_deja/gmail_search/"
+                    "calendar_list_events can answer locally. "
+                    "\n\n"
+                    "Best for: fuzzy semantic questions, pulling "
+                    "structured data from web UIs, checking in on "
+                    "conversations the user would otherwise miss. "
+                    "Honest about auth walls — returns 'please log "
+                    "in' rather than fabricating. Honest about "
+                    "missing data — won't invent what it can't see. "
+                    "\n\n"
+                    "Always phrase the prompt as a full task: 'Use "
+                    "the Chrome extension to navigate to X and tell "
+                    "me Y.' Include context (dates, names, what "
+                    "'latest' means) so Claude doesn't have to guess."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "prompt": {
+                            "type": "string",
+                            "description": "Full natural-language instruction for Claude to execute in the browser. Example: 'Navigate to open.spotify.com, find my 3 most recently played podcasts, and return show, episode, description, and transcript excerpts if available.'",
+                        },
+                        "timeout_sec": {
+                            "type": "integer",
+                            "default": 180,
+                            "description": "Max seconds to wait for the browser task (default 180).",
+                        },
+                    },
+                    "required": ["prompt"],
+                },
+            ),
         ]
 
     @app.call_tool()
@@ -1287,6 +1331,90 @@ def _gmail_search(query: str, max_results: int = 10) -> str:
     return "\n".join(lines)
 
 
+def _browser_ask(prompt: str, timeout_sec: int = 180) -> str:
+    """Shell out to ``claude -p --chrome "<prompt>"`` and return stdout.
+
+    Non-interactive subprocess. Claude-in-Chrome opens tabs inside its
+    MCP tab group, drives them to fulfill the prompt, and prints the
+    result. Tab group scoping is what makes this safe — the extension
+    can't read tabs outside its own group.
+
+    Caveats:
+      - ~60-120s latency per call.
+      - Requires Chrome running with the Claude-in-Chrome extension
+        installed and authenticated to the user's Pro/Max plan.
+      - The session's global CLAUDE.md can bias Claude toward other
+        tools — always include "use the Chrome extension (NOT any
+        CLI)" in prompts you construct here.
+      - Tabs are left open in the MCP tab group after; caller should
+        instruct "close the tabs you opened" when cleanup matters.
+    """
+    import shutil
+    import subprocess
+
+    if not prompt or not prompt.strip():
+        return "(empty prompt — nothing to ask)"
+
+    claude_bin = shutil.which("claude")
+    if not claude_bin:
+        for candidate in (
+            "/Applications/cmux.app/Contents/Resources/bin/claude",
+            str(Path.home() / ".local/bin/claude"),
+            "/opt/homebrew/bin/claude",
+            "/usr/local/bin/claude",
+        ):
+            if Path(candidate).exists() and os.access(candidate, os.X_OK):
+                claude_bin = candidate
+                break
+    if not claude_bin:
+        return (
+            "(browser_ask: claude CLI not found. Install Claude Code "
+            "and the Claude-in-Chrome extension.)"
+        )
+
+    # Reinforce "use the extension" to counter a global CLAUDE.md that
+    # biases Claude toward other Google CLIs like gws.
+    if "Chrome extension" not in prompt:
+        prompt = (
+            "Use the Chrome extension (NOT any CLI like gws or gcloud).\n\n"
+            + prompt
+        )
+
+    env = {**os.environ}
+    path_extras = [
+        "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin",
+        "/opt/homebrew/bin",
+        str(Path.home() / ".local/bin"),
+        "/Applications/cmux.app/Contents/Resources/bin",
+    ]
+    existing = env.get("PATH", "")
+    env["PATH"] = ":".join([*path_extras, existing]) if existing else ":".join(path_extras)
+    env.setdefault("HOME", str(Path.home()))
+
+    try:
+        proc = subprocess.run(
+            [claude_bin, "-p", "--chrome", prompt],
+            capture_output=True,
+            text=True,
+            timeout=max(30, min(int(timeout_sec), 600)),
+            env=env,
+        )
+    except subprocess.TimeoutExpired:
+        return f"(browser_ask timed out after {timeout_sec}s)"
+    except Exception as e:
+        return f"(browser_ask failed: {type(e).__name__}: {e})"
+
+    if proc.returncode != 0:
+        return (
+            f"(browser_ask rc={proc.returncode}: "
+            f"{(proc.stderr or '')[-400:]})"
+        )
+    out = (proc.stdout or "").strip()
+    if not out:
+        return f"(browser_ask: empty stdout, stderr={(proc.stderr or '')[-200:]})"
+    return out
+
+
 def _gmail_get_message(message_id: str) -> str:
     """Fetch one Gmail message's full body (plain-text stripped of quoted history)."""
     if not message_id:
@@ -1434,6 +1562,12 @@ def _dispatch(name: str, args: dict) -> str:
 
     if name == "gmail_get_message":
         return _gmail_get_message(args.get("message_id", ""))
+
+    if name == "browser_ask":
+        return _browser_ask(
+            prompt=args.get("prompt", ""),
+            timeout_sec=args.get("timeout_sec", 180),
+        )
 
     return f"(unknown tool: {name})"
 

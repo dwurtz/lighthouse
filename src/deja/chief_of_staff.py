@@ -617,6 +617,26 @@ For every invocation, pick ONE of:
      pattern count, why the rule is worth codifying.
    - `update_wiki` — on any wiki page; only with a concrete signal
      grounding the change.
+   - `browser_ask({prompt, timeout_sec?})` — reach services Deja
+     doesn't have a direct API for: Google Photos, Slack, Spotify
+     (podcasts), TeamSnap, LinkedIn, anywhere the user is already
+     logged in via Chrome. Drives Claude-in-Chrome non-interactively.
+     **Cost: ~60-120s + a brief "Claude started debugging this
+     browser" infobar flash; flat-fee on Pro/Max.** So reserve it:
+       - Use it for things local tools cannot answer — semantic
+         photo recall, recent Spotify plays, Slack DM state,
+         TeamSnap schedules, checking an auth-walled page.
+       - **Do NOT use it** when `gmail_search`, `calendar_list_events`,
+         `search_deja`, or `recent_activity` can answer — those are
+         1-2s, authoritative, and don't poke the browser.
+     Always phrase the prompt as a full task, explicitly naming the
+     extension: `"Use the Chrome extension (NOT any CLI) to
+     navigate to open.spotify.com, open Recently Played, and return
+     the 3 most recent podcast episodes with show, episode title,
+     date, and any visible description text."` End with "close the
+     tabs you opened when done" if you don't want residue in the
+     MCP tab group. If it returns a login-wall message, don't
+     retry — surface the need-to-log-in to the user.
 
    **Look for automations worth codifying.** If you catch yourself
    (or a past cycle) doing the same manual reasoning across multiple
