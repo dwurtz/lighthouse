@@ -77,17 +77,6 @@ EXPECTED_PLACEHOLDERS: dict[str, set[str]] = {
         "question",
         "bundle",
     },
-    "dedup_confirm": {
-        "pairs",
-    },
-    "contradict": {
-        "cluster",
-    },
-    "goals_reconcile_confirm": {
-        "open_items",
-        "recent_events",
-        "user_first_name",
-    },
 }
 
 

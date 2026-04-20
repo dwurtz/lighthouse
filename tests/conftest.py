@@ -75,18 +75,18 @@ def isolated_home(request, monkeypatch, tmp_path):
     monkeypatch.setattr(user_mod, "WIKI_DIR", wiki)
 
     # events_to_projects imports WIKI_DIR at module load and reads it
-    # directly for clustering / write paths.
+    # directly for clustering.
     try:
         import deja.events_to_projects as etp_mod
         monkeypatch.setattr(etp_mod, "WIKI_DIR", wiki)
     except ImportError:
         pass
 
-    # goals_reconcile imports WIKI_DIR at module load for the events
+    # open_loops imports WIKI_DIR at module load for the events
     # scan path.
     try:
-        import deja.goals_reconcile as gr_mod
-        monkeypatch.setattr(gr_mod, "WIKI_DIR", wiki)
+        import deja.open_loops as ol_mod
+        monkeypatch.setattr(ol_mod, "WIKI_DIR", wiki)
     except ImportError:
         pass
 

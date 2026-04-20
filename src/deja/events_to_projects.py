@@ -1,38 +1,23 @@
-"""Events-to-projects sweep — cluster related events and materialize
-new project pages directly.
+"""Event-cluster candidate generator.
 
-Runs during the 3×/day reflection slot after dedup. Mirrors dedup's
-dedup→confirm→write shape:
+Groups events that look like they belong to a not-yet-existing project,
+using two deterministic mechanisms:
 
-  1. **Cluster** events from two sources:
-     - *Dangling-slug clusters*: events whose ``projects:`` frontmatter
-       references a slug that has no corresponding ``projects/<slug>.md``
-       page. When ≥2 events share the same dangling slug, that's a
-       deterministic cluster — the events are already voting for the
-       slug, and the slug is the name.
-     - *Vector-similarity clusters*: events with an empty ``projects:``
-       field that cluster via QMD embeddings at similarity ≥0.55 AND
-       share a non-user person OR have average similarity ≥0.85.
-     When both mechanisms surface the same event group, the dangling-slug
-     variant wins — slug is pre-named and deterministic.
+  - *Dangling-slug clusters*: events whose ``projects:`` frontmatter
+    references a slug that has no corresponding ``projects/<slug>.md``
+    page. When ≥2 events share the same dangling slug, the events are
+    already voting for the slug and the slug is the name.
 
-  2. **Confirm** each candidate cluster via Flash-Lite. One prompt per
-     batch of N clusters: "is this a real project? if yes, what slug,
-     description, seed body?"
+  - *Vector-similarity clusters*: events with an empty ``projects:``
+    field that cluster via QMD embeddings at similarity ≥0.55 AND
+    share a non-user person OR have average similarity ≥0.85.
 
-  3. **Write** confirmed clusters directly to the wiki via
-     ``wiki.apply_updates`` — ``create`` a ``projects/<slug>.md`` page
-     with the seed body plus a ``## Recent`` section listing the cluster's
-     events. Race against an existing project → fall back to ``update``.
+When both mechanisms surface the same event group, the dangling-slug
+variant wins — slug is pre-named and deterministic.
 
-No observation-file proposals. No waiting for integrate to materialize
-anything. The previous design leaked dangling project references onto
-events and never closed the loop; this design closes it every sweep.
-
-Why ≥3 events for vector clusters: two related events could be
-coincidence. Three is a pattern. Why ≥2 for dangling-slug clusters:
-the slug IS a stronger signal than vectors alone — the events are
-literally saying "we belong to <slug>".
+No LLM calls, no wiki writes. Cos consumes this via the
+``find_orphan_event_clusters`` MCP tool and decides whether to
+materialize a project page (via ``update_wiki``).
 """
 
 from __future__ import annotations
@@ -42,17 +27,12 @@ import logging
 import re
 import sqlite3
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
 
 import numpy as np
 import yaml
 
-from deja import wiki as wiki_store
 from deja.config import QMD_COLLECTION, WIKI_DIR
-from deja.llm_client import GeminiClient
-from deja.prompts import load as load_prompt
 
 log = logging.getLogger(__name__)
 
@@ -76,24 +56,6 @@ _MIN_CLUSTER_SIZE = 3
 # "we belong to the same (non-existent) project" is enough.
 _MIN_DANGLING_VOTES = 2
 
-# Cap on clusters per sweep so a wiki with many unprojected events
-# doesn't flood Flash-Lite / the wiki with 50 creates at once.
-_MAX_CLUSTERS_PER_SWEEP = 10
-
-# Clusters per Flash-Lite call. Clusters are denser payloads than
-# dedup pairs (multi-event bodies), so batch modestly.
-CONFIRM_BATCH_SIZE = 5
-
-CONFIRM_MODEL = "gemini-2.5-flash-lite"
-
-# Max chars of event body shown to Flash-Lite per event — keep the
-# prompt compact so batch coverage is reliable.
-_EVENT_SNIPPET_CHARS = 300
-
-# Flash-Lite pricing (as of 2026-04). Used for per-run cost logging.
-_FLASH_LITE_INPUT_PER_MTOK = 0.10
-_FLASH_LITE_OUTPUT_PER_MTOK = 0.40
-
 
 # ---------------------------------------------------------------------------
 # Data classes
@@ -102,11 +64,11 @@ _FLASH_LITE_OUTPUT_PER_MTOK = 0.40
 
 @dataclass
 class EventCluster:
-    """One candidate cluster to surface to Flash-Lite.
+    """One candidate cluster to hand to cos.
 
     ``suggested_slug`` is set only for dangling-slug clusters. For vector
-    clusters it's None and Flash-Lite invents the slug. ``source``
-    distinguishes the two mechanisms in logs + audit reasons.
+    clusters it's None — cos invents the slug. ``source`` distinguishes
+    the two mechanisms in logs + audit reasons.
     """
 
     cluster_id: str
@@ -117,57 +79,8 @@ class EventCluster:
     source: str = "vector"  # "dangling" | "vector"
 
 
-@dataclass
-class ConfirmedProject:
-    slug: str
-    description: str
-    seed_body: str
-    reason: str
-    cluster: EventCluster
-
-
-@dataclass
-class SweepSummary:
-    events_indexed: int = 0
-    dangling_clusters: int = 0
-    vector_clusters: int = 0
-    clusters_proposed: int = 0
-    decisions_returned: int = 0
-    projects_confirmed: int = 0
-    projects_written: int = 0
-    input_tokens: int = 0
-    output_tokens: int = 0
-    cost_usd: float = 0.0
-    clusters: list[EventCluster] = field(default_factory=list)
-
-    def as_dict(self) -> dict:
-        return {
-            "events_indexed": self.events_indexed,
-            "dangling_clusters": self.dangling_clusters,
-            "vector_clusters": self.vector_clusters,
-            "clusters_proposed": self.clusters_proposed,
-            "decisions_returned": self.decisions_returned,
-            "projects_confirmed": self.projects_confirmed,
-            "projects_written": self.projects_written,
-            "input_tokens": self.input_tokens,
-            "output_tokens": self.output_tokens,
-            "cost_usd": round(self.cost_usd, 6),
-            "clusters": [
-                {
-                    "cluster_id": c.cluster_id,
-                    "source": c.source,
-                    "events": c.paths,
-                    "suggested_slug": c.suggested_slug,
-                    "shared_people": c.shared_people,
-                    "avg_similarity": c.avg_similarity,
-                }
-                for c in self.clusters
-            ],
-        }
-
-
 # ---------------------------------------------------------------------------
-# 1. QMD vector load — reuses dedup's connection helper
+# QMD vector load — reuses dedup's connection helper
 # ---------------------------------------------------------------------------
 
 
@@ -225,7 +138,7 @@ def _load_event_vectors(
 
 
 # ---------------------------------------------------------------------------
-# 2. Event frontmatter + existing-project enumeration
+# Event frontmatter + existing-project enumeration
 # ---------------------------------------------------------------------------
 
 
@@ -233,9 +146,10 @@ def _parse_event_frontmatter(path: str) -> dict:
     """Return the YAML frontmatter dict for an event page, or {}.
 
     Handles the clean multi-line form and the legacy one-line corruption
-    shape (30+ events in the current wiki have it). Only ``people`` and
-    ``projects`` are required for clustering decisions, so the one-line
-    fallback uses targeted regex rather than full YAML parsing.
+    shape (some events in the current wiki still have it). Only
+    ``people`` and ``projects`` are required for clustering decisions,
+    so the one-line fallback uses targeted regex rather than full YAML
+    parsing.
     """
     fp = WIKI_DIR / path
     if not fp.exists():
@@ -278,59 +192,11 @@ def _parse_event_frontmatter(path: str) -> dict:
 
 
 def _existing_project_slugs() -> set[str]:
-    """Return the set of ``slug`` values for all existing projects/<slug>.md."""
+    """Return the set of slugs for all existing projects/<slug>.md."""
     projects_dir = WIKI_DIR / "projects"
     if not projects_dir.exists():
         return set()
     return {p.stem for p in projects_dir.glob("*.md")}
-
-
-def _event_title(path: str) -> str:
-    """Return the H1 title of an event page, or the slug as a fallback."""
-    fp = WIKI_DIR / path
-    title = Path(path).stem
-    if not fp.exists():
-        return title
-    try:
-        for line in fp.read_text(encoding="utf-8").splitlines():
-            if line.startswith("# "):
-                return line[2:].strip()
-    except Exception:
-        pass
-    return title
-
-
-def _event_snippet(path: str, max_chars: int = _EVENT_SNIPPET_CHARS) -> str:
-    """Return a compact body snippet for the confirm prompt.
-
-    Strips frontmatter + H1, collapses whitespace, truncates.
-    """
-    fp = WIKI_DIR / path
-    if not fp.exists():
-        return ""
-    try:
-        text = fp.read_text(encoding="utf-8")
-    except Exception:
-        return ""
-    # Drop frontmatter.
-    if text.startswith("---"):
-        end = text.find("\n---", 3)
-        if end != -1:
-            text = text[end + 4 :]
-        else:
-            end_close = text.find("---", 3)
-            if end_close != -1:
-                text = text[end_close + 3 :]
-    # Drop H1.
-    lines = [ln for ln in text.splitlines() if not ln.startswith("# ")]
-    body = " ".join(lines)
-    body = re.sub(r"\s+", " ", body).strip()
-    return body[:max_chars]
-
-
-# ---------------------------------------------------------------------------
-# 3. Clustering — dangling-slug + vector
-# ---------------------------------------------------------------------------
 
 
 def _self_slug() -> str:
@@ -342,16 +208,22 @@ def _self_slug() -> str:
         return ""
 
 
+# ---------------------------------------------------------------------------
+# Clustering — dangling-slug + vector
+# ---------------------------------------------------------------------------
+
+
 def _find_dangling_clusters(
     paths: list[str],
     existing: set[str],
     self_slug: str,
+    min_votes: int = _MIN_DANGLING_VOTES,
 ) -> list[EventCluster]:
     """Group events by shared dangling-slug references.
 
     For every event, inspect its ``projects:`` frontmatter. Any slug NOT
     in ``existing`` is "dangling" — the event is voting for a project
-    that doesn't exist yet. ≥_MIN_DANGLING_VOTES events sharing the same
+    that doesn't exist yet. ≥``min_votes`` events sharing the same
     dangling slug form a cluster.
     """
     slug_to_events: dict[str, list[str]] = {}
@@ -372,7 +244,7 @@ def _find_dangling_clusters(
 
     clusters: list[EventCluster] = []
     for slug, evs in slug_to_events.items():
-        if len(evs) < _MIN_DANGLING_VOTES:
+        if len(evs) < min_votes:
             continue
         people_sets = slug_to_people.get(slug) or []
         shared = (
@@ -388,7 +260,6 @@ def _find_dangling_clusters(
                 source="dangling",
             )
         )
-    # Deterministic order: largest first, then slug alpha.
     clusters.sort(key=lambda c: (-len(c.paths), c.suggested_slug or ""))
     return clusters
 
@@ -396,21 +267,20 @@ def _find_dangling_clusters(
 def _find_vector_clusters(
     paths: list[str],
     mat: np.ndarray,
-    existing: set[str],
     self_slug: str,
     already_clustered: set[str],
     threshold: float = _SIMILARITY_THRESHOLD,
+    min_size: int = _MIN_CLUSTER_SIZE,
 ) -> list[EventCluster]:
     """Greedy clustering on empty-projects events.
 
     Only considers events with ``projects: []`` (or no projects key) AND
-    not already in a dangling cluster. Returns clusters of ≥_MIN_CLUSTER_SIZE
+    not already in a dangling cluster. Returns clusters of ≥``min_size``
     that also have a shared non-user person OR high (≥0.85) avg similarity.
     """
-    if len(paths) < _MIN_CLUSTER_SIZE or mat.size == 0:
+    if len(paths) < min_size or mat.size == 0:
         return []
 
-    # Pre-filter: events with no projects AND not already clustered.
     eligible_idx: list[int] = []
     eligible_fms: list[dict] = []
     for i, p in enumerate(paths):
@@ -422,7 +292,7 @@ def _find_vector_clusters(
         eligible_idx.append(i)
         eligible_fms.append(fm)
 
-    if len(eligible_idx) < _MIN_CLUSTER_SIZE:
+    if len(eligible_idx) < min_size:
         return []
 
     sub_paths = [paths[i] for i in eligible_idx]
@@ -450,7 +320,7 @@ def _find_vector_clusters(
                     visited[j] = True
                     changed = True
 
-        if len(cluster_idx) < _MIN_CLUSTER_SIZE:
+        if len(cluster_idx) < min_size:
             continue
 
         cluster_paths = [sub_paths[k] for k in cluster_idx]
@@ -471,7 +341,6 @@ def _find_vector_clusters(
             ]
             avg = sum(pair_sims) / len(pair_sims) if pair_sims else 0.0
 
-        # Acceptance: shared non-user person OR high avg similarity.
         if not shared and avg < 0.85:
             continue
 
@@ -491,7 +360,10 @@ def _find_vector_clusters(
     return clusters
 
 
-def find_clusters() -> tuple[list[EventCluster], int, int, int]:
+def find_clusters(
+    min_size: int = _MIN_CLUSTER_SIZE,
+    sim_threshold: float = _SIMILARITY_THRESHOLD,
+) -> tuple[list[EventCluster], int, int, int]:
     """Return (clusters, events_indexed, dangling_count, vector_count).
 
     Combines dangling-slug + vector mechanisms. Dangling clusters take
@@ -513,415 +385,9 @@ def find_clusters() -> tuple[list[EventCluster], int, int, int]:
         already.update(c.paths)
 
     vector = _find_vector_clusters(
-        paths, mat, existing, self_slug, already
+        paths, mat, self_slug, already,
+        threshold=sim_threshold, min_size=min_size,
     )
 
     combined = dangling + vector
-    combined = combined[:_MAX_CLUSTERS_PER_SWEEP]
     return combined, len(paths), len(dangling), len(vector)
-
-
-# ---------------------------------------------------------------------------
-# 4. Confirm — Flash-Lite batched judgment
-# ---------------------------------------------------------------------------
-
-
-def _build_clusters_block(clusters: list[EventCluster]) -> str:
-    """Render clusters as the ``{clusters}`` prompt section."""
-    lines: list[str] = []
-    for c in clusters:
-        lines.append(f"### {c.cluster_id}")
-        if c.suggested_slug:
-            lines.append(f"suggested_slug: {c.suggested_slug}")
-        if c.shared_people:
-            lines.append(f"shared_people: {', '.join(c.shared_people)}")
-        lines.append(f"avg_similarity: {c.avg_similarity:.3f}")
-        lines.append(f"source: {c.source}")
-        lines.append("events:")
-        for path in c.paths:
-            title = _event_title(path)
-            snippet = _event_snippet(path)
-            lines.append(f"  - [{path}] {title}")
-            if snippet:
-                lines.append(f"    body: {snippet}")
-        lines.append("")
-    return "\n".join(lines)
-
-
-def _parse_confirm_json(raw: str) -> dict:
-    """Parse the Flash-Lite response. Raises with raw payload on failure."""
-    text = (raw or "").strip()
-    if not text:
-        raise RuntimeError(
-            "events_to_projects confirm: Flash-Lite returned empty response"
-        )
-    if text.startswith("```"):
-        text = text.split("\n", 1)[1] if "\n" in text else text[3:]
-        if text.endswith("```"):
-            text = text[:-3]
-        text = text.strip()
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        pass
-    if "{" in text and "}" in text:
-        start = text.index("{")
-        end = text.rindex("}") + 1
-        try:
-            return json.loads(text[start:end])
-        except json.JSONDecodeError as e:
-            raise RuntimeError(
-                f"events_to_projects confirm: unparseable Flash-Lite JSON. "
-                f"Error: {e}. Raw payload (first 2000 chars): {raw[:2000]!r}"
-            ) from e
-    raise RuntimeError(
-        f"events_to_projects confirm: Flash-Lite response has no JSON "
-        f"object. Raw payload (first 2000 chars): {raw[:2000]!r}"
-    )
-
-
-async def _call_flash_lite(prompt: str) -> tuple[dict, int, int]:
-    """Call Flash-Lite, retry once on exception, then raise.
-
-    Returns (parsed_json, input_tokens, output_tokens_including_thoughts).
-    """
-    client = GeminiClient()
-    config = {
-        "response_mime_type": "application/json",
-        "max_output_tokens": 65536,
-        "temperature": 0.1,
-    }
-    last_exc: Exception | None = None
-    for attempt in (1, 2):
-        try:
-            resp = await client._generate_full(
-                model=CONFIRM_MODEL,
-                contents=prompt,
-                config_dict=config,
-            )
-            break
-        except Exception as e:
-            last_exc = e
-            log.warning(
-                "events_to_projects confirm: attempt %d failed: %s",
-                attempt, e,
-            )
-            if attempt == 2:
-                raise RuntimeError(
-                    f"events_to_projects confirm: Flash-Lite failed after "
-                    f"2 attempts: {e}"
-                ) from e
-    else:  # pragma: no cover
-        raise RuntimeError(
-            f"events_to_projects confirm: Flash-Lite failed: {last_exc}"
-        )
-
-    if isinstance(resp, dict):
-        raw_text = resp.get("text") or ""
-        um = resp.get("usage_metadata") or {}
-        in_tok = int(um.get("prompt_token_count") or 0)
-        out_tok = int(um.get("candidates_token_count") or 0)
-        thoughts = int(um.get("thoughts_token_count") or 0)
-    else:
-        raw_text = getattr(resp, "text", "") or ""
-        um = getattr(resp, "usage_metadata", None)
-        in_tok = int(getattr(um, "prompt_token_count", 0) or 0) if um else 0
-        out_tok = int(getattr(um, "candidates_token_count", 0) or 0) if um else 0
-        thoughts = int(getattr(um, "thoughts_token_count", 0) or 0) if um else 0
-
-    parsed = _parse_confirm_json(raw_text)
-    return parsed, in_tok, out_tok + thoughts
-
-
-async def confirm_clusters(
-    clusters: list[EventCluster],
-) -> tuple[list[ConfirmedProject], SweepSummary]:
-    """Ask Flash-Lite to judge each cluster; return the confirmed projects."""
-    summary = SweepSummary()
-    summary.clusters_proposed = len(clusters)
-    summary.clusters = list(clusters)
-    if not clusters:
-        return [], summary
-
-    prompt_template = load_prompt("events_to_projects_confirm")
-    if "{clusters}" not in prompt_template:
-        raise RuntimeError(
-            "events_to_projects confirm prompt is missing the {clusters} "
-            "placeholder. Check the bundled events_to_projects_confirm.md "
-            "in default_assets/prompts/."
-        )
-
-    batches: list[list[EventCluster]] = [
-        clusters[i : i + CONFIRM_BATCH_SIZE]
-        for i in range(0, len(clusters), CONFIRM_BATCH_SIZE)
-    ]
-    log.info(
-        "events_to_projects: confirming %d cluster(s) via %s across "
-        "%d batch(es) of ≤%d",
-        len(clusters), CONFIRM_MODEL, len(batches), CONFIRM_BATCH_SIZE,
-    )
-
-    by_cluster_id = {c.cluster_id: c for c in clusters}
-    all_decisions: list[dict] = []
-    total_in_tok = 0
-    total_out_tok = 0
-
-    for batch_idx, batch in enumerate(batches, start=1):
-        try:
-            prompt = prompt_template.format(
-                clusters=_build_clusters_block(batch)
-            )
-        except (KeyError, IndexError) as e:
-            raise RuntimeError(
-                f"events_to_projects confirm prompt has an unexpected "
-                f"format placeholder: {e}. Only {{clusters}} should be an "
-                f"unescaped placeholder; literal braces must be doubled."
-            ) from e
-
-        log.info(
-            "events_to_projects batch %d/%d: %d cluster(s), %d prompt chars",
-            batch_idx, len(batches), len(batch), len(prompt),
-        )
-
-        parsed, in_tok, out_tok = await _call_flash_lite(prompt)
-        total_in_tok += in_tok
-        total_out_tok += out_tok
-
-        decisions = parsed.get("decisions") if isinstance(parsed, dict) else None
-        if not isinstance(decisions, list):
-            raise RuntimeError(
-                f"events_to_projects confirm batch {batch_idx}: response "
-                f"JSON has no 'decisions' list. Got: {parsed!r}"
-            )
-
-        covered: set[str] = set()
-        for d in decisions:
-            if isinstance(d, dict) and isinstance(d.get("cluster_id"), str):
-                covered.add(d["cluster_id"])
-        expected = {c.cluster_id for c in batch}
-        missing = expected - covered
-        if missing:
-            raise RuntimeError(
-                f"events_to_projects confirm batch {batch_idx}/{len(batches)}: "
-                f"Flash-Lite omitted {len(missing)} of {len(expected)} "
-                f"cluster(s). Missing: {sorted(missing)}. Reduce "
-                f"CONFIRM_BATCH_SIZE or switch to 2.5 Flash."
-            )
-
-        all_decisions.extend(decisions)
-
-    summary.decisions_returned = len(all_decisions)
-    summary.input_tokens = total_in_tok
-    summary.output_tokens = total_out_tok
-    summary.cost_usd = (
-        (total_in_tok / 1_000_000) * _FLASH_LITE_INPUT_PER_MTOK
-        + (total_out_tok / 1_000_000) * _FLASH_LITE_OUTPUT_PER_MTOK
-    )
-
-    confirmed: list[ConfirmedProject] = []
-    for d in all_decisions:
-        if not isinstance(d, dict):
-            continue
-        if not d.get("is_project"):
-            continue
-        cid = d.get("cluster_id") or ""
-        cluster = by_cluster_id.get(cid)
-        if cluster is None:
-            log.warning(
-                "events_to_projects: decision references unknown cluster_id "
-                "%r — skipping",
-                cid,
-            )
-            continue
-        slug = (d.get("slug") or "").strip()
-        description = (d.get("description") or "").strip()
-        seed_body = (d.get("seed_body") or "").strip()
-        reason = (d.get("reason") or "").strip()
-        if not slug or not seed_body:
-            raise RuntimeError(
-                f"events_to_projects: is_project=true decision missing "
-                f"slug or seed_body: {d!r}"
-            )
-        # Honor the dangling slug — if the cluster is pre-named, the
-        # Flash-Lite slug MUST match.
-        if cluster.suggested_slug and slug != cluster.suggested_slug:
-            log.info(
-                "events_to_projects: overriding Flash-Lite slug %r with "
-                "cluster's dangling slug %r",
-                slug, cluster.suggested_slug,
-            )
-            slug = cluster.suggested_slug
-        confirmed.append(
-            ConfirmedProject(
-                slug=wiki_store.slugify(slug),
-                description=description,
-                seed_body=seed_body,
-                reason=reason,
-                cluster=cluster,
-            )
-        )
-
-    summary.projects_confirmed = len(confirmed)
-    log.info(
-        "events_to_projects: %d decision(s), %d confirmed, cost $%.4f",
-        len(all_decisions), len(confirmed), summary.cost_usd,
-    )
-    return confirmed, summary
-
-
-# ---------------------------------------------------------------------------
-# 5. Write — direct wiki.apply_updates calls
-# ---------------------------------------------------------------------------
-
-
-def _compose_seed_page(project: ConfirmedProject) -> str:
-    """Build the body for a new project page.
-
-    Shape:
-
-        <seed body>
-
-        ## Recent
-        - [[events/2026-04-10/foo]]
-        - [[events/2026-04-12/bar]]
-
-    No H1 — the seed body includes its own narrative and the wiki's
-    convention is to leave the filename as the de-facto title for
-    newly-minted projects (existing project pages don't use an H1 either).
-    Frontmatter is applied by ``wiki.apply_updates`` on the create path.
-    """
-    lines: list[str] = [project.seed_body.rstrip(), "", "## Recent"]
-    for path in project.cluster.paths:
-        link = path.removesuffix(".md")
-        lines.append(f"- [[{link}]]")
-    return "\n".join(lines) + "\n"
-
-
-def apply_confirmed(
-    confirmed: list[ConfirmedProject],
-) -> int:
-    """Write each confirmed project. Returns the count successfully written.
-
-    Uses ``wiki.apply_updates`` with a ``create`` action. If the project
-    already exists at write time (race with another pass), falls back to
-    ``update`` so we don't lose the new ``## Recent`` section.
-    """
-    if not confirmed:
-        return 0
-
-    updates: list[dict] = []
-    for p in confirmed:
-        project_path = WIKI_DIR / "projects" / f"{p.slug}.md"
-        action = "update" if project_path.exists() else "create"
-        if action == "update":
-            log.info(
-                "events_to_projects: projects/%s already exists — "
-                "falling back to update",
-                p.slug,
-            )
-        updates.append(
-            {
-                "category": "projects",
-                "slug": p.slug,
-                "action": action,
-                "body_markdown": _compose_seed_page(p),
-                "reason": (
-                    f"Materialized from {len(p.cluster.paths)} event(s) "
-                    f"via {p.cluster.source} cluster "
-                    f"({p.cluster.cluster_id}): "
-                    f"{p.reason or p.description}"
-                ),
-            }
-        )
-
-    applied = wiki_store.apply_updates(updates)
-
-    # Audit one record per confirmed project so the trail cites the
-    # specific events that seeded each create.
-    try:
-        from deja import audit
-
-        for p in confirmed:
-            events_list = ", ".join(p.cluster.paths)
-            dangling_note = (
-                f"dangling slug {p.cluster.suggested_slug!r}; "
-                if p.cluster.source == "dangling"
-                else ""
-            )
-            audit.record(
-                "project_materialize",
-                target=f"projects/{p.slug}",
-                reason=(
-                    f"{dangling_note}seeded from {len(p.cluster.paths)} "
-                    f"event(s): {events_list}. {p.reason or p.description}"
-                ),
-                trigger={
-                    "kind": "events_to_projects",
-                    "detail": p.cluster.source,
-                },
-            )
-    except Exception:
-        log.debug("events_to_projects: audit.record failed", exc_info=True)
-
-    return applied
-
-
-# ---------------------------------------------------------------------------
-# 6. Top-level entrypoint — called by reflection_scheduler
-# ---------------------------------------------------------------------------
-
-
-async def run_events_to_projects() -> dict:
-    """Run one full events→projects sweep. Called by reflection_scheduler.
-
-    Steps:
-      1. find_clusters — dangling-slug + vector-similarity clusters
-      2. confirm_clusters — Flash-Lite yes/no + slug + seed body
-      3. apply_confirmed — create project pages, fall back to update on race
-
-    Returns a SweepSummary as a dict. Raises loudly on any failure — no
-    silent fallbacks per the project's rule.
-    """
-    wiki_store.ensure_dirs()
-
-    clusters, events_indexed, dangling_count, vector_count = find_clusters()
-    summary_preview = SweepSummary(
-        events_indexed=events_indexed,
-        dangling_clusters=dangling_count,
-        vector_clusters=vector_count,
-        clusters_proposed=len(clusters),
-        clusters=list(clusters),
-    )
-
-    if events_indexed < _MIN_DANGLING_VOTES:
-        log.info(
-            "events_to_projects: only %d events indexed — skipping",
-            events_indexed,
-        )
-        return summary_preview.as_dict()
-
-    if not clusters:
-        log.info(
-            "events_to_projects: %d events, no clusters surfaced "
-            "(dangling=%d, vector=%d)",
-            events_indexed, dangling_count, vector_count,
-        )
-        return summary_preview.as_dict()
-
-    confirmed, summary = await confirm_clusters(clusters)
-    summary.events_indexed = events_indexed
-    summary.dangling_clusters = dangling_count
-    summary.vector_clusters = vector_count
-
-    if confirmed:
-        summary.projects_written = apply_confirmed(confirmed)
-
-    log.info(
-        "events_to_projects complete: %s",
-        {
-            k: v
-            for k, v in summary.as_dict().items()
-            if k != "clusters"
-        },
-    )
-    return summary.as_dict()
