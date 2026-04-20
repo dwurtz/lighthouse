@@ -417,10 +417,11 @@ class AgentLoop:
             self.phase = "IDLE"
             return False
 
+        cos_info = result.get("cos_reflective") or {}
         log.info(
-            "Nightly catch-up complete: %d updates, %d chars thoughts",
-            len(result.get("wiki_updates", []) or []),
-            len(result.get("thoughts", "") or ""),
+            "Nightly catch-up complete: cos rc=%s summary=%s",
+            cos_info.get("rc", "?"),
+            (cos_info.get("summary") or "")[:160],
         )
         self.last_analysis_time = datetime.now(timezone.utc)
         self._fire_stats_update()

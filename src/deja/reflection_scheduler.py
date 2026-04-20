@@ -1,18 +1,22 @@
-"""Dedup scheduling — when to run, cooldowns, last-run marker.
+"""Reflect scheduling — when to run, cooldowns, last-run marker.
 
-Formerly the reflection scheduler; the LLM-only reflect/deduplicate pass
-has been replaced by the vector+Flash-Lite dedup pipeline in
-``deja.dedup``. The function names and marker file are kept as
-``*_reflection`` because callers and tests still import them under those
-names, and the cadence (3x/day slot boundaries) is unchanged. Think of
-"reflection" here as "the periodic deep wiki pass that runs a few times
-a day" — today that pass is dedup.
+The reflect pass fires 3x/day at the slot boundaries configured in
+``REFLECT_SLOT_HOURS``. Its job is to wake cos (the chief-of-staff
+Claude Code subprocess) and let cos decide what deep-wiki work — if
+any — needs doing. Cos reaches the four candidate-generator MCP
+tools (``find_dedup_candidates``, ``find_orphan_event_clusters``,
+``find_open_loops_with_evidence``, ``find_contradictions``) and acts
+on whatever it finds via the existing write tools.
+
+Before invoking cos we refresh the QMD vector index so every
+candidate sweep cos runs sees the current wiki state.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import subprocess
 from datetime import datetime, timedelta, timezone
 
 from deja.config import (
@@ -47,8 +51,7 @@ def _most_recent_slot(now: datetime) -> datetime:
 
     Walks the configured ``REFLECT_SLOT_HOURS`` in local time. If any of
     today's slots is <= now, returns the latest one. Otherwise returns
-    yesterday's last slot (the clock hasn't crossed today's earliest slot
-    yet, so the "current" slot is still yesterday's final one).
+    yesterday's last slot.
     """
     if not REFLECT_SLOT_HOURS:
         return now
@@ -67,7 +70,6 @@ def _most_recent_slot(now: datetime) -> datetime:
 # ---------------------------------------------------------------------------
 
 def _read_last_run() -> datetime | None:
-    """Return the timestamp of the last successful reflection run, or None."""
     try:
         raw = _LAST_RUN_FILE.read_text().strip()
     except (OSError, FileNotFoundError):
@@ -83,7 +85,6 @@ def _read_last_run() -> datetime | None:
 
 
 def _write_last_run(ts: datetime | None = None) -> None:
-    """Record `ts` (or now) as the last successful reflection run."""
     if ts is None:
         ts = datetime.now(timezone.utc)
     try:
@@ -97,24 +98,11 @@ def _write_last_run(ts: datetime | None = None) -> None:
 # Public API
 # ---------------------------------------------------------------------------
 
+
 def should_run_reflection(now: datetime | None = None) -> bool:
     """Return True if reflection hasn't run since the most recent slot boundary.
 
-    Clock-aligned, not interval-based. With default slots (02:00, 11:00,
-    18:00), "did reflection run since the last time the clock crossed any
-    slot boundary?" means:
-
-      - It's 12:00 today, last run was today at 03:00 -> run (last run
-        predates today's 11:00 slot that just passed)
-      - It's 12:00 today, last run was today at 11:30 -> don't run
-        (last run is past today's most recent slot)
-      - It's 01:30 today, last run was yesterday at 19:00 -> don't run
-        (last run is past yesterday's final slot of 18:00; today's 02:00
-        hasn't happened yet)
-      - Machine was asleep all day; wakes at 20:00 with last run 6 days
-        ago -> run ONCE (backs up to today's 18:00 slot, not a stampede)
-
-    All times are local.
+    Clock-aligned, not interval-based. All times are local.
     """
     if now is None:
         now = datetime.now().astimezone()
@@ -129,97 +117,64 @@ def should_run_reflection(now: datetime | None = None) -> bool:
     return last.astimezone(threshold.tzinfo) < threshold
 
 
+def _refresh_qmd_index() -> None:
+    """Refresh QMD so every candidate sweep sees the current wiki state.
+
+    Failure here is non-fatal — we still let cos run against the last
+    known embeddings rather than skipping the reflect pass — but we
+    log loudly so stale-index drift is visible.
+    """
+    try:
+        subprocess.run(["qmd", "update"], capture_output=True, timeout=60, check=False)
+        subprocess.run(["qmd", "embed"], capture_output=True, timeout=300, check=False)
+    except Exception:
+        log.exception("reflect: qmd refresh failed — proceeding with stale index")
+
+
 async def run_reflection() -> dict:
-    """Run the 3x/day reflect phase — a pipeline of cluster-based
-    sweeps over the wiki corpus. Returns a merged summary dict.
+    """Fire the reflect pass: refresh embeddings, then let cos decide.
 
-    "Reflect" is no longer one big LLM call (the original expensive
-    pass was retired). It's now a series of sweeps that reuse the
-    same QMD vector embeddings at different similarity thresholds
-    and filters, each producing a different kind of action:
-
-    1. **dedup** — similarity ≥0.82 on people/projects → merge pages
-       that describe the same entity. Writes directly to the wiki.
-    2. **contradictions** — similarity 0.65-0.82 on people/projects →
-       flag pages that reference the same subject but disagree on a
-       fact. Writes directly to the wiki.
-    3. **event themes** — similarity ≥0.55 on events with ``projects:
-       []`` and shared people → propose a new project page. Writes
-       a ``create_project`` observation; integrate creates the page.
-
-    All three run in sequence, share one concurrency lock, and share
-    one last-run marker. Per-sweep infra failures raise up to the
-    agent loop so the marker isn't updated and the next heartbeat
-    retries.
+    Steps:
+      1. Refresh the QMD vector index so the candidate-generator MCP
+         tools cos calls see the current wiki state.
+      2. Invoke cos in reflective mode. Cos owns the loop — it uses
+         ``find_dedup_candidates``, ``find_orphan_event_clusters``,
+         ``find_open_loops_with_evidence``, and ``find_contradictions``
+         to find work, verifies via ``get_page`` / ``gmail_search`` /
+         ``search_deja`` / ``recent_activity`` as needed, and writes
+         directly through the existing MCP write tools.
+      3. Audit-trim to keep ``audit.jsonl`` bounded.
 
     Concurrent invocations are coalesced: the second caller sees the
-    lock held and returns ``{"skipped": "concurrent"}`` immediately
-    rather than double-running the full pipeline.
+    lock held and returns ``{"skipped": "concurrent"}`` immediately.
     """
     if _run_lock.locked():
         log.info("Reflect already running — skipping concurrent invocation")
         return {"skipped": "concurrent"}
 
     async with _run_lock:
-        from deja.dedup import run_dedup
-        from deja.events_to_projects import run_events_to_projects
-        from deja.goals_reconcile import run_goals_reconcile
         from deja import chief_of_staff
 
-        # 1. Dedup — merges same-entity pages.
-        result = await run_dedup()
+        _refresh_qmd_index()
 
-        # 2. Contradictions sweep DISABLED 2026-04-14.
-        # Both Flash-Lite and Flash produced too many false positives:
-        # complementary mentions of the same entity were being labeled as
-        # contradictions and real facts were being stripped from pages
-        # (interview context, role details, confirmation facts, etc.
-        # — all true claims removed). Net signal-to-
-        # noise was negative across two days of audit data. Re-enable
-        # only after a redesign that gates more strictly (date-stamped
-        # claims required, higher similarity threshold, or a different
-        # detection approach altogether).
+        result: dict = {}
 
-        # 3. Events → projects — materializes project pages for
-        #    dangling slugs + recurring event themes.
-        etp_result = await run_events_to_projects()
-        if isinstance(result, dict) and isinstance(etp_result, dict):
-            result["events_to_projects"] = etp_result
+        if chief_of_staff.is_enabled():
+            rc, stdout, stderr = await asyncio.get_running_loop().run_in_executor(
+                None, chief_of_staff.invoke_reflective_sync,
+            )
+            final_line = (stdout or "").strip().splitlines()[-1:]
+            result["cos_reflective"] = {
+                "rc": rc,
+                "summary": (final_line[0][:200] if final_line else ""),
+            }
+        else:
+            result["cos_reflective"] = {"rc": 0, "summary": "(cos disabled)"}
 
-        # 4. Goals reconcile — sweeps open waiting-fors against recent
-        #    events and closes the ones Flash decides were satisfied
-        #    (including indirectly). Compensates for integrate dropping
-        #    the close-satisfied-commitments step under load.
-        reconcile_result = await run_goals_reconcile()
-        if isinstance(result, dict) and isinstance(reconcile_result, dict):
-            result["goals_reconcile"] = reconcile_result
-
-        # 5. Chief-of-staff reflective pass — a genuine LLM pass that
-        #    asks "what would a proactive chief of staff be doing for
-        #    the user right now?" given the state just cleaned up by
-        #    steps 1-4. Clock-driven (not event-driven like the normal
-        #    cos cycle invocation), so it runs exactly once per slot.
-        #    Gracefully no-ops when cos is disabled.
-        try:
-            if chief_of_staff.is_enabled():
-                rc, stdout, stderr = await asyncio.get_running_loop().run_in_executor(
-                    None, chief_of_staff.invoke_reflective_sync,
-                )
-                if isinstance(result, dict):
-                    final_line = (stdout or "").strip().splitlines()[-1:]
-                    result["cos_reflective"] = {
-                        "rc": rc,
-                        "summary": (final_line[0][:200] if final_line else ""),
-                    }
-        except Exception:
-            log.exception("reflect: cos reflective pass failed")
-
-        # 6. Audit trim — keep audit.jsonl bounded to ~7 days.
         try:
             from deja.audit import trim_older_than
             dropped = trim_older_than(days=7)
-            if isinstance(result, dict):
-                result["audit_trim"] = {"dropped": dropped}
+            result["audit_trim"] = {"dropped": dropped}
         except Exception:
             log.exception("reflect: audit trim failed")
 

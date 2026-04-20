@@ -360,15 +360,18 @@ A short structured snapshot of the cycle: one lead line, then bulleted threads (
 
 Clock-driven, three slots/day (default `02:00`, `11:00`, `18:00` local — configurable via `REFLECT_SLOT_HOURS`). Triggered by `should_run_reflection()` (`src/deja/reflection_scheduler.py:100`). Slot boundaries are missed-fire resistant: if the machine was asleep and the clock crosses a slot, the next wake triggers the pass once (not a catch-up stampede).
 
-`run_reflection()` pipeline in order:
+`run_reflection()` pipeline:
 
-1. **Dedup** (`dedup.py`) — QMD vector embeddings at similarity ≥0.82 on people/projects pages, Flash-Lite confirmation, merge canonical + delete duplicates.
-2. **Events→Projects** (`events_to_projects.py`) — cluster events with dangling project slugs or shared-person recurrence, Flash-Lite confirms, materialize a `projects/` stub.
-3. **Goals reconcile** (`goals_reconcile.py`) — sweep open waiting-fors against recent events, close satisfied ones (including indirect satisfaction).
-4. **Cos reflective pass** (`chief_of_staff.invoke_reflective_sync()`) — spawns a Claude subprocess with Deja MCP, asks "what proactive action now?"
-5. **Audit trim** — drop rows >7 days old.
+1. **QMD refresh** — `qmd update && qmd embed` so every candidate sweep cos runs sees the current wiki state.
+2. **Cos reflective pass** (`chief_of_staff.invoke_reflective_sync()`) — spawns a Claude subprocess with Deja MCP. Cos owns the decisions; four candidate-generator MCP tools prepare the work:
+   - `find_dedup_candidates` → `dedup.py:find_candidates()` (vector similarity ≥0.82 pairs).
+   - `find_orphan_event_clusters` → `events_to_projects.py:find_clusters()` (dangling-slug + vector clusters).
+   - `find_open_loops_with_evidence` → `open_loops.py:match_open_loops()` (open Tasks/Waiting-fors vs. recent events by keyword match).
+   - `find_contradictions` → `contradictions.py:find_contradiction_clusters()` (pairs in the 0.65..0.82 similarity window).
+   Cos reads full pages via `get_page`, verifies with `gmail_search` / `search_deja` / `recent_activity`, then writes via `update_wiki` / `complete_task` / `resolve_waiting_for` / `add_reminder` / `send_email_to_self`.
+3. **Audit trim** — drop rows >7 days old.
 
-The contradictions sweep (step 2 in earlier versions) is currently **disabled** — two days of audit data showed it stripped real facts as "contradictions". Re-enable only after redesign. See `reflection_scheduler.py:172`.
+The deterministic Flash-Lite confirm + apply steps were retired in favor of this model: cheaper tools do the high-volume prep; cos is the decision layer. See `chief_of_staff.REFLECTIVE_APPENDIX` for the slot/horizon playbook.
 
 ## 8. Chief of Staff (cos)
 

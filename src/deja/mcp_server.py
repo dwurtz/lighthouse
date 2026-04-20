@@ -503,6 +503,141 @@ def create_server() -> Server:
                     "required": ["type", "params", "reason"],
                 },
             ),
+            # -------- Reflect-phase candidate generators (read-only) --------
+            # These wrap the deterministic clustering / matching sweeps
+            # that used to be paired with Flash "confirm" steps. Cos
+            # now owns the decision: it calls these to find candidate
+            # work, verifies with other tools, and writes via
+            # update_wiki / complete_task / resolve_waiting_for /
+            # add_reminder.
+            types.Tool(
+                name="find_dedup_candidates",
+                description=(
+                    "Return people/project page pairs with high vector "
+                    "similarity that might be duplicates of the same "
+                    "entity. Pure candidate generation — you decide "
+                    "whether to merge. Typical flow: read each "
+                    "interesting pair's full body via get_page, verify "
+                    "with search_deja if ambiguous, then call update_wiki "
+                    "to write merged content to the canonical page and "
+                    "update_wiki with action='delete' to remove the "
+                    "duplicate."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "category": {
+                            "type": "string",
+                            "enum": ["people", "projects", "all"],
+                            "default": "all",
+                        },
+                        "threshold": {
+                            "type": "number",
+                            "description": "Cosine similarity floor (default 0.82).",
+                            "default": 0.82,
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Max pairs to return (default 20).",
+                            "default": 20,
+                        },
+                    },
+                },
+            ),
+            types.Tool(
+                name="find_orphan_event_clusters",
+                description=(
+                    "Return groups of events that look like they belong "
+                    "to a not-yet-existing project. Two sources: events "
+                    "voting for the same dangling project slug, and "
+                    "vector-similar events with a shared non-user "
+                    "person. Pure candidate generation — you decide "
+                    "whether to materialize a project page. Typical "
+                    "flow: read a few event bodies via get_page, then "
+                    "call update_wiki to create projects/<slug>.md with "
+                    "a seed narrative + ## Recent list linking members."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "min_size": {
+                            "type": "integer",
+                            "description": "Minimum cluster size for vector clusters (default 3).",
+                            "default": 3,
+                        },
+                        "sim_threshold": {
+                            "type": "number",
+                            "description": "Similarity floor for vector clustering (default 0.55).",
+                            "default": 0.55,
+                        },
+                    },
+                },
+            ),
+            types.Tool(
+                name="find_open_loops_with_evidence",
+                description=(
+                    "For each open task or waiting-for in goals.md, "
+                    "return recent events that keyword-match the item "
+                    "— i.e. potential closure evidence. Pure candidate "
+                    "generation — you decide whether the evidence "
+                    "actually closes the loop. Typical flow: read the "
+                    "full event body via get_page, cross-check with "
+                    "gmail_search or recent_activity if evidence is "
+                    "thin, then call complete_task / resolve_waiting_for "
+                    "with a concrete reason citing the event slug."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "days": {
+                            "type": "integer",
+                            "description": "Lookback window in days (default 2).",
+                            "default": 2,
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Max open-item candidates to return (default 20).",
+                            "default": 20,
+                        },
+                    },
+                },
+            ),
+            types.Tool(
+                name="find_contradictions",
+                description=(
+                    "Return clusters of wiki pages whose similarity is "
+                    "in the contradiction window (below dedup's merge "
+                    "threshold but similar enough to plausibly talk "
+                    "about the same subject). Pure candidate generation "
+                    "— you decide whether any two pages in a cluster "
+                    "actually contradict. Typical flow: read full page "
+                    "bodies via get_page, compare the claims, then "
+                    "either silently fix the stale page via update_wiki, "
+                    "log the ambiguity in goals.md via update_wiki, or "
+                    "escalate via execute_action('send_email_to_self', "
+                    "...) if resolution is blocking."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "sim_min": {
+                            "type": "number",
+                            "description": "Lower bound of similarity window (default 0.65).",
+                            "default": 0.65,
+                        },
+                        "sim_max": {
+                            "type": "number",
+                            "description": "Upper bound (exclusive) of similarity window (default 0.82).",
+                            "default": 0.82,
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Max clusters to return (default 20).",
+                            "default": 20,
+                        },
+                    },
+                },
+            ),
             # -------- Direct Google API access (read-only) ---------
             # These bypass Deja's observation pipeline and hit the
             # user's Google Workspace directly via the OAuth token
@@ -1623,6 +1758,160 @@ def _gmail_get_message(message_id: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Reflect-phase candidate generators (read-only)
+# ---------------------------------------------------------------------------
+
+
+def _find_dedup_candidates(
+    category: str = "all",
+    threshold: float = 0.82,
+    limit: int = 20,
+) -> str:
+    """Return people/project page pairs above the similarity threshold.
+
+    Each pair includes a compact snippet for both pages so cos can
+    decide whether a full ``get_page`` read is worth it. Pure read —
+    no LLM, no wiki writes.
+    """
+    from deja.dedup import find_candidates, load_page_snippet
+
+    cat = category if category in ("people", "projects", "all") else "all"
+    try:
+        pairs = find_candidates(threshold=threshold, category=cat)
+    except RuntimeError as e:
+        return f"(find_dedup_candidates unavailable: {e})"
+    if not pairs:
+        return (
+            f"(no dedup candidates at threshold {threshold:.2f} "
+            f"for category={cat})"
+        )
+
+    lines: list[str] = [
+        f"{min(len(pairs), limit)} dedup candidate pair(s) "
+        f"(threshold {threshold:.2f}, category={cat}):"
+    ]
+    for pair in pairs[:limit]:
+        title_a, _fm_a, body_a = load_page_snippet(pair.page_a, body_chars=300)
+        title_b, _fm_b, body_b = load_page_snippet(pair.page_b, body_chars=300)
+        lines.append(
+            f"- sim={pair.similarity:.3f} "
+            f"{pair.page_a} ({title_a}) vs {pair.page_b} ({title_b})\n"
+            f"    a: {body_a}\n"
+            f"    b: {body_b}"
+        )
+    return "\n".join(lines)
+
+
+def _find_orphan_event_clusters(
+    min_size: int = 3,
+    sim_threshold: float = 0.55,
+) -> str:
+    """Return candidate event clusters that may want a project page."""
+    from deja.events_to_projects import find_clusters
+
+    try:
+        clusters, events_indexed, dangling_count, vector_count = find_clusters(
+            min_size=min_size, sim_threshold=sim_threshold,
+        )
+    except RuntimeError as e:
+        return f"(find_orphan_event_clusters unavailable: {e})"
+
+    if not clusters:
+        return (
+            f"(no orphan event clusters — indexed {events_indexed} event(s), "
+            f"dangling={dangling_count}, vector={vector_count})"
+        )
+
+    lines: list[str] = [
+        f"{len(clusters)} orphan event cluster(s) "
+        f"(dangling={dangling_count}, vector={vector_count}, "
+        f"events_indexed={events_indexed}):"
+    ]
+    for c in clusters:
+        header = f"- {c.cluster_id} source={c.source} size={len(c.paths)}"
+        if c.suggested_slug:
+            header += f" suggested_slug={c.suggested_slug}"
+        if c.avg_similarity and c.source == "vector":
+            header += f" avg_sim={c.avg_similarity:.3f}"
+        if c.shared_people:
+            header += f" shared={','.join(c.shared_people)}"
+        lines.append(header)
+        for p in c.paths:
+            lines.append(f"    - {p.removesuffix('.md')}")
+    return "\n".join(lines)
+
+
+def _find_open_loops_with_evidence(
+    days: int = 2,
+    limit: int = 20,
+) -> str:
+    """Return open goals items paired with keyword-matching recent events."""
+    from deja.open_loops import match_open_loops
+
+    candidates = match_open_loops(days=days, limit=limit)
+    if not candidates:
+        return f"(no open loops with matching events in the last {days} day(s))"
+
+    lines: list[str] = [
+        f"{len(candidates)} open loop(s) with candidate evidence "
+        f"(last {days} day(s)):"
+    ]
+    for c in candidates:
+        lines.append(
+            f"- [{c.open_item.kind}] {c.open_item.text}\n"
+            f"    hints: {', '.join(c.reason_hints)}"
+        )
+        for ev in c.candidate_events:
+            people_str = f" people={','.join(ev.people)}" if ev.people else ""
+            projects_str = f" projects={','.join(ev.projects)}" if ev.projects else ""
+            lines.append(
+                f"    - {ev.path.removesuffix('.md')} ({ev.title})"
+                f"{people_str}{projects_str}"
+                f" matched={','.join(ev.matched_keywords)}"
+            )
+    return "\n".join(lines)
+
+
+def _find_contradictions(
+    sim_min: float = 0.65,
+    sim_max: float = 0.82,
+    limit: int = 20,
+) -> str:
+    """Return page clusters in the contradiction similarity window."""
+    from deja.contradictions import find_contradiction_clusters
+    from deja.dedup import load_page_snippet
+
+    try:
+        clusters = find_contradiction_clusters(
+            sim_min=sim_min, sim_max=sim_max,
+        )
+    except RuntimeError as e:
+        return f"(find_contradictions unavailable: {e})"
+
+    if not clusters:
+        return (
+            f"(no contradiction clusters in window "
+            f"{sim_min:.2f}..{sim_max:.2f})"
+        )
+
+    lines: list[str] = [
+        f"{min(len(clusters), limit)} contradiction cluster(s) "
+        f"(window {sim_min:.2f}..{sim_max:.2f}):"
+    ]
+    for i, c in enumerate(clusters[:limit], start=1):
+        lines.append(
+            f"- cluster {i} mean_sim={c.mean_similarity:.3f} "
+            f"size={len(c.page_ids)}"
+        )
+        for pid in c.page_ids:
+            title, _fm, body = load_page_snippet(pid, body_chars=280)
+            lines.append(f"    - {pid} ({title})")
+            if body:
+                lines.append(f"        {body}")
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
 # Tool dispatch
 # ---------------------------------------------------------------------------
 
@@ -1714,6 +2003,32 @@ def _dispatch(name: str, args: dict) -> str:
             action_type=args.get("type", ""),
             params=args.get("params") or {},
             reason=args.get("reason", ""),
+        )
+
+    if name == "find_dedup_candidates":
+        return _find_dedup_candidates(
+            category=args.get("category", "all"),
+            threshold=args.get("threshold", 0.82),
+            limit=args.get("limit", 20),
+        )
+
+    if name == "find_orphan_event_clusters":
+        return _find_orphan_event_clusters(
+            min_size=args.get("min_size", 3),
+            sim_threshold=args.get("sim_threshold", 0.55),
+        )
+
+    if name == "find_open_loops_with_evidence":
+        return _find_open_loops_with_evidence(
+            days=args.get("days", 2),
+            limit=args.get("limit", 20),
+        )
+
+    if name == "find_contradictions":
+        return _find_contradictions(
+            sim_min=args.get("sim_min", 0.65),
+            sim_max=args.get("sim_max", 0.82),
+            limit=args.get("limit", 20),
         )
 
     if name == "calendar_list_events":
