@@ -37,11 +37,13 @@ Deja is a **two-tier system**: a Swift menubar app hosts two Python subprocesses
             ▼    ▼      ▼                            │ command / mic
          OBSERVE INTEGRATE REFLECT                   │
           (3s)   (5min)    (3×/day)                  │
-            │    │      │                            │
+            │    │      │   deterministic prep       │
+            │    │      │   + cos reflective         │
             │    │      │    ┌────────────────┐      │
             │    │      │    │ chief of staff │◄─────┤ (command mode)
             │    │      └───►│     (cos)      │      │
-            │    └──────────►│  spawns fresh  │      │
+            │    └──────────►│  decision      │      │
+            │                │  layer: fresh  │      │
             │                │  claude CLI,   │      │
             │                │  MCP attached  │      │
             │                └───────┬────────┘      │
@@ -64,9 +66,13 @@ INTEGRATE (every 5min)
    ↓ reads new signals + retrieves wiki context → LLM → writes wiki pages,
    ↓ event pages, goal mutations; emits observation_narrative
 REFLECT (3×/day, 02/11/18 local)
-   ↓ housekeeping: entity dedup, event→project materialization,
-   ↓ goals reconcile, audit trim — plus a genuine LLM reflective pass
+   ↓ deterministic prep: vector-embedding refresh, candidate generation
+   ↓ (dedup pairs, orphan-event clusters, open-loop evidence,
+   ↓  contradiction pairs) — then a single cos reflective pass that
+   ↓ decides what to do about any of it
 ```
+
+**Cos is the decision layer.** Everything else — the signal tiering, the Flash preprocess, vector similarity, clustering, candidate generators — is cheap analyst work preparing material for cos. The integrate LLM still writes the wiki directly (it's an immediate classifier over a bounded signal batch), but reflect's old Flash-confirm sweeps are gone: cos itself now makes every judgment call in reflect, using its MCP tool surface to verify and, when necessary, asking the user via `send_email_to_self`.
 
 Plus two reactive layers on top:
 
@@ -360,21 +366,96 @@ A short structured snapshot of the cycle: one lead line, then bulleted threads (
 
 Clock-driven, three slots/day (default `02:00`, `11:00`, `18:00` local — configurable via `REFLECT_SLOT_HOURS`). Triggered by `should_run_reflection()` (`src/deja/reflection_scheduler.py:100`). Slot boundaries are missed-fire resistant: if the machine was asleep and the clock crosses a slot, the next wake triggers the pass once (not a catch-up stampede).
 
-`run_reflection()` pipeline in order:
+Reflect used to be a sequence of narrow Flash-Lite confirmation sweeps — dedup-confirm, events→projects proposal, goals reconcile, contradiction classification — each with its own prompt, its own JSON contract, and its own class of false positives. That's gone. The new shape is a thin deterministic prep step that produces *candidates*, and one cos invocation that decides what to do about them.
 
-1. **Dedup** (`dedup.py`) — QMD vector embeddings at similarity ≥0.82 on people/projects pages, Flash-Lite confirmation, merge canonical + delete duplicates.
-2. **Events→Projects** (`events_to_projects.py`) — cluster events with dangling project slugs or shared-person recurrence, Flash-Lite confirms, materialize a `projects/` stub.
-3. **Goals reconcile** (`goals_reconcile.py`) — sweep open waiting-fors against recent events, close satisfied ones (including indirect satisfaction).
-4. **Cos reflective pass** (`chief_of_staff.invoke_reflective_sync()`) — spawns a Claude subprocess with Deja MCP, asks "what proactive action now?"
-5. **Audit trim** — drop rows >7 days old.
+```
+  DETERMINISTIC PREP              COS REFLECTIVE                 WRITES
+┌──────────────────────┐        ┌──────────────────┐        ┌────────────────┐
+│ vector embeddings    │        │  claude -p       │        │ wiki merges /  │
+│ refresh (QMD)        │        │  (fresh subproc, │        │ updates        │
+│                      │        │   MCP attached)  │        │                │
+│ candidate generators │        │                  │        │ goals.md:      │
+│  - dedup pairs       │──────► │ calls the four   │──────► │  new tasks,    │
+│  - orphan event      │        │ find_* tools as  │        │  notes,        │
+│    clusters          │        │ needed, plus     │        │  contradictions│
+│  - open loops +      │        │ search_deja,     │        │                │
+│    evidence          │        │ gmail_search,    │        │ optional       │
+│  - contradiction     │        │ get_page,        │        │  [Deja] email  │
+│    pairs             │        │ recent_activity  │        │  (send_email_  │
+│                      │        │                  │        │   to_self)     │
+│ audit trim (>7d)     │        │ decides per      │        │                │
+│                      │        │ escalation rules │        │                │
+└──────────────────────┘        └──────────────────┘        └────────────────┘
+```
 
-The contradictions sweep (step 2 in earlier versions) is currently **disabled** — two days of audit data showed it stripped real facts as "contradictions". Re-enable only after redesign. See `reflection_scheduler.py:172`.
+### 7.1 Deterministic prep
+
+Cheap, pure, testable. Entry point `run_reflection()` in `src/deja/reflection.py`:
+
+1. **Refresh QMD vector embeddings** over people/projects/events pages — cos's candidate tools and `search_deja` both need fresh vectors.
+2. **Cache candidate inputs** that cos will most likely want this slot: recent activity window, list of open tasks/waiting-fors, slugs touched since the last reflect. These are precomputed so cos isn't paying latency on them inside its loop.
+3. **Audit trim** — drop `audit.jsonl` rows older than 7 days.
+
+No LLM calls in this phase. If cos never asks for a candidate set, the cost of prep is bounded by vector math over a few hundred pages.
+
+### 7.2 Cos reflective invocation
+
+A single `chief_of_staff.invoke_reflective_sync()` call. Cos reads its system prompt + REFLECTIVE_APPENDIX, sees the slot (02/11/18) and the horizon, and decides what to look into. It has four new MCP candidate-generator tools on top of its usual read/write surface:
+
+- `find_dedup_candidates(category, threshold, limit)` — people/project page pairs above a vector-similarity threshold. Cos reads both pages, checks `search_deja` for disambiguating context, decides whether they're the same entity, and if so calls `update_wiki` to merge.
+- `find_orphan_event_clusters(min_size, sim_threshold)` — clusters of events that look like they should have a parent project page. Cos decides whether to materialize a `projects/` page (via `update_wiki` create) or leave them as scattered events.
+- `find_open_loops_with_evidence(days, limit)` — open tasks and waiting-fors paired with recent events that might resolve them. Cos decides whether a loop is genuinely closed (call `complete_task` / `resolve_waiting_for`), still open, or needs the user's attention.
+- `find_contradictions(sim_min, sim_max, limit)` — page pairs in the mid-similarity window (close enough to be about the same thing, far enough apart to possibly disagree on a fact). Cos reads both sides and decides what to do with each pair per §7.3. This replaces the disabled Flash contradictions sweep, which produced too many false positives stripping real facts.
+
+Because cos is the one deciding, verification is no longer a rigid prompt contract — cos can call `gmail_search`, `search_deja`, `get_page`, `recent_activity`, `calendar_list_events` to gather evidence before it commits to a call. That's the whole point of the refactor: judgment moves from a dozen narrow Flash calls to one capable agent with tools.
+
+### 7.3 Escalation pattern for contradictions
+
+When `find_contradictions` surfaces a pair, cos picks one of three dispositions:
+
+- **Resolvable via tools** → cos silently fixes via `update_wiki`. A contradicting fact that `gmail_search` or `calendar_list_events` can adjudicate doesn't need the user — cos just writes the correct version with a `reason` that names the evidence.
+- **Unresolvable but not blocking** → cos notes it in `goals.md` with both claims and the tool evidence it checked. Future cos cycles see the note and can revisit if new signals land.
+- **Blocking an open loop or critical fact** → cos asks the user via `send_email_to_self`. Just the question and the two claims, no padding. The user's reply routes back through the user_reply channel (§12) and cos resolves the write.
+
+This is the general pattern for any judgment call cos makes in reflect: fix silently if you can, write to goals if you can't but it's not urgent, email the user only when you genuinely need them.
+
+### 7.4 What's gone
+
+- `goals_reconcile.py` — cos handles this via `find_open_loops_with_evidence`. The dedicated Flash sweep is removed.
+- The Flash-confirm step inside `dedup.py` — cos reads the pages and decides. The candidate-pair generation logic remains as the backing store for `find_dedup_candidates`.
+- The Flash proposal step inside `events_to_projects.py` — same pattern: clustering stays as the analyst layer behind `find_orphan_event_clusters`, cos makes the materialization decision.
+- The disabled contradictions sweep — revived, but as a cos-driven tool rather than a standalone Flash classifier.
 
 ## 8. Chief of Staff (cos)
 
 Cos is Deja's reflex layer. It's Claude (via the `claude` CLI subprocess), fired on four trigger types, reading state via the Deja MCP, deciding whether to notify you, take action, or stay silent.
 
-### 8.1 Invocation modes
+### 8.1 Cos as decision layer
+
+The mental model for the whole system:
+
+```
+  ANALYSTS (cheap, high-volume,              COS (one capable
+     deterministic)                            agent with tools)
+┌───────────────────────────────────┐      ┌───────────────────┐
+│ tiering (T1/T2/T3)                │      │  Claude Opus      │
+│ Flash preprocess (screenshots)    │      │  via claude -p    │
+│ vector similarity (QMD)           │ ───► │                   │ ───►  writes
+│ clustering                        │      │  decides          │      + actions
+│ candidate generators (reflect)    │      │                   │
+│ Apple Vision OCR                  │      │  MCP tool surface:│
+│ BM25 retrieval                    │      │   read, write,    │
+└───────────────────────────────────┘      │   verify, escalate│
+                                           └───────────────────┘
+```
+
+Analysts are cheap and narrow. They're good at "here are 40 pairs of pages above 0.82 cosine similarity" or "this screenshot has 820 chars of OCR, condense or skip." They're terrible at "which of these pairs is actually the same person" — that's a judgment call involving disambiguation against tools, and it's exactly where Flash-confirm sweeps used to fail.
+
+Cos is the decision layer. It doesn't need to be cheap because it runs rarely (three reflect slots/day, plus substantive integrate cycles, plus user-initiated commands). It does need to be capable — Claude Opus with a full MCP tool surface, able to call `gmail_search` / `search_deja` / `calendar_list_events` to verify before it writes, and able to ask the user via `send_email_to_self` when it genuinely can't resolve something.
+
+Practical consequence: when you're tempted to add a narrow LLM sweep somewhere — "let's have Flash classify these events as X or Y" — the right move is almost always to (a) add a deterministic candidate generator and (b) expose it as an MCP tool so cos can decide. The integrate pipeline is the exception (it's immediate, bounded, and its prompt is load-bearing); reflect is explicitly designed around cos-makes-the-call.
+
+### 8.2 Invocation modes
 
 ```
                        ┌────────────────────────────────┐
@@ -416,7 +497,7 @@ Entry points in `src/deja/chief_of_staff.py`:
 
 All spawn `claude -p` with `--mcp-config` pointing at `~/.deja/chief_of_staff/mcp_config.json`, a 10-minute hard timeout, and the system prompt appended inline per mode. Command mode also preloads `recent_screens` — per-display OCR + AX frontmost-window metadata — so cos can ground pronouns like "this email" or "that person" when the user is verifiably at their screen.
 
-### 8.2 Decision tree (disposition)
+### 8.3 Decision tree (disposition)
 
 Every invocation picks one of:
 
@@ -429,7 +510,7 @@ Every invocation picks one of:
 
 The disposition is **filter, don't plan**. Goals.md is cos's scratchpad for things it's thinking about; cos reviews it every cycle and decides *when* to surface — considering time of day, day of week, whether the user is mid-coordination, natural batching opportunities. No fixed digest schedule; timing is a reasoning task.
 
-### 8.3 Cos reasons over time
+### 8.4 Cos reasons over time
 
 Cos is stateless per-invocation (each call is a fresh subprocess) but **stateful across time via its writes**:
 
@@ -439,7 +520,7 @@ Cos is stateless per-invocation (each call is a fresh subprocess) but **stateful
 
 So cos can plant a thought now and revisit it later. A future cos reads what a prior cos wrote. This is the mechanism for getting more useful over time.
 
-### 8.4 `~/.deja/chief_of_staff/` layout
+### 8.5 `~/.deja/chief_of_staff/` layout
 
 | File | Purpose |
 |---|---|
@@ -466,6 +547,10 @@ So cos can plant a thought now and revisit it later. A future cos reads what a p
 | `recent_activity(minutes)` | Observations from the last N minutes (keyword filterable). |
 | `calendar_list_events(time_min, time_max, ...)` | Direct Google Calendar API — authoritative ground truth. |
 | `gmail_search(query)` / `gmail_get_message(id)` | Gmail native query syntax + full message body. |
+| `find_dedup_candidates(category, threshold, limit)` | People/project page pairs above a vector-similarity threshold. Reflect candidate generator — cos decides the merge. |
+| `find_orphan_event_clusters(min_size, sim_threshold)` | Clusters of events that share people/projects and look like they want a parent project page. Reflect candidate generator — cos decides whether to materialize. |
+| `find_open_loops_with_evidence(days, limit)` | Open tasks + waiting-fors paired with recent events that might resolve them. Reflect candidate generator — cos decides whether the loop is closed. |
+| `find_contradictions(sim_min, sim_max, limit)` | Page pairs in the mid-similarity window that might disagree on a fact. Reflect candidate generator — cos resolves per the §7.3 escalation pattern. |
 
 ### 9.2 Write tools
 
