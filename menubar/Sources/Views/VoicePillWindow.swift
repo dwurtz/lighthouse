@@ -94,7 +94,7 @@ class VoicePillWindow: NSPanel {
         hostView.autoresizingMask = [.width, .height]
 
         let trackingOverlay = PillTrackingOverlay(monitor: monitor)
-        trackingOverlay.autoresizingMask = [.width]
+        trackingOverlay.autoresizingMask = []
 
         let container = NSView(frame: NSRect(origin: .zero, size: Self.expandedSize))
         container.autoresizesSubviews = true
@@ -208,16 +208,23 @@ class VoicePillWindow: NSPanel {
         }
     }
 
-    /// Pin the tracking overlay to the bottom ``height`` pts of the
-    /// window so pill clicks register even when the panel above is
-    /// visible. When expanded the panel handles its own hit testing.
+    /// Pin the tracking overlay to the visible pill region only — a
+    /// centered 120pt-wide by 40pt-tall rectangle at the bottom of
+    /// the window, sized to match Voquill's hover capsule. Previously
+    /// the overlay covered the entire 320×96 bottom stripe, which
+    /// caused accidental expansion whenever the cursor approached
+    /// the screen's bottom-center. When the panel is expanded above,
+    /// the panel handles its own hit testing — this overlay only
+    /// matters for the collapsed pill.
     private func updateTrackingFrame(overlay: NSView, height: CGFloat) {
         guard let content = contentView else { return }
+        let hitWidth: CGFloat = 120
+        let hitHeight: CGFloat = 40
         overlay.frame = NSRect(
-            x: 0,
+            x: (content.bounds.width - hitWidth) / 2,
             y: 0,
-            width: content.bounds.width,
-            height: height
+            width: hitWidth,
+            height: hitHeight
         )
     }
 
