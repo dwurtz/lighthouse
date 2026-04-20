@@ -126,8 +126,9 @@ struct SignalHealthPanel: View {
         guard let t = lastFetchedAt else { return "Last updated: —" }
         let delta = Int(max(0, Date().timeIntervalSince(t)))
         if delta < 2 { return "Last updated: just now" }
-        if delta < 60 { return "Last updated: \(delta) sec ago" }
-        return "Last updated: \(delta / 60) min ago"
+        if delta < 60 { return "Last updated: \(delta)s ago" }
+        let mins = delta / 60
+        return "Last updated: \(mins)m \(delta % 60)s ago"
     }
 
     private var awakeLabel: String {
@@ -236,20 +237,31 @@ struct SignalHealthPanel: View {
     }
 
     private func lastLabel(_ src: SignalHealthSource) -> String {
-        // "stable" when minutes_since_last_signal is nil or 0 for
-        // low-volume sources (calendar, tasks). Otherwise render the
-        // last_signal_at timestamp as a relative "X ago".
-        if let mins = src.minutes_since_last_signal, mins > 0 {
-            if let ts = src.last_signal_at, !ts.isEmpty {
-                return "last: " + formatTimestamp(ts, relative: true)
-            }
-            return "last: \(Int(mins))m ago"
-        }
+        // Healthy idle sources (status=ok but no recent signals) read as
+        // alarming if we just say "last: 35m ago" — users assume
+        // something is broken. Prefix "idle ·" when the source is OK
+        // and genuinely quiet, so the stale number reads as expected
+        // rather than as a failure. Stalled/error sources already have
+        // their own status chip; keep their labels crisp.
+        let ago: String
         if let ts = src.last_signal_at, !ts.isEmpty {
-            // minutes_since is nil/0 but we have a stamp → show relative
-            return "last: " + formatTimestamp(ts, relative: true)
+            ago = formatTimestamp(ts, relative: true)
+        } else if let mins = src.minutes_since_last_signal, mins > 0 {
+            ago = "\(Int(mins))m ago"
+        } else {
+            return "stable"
         }
-        return "stable"
+        switch src.status {
+        case "ok":
+            if let mins = src.minutes_since_last_signal, mins >= 2 {
+                return "idle · last signal \(ago)"
+            }
+            return "last: \(ago)"
+        case "stalled":
+            return "stalled · last signal \(ago)"
+        default:
+            return "last: \(ago)"
+        }
     }
 
     private func intervalTooltip(_ src: SignalHealthSource) -> String {
