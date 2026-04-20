@@ -649,6 +649,39 @@ def _esc(s) -> str:
     return _html.escape(str(s)) if s else ""
 
 
+def _time_ago(iso_ts: str | None) -> str:
+    """Render an ISO-8601 UTC timestamp as "Nm ago" / "Nh ago" / "Nd ago".
+
+    Admin rows used to display raw UTC which was hard to parse at a
+    glance. Everything in the DB is timezone-naive UTC; compare to
+    naive UTC now and render the delta.
+    """
+    if not iso_ts:
+        return "—"
+    from datetime import datetime, timezone as _tz
+    try:
+        s = str(iso_ts).replace("Z", "")
+        if "." in s:
+            s = s.split(".", 1)[0]
+        ts = datetime.fromisoformat(s)
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=_tz.utc)
+    except (ValueError, TypeError):
+        return str(iso_ts)[:19]
+    now = datetime.now(_tz.utc)
+    delta = now - ts
+    secs = int(delta.total_seconds())
+    if secs < 0:
+        return "just now"
+    if secs < 60:
+        return f"{secs}s ago"
+    if secs < 3600:
+        return f"{secs // 60}m ago"
+    if secs < 86400:
+        return f"{secs // 3600}h ago"
+    return f"{secs // 86400}d ago"
+
+
 # ---------------------------------------------------------------------------
 # Admin auth — email-allowlisted cookie session.
 #
@@ -829,15 +862,19 @@ async def admin_dashboard(deja_admin_session: str | None = Cookie(default=None))
     errors_html = ""
     for e in stats["recent_errors"]:
         props = _esc(e.get("properties", "{}"))
-        errors_html += f"<tr><td>{_esc(e['timestamp'][:19])}</td><td>{_esc(e['user_email']) or '—'}</td><td>{props}</td></tr>"
+        errors_html += (
+            f"<tr><td title=\"{_esc(e['timestamp'])}\">{_esc(_time_ago(e['timestamp']))}</td>"
+            f"<td>{_esc(e['user_email']) or '—'}</td><td>{props}</td></tr>"
+        )
 
     users_html = ""
     for u in stats["active_users"]:
         email = u["user_email"]
+        last = u["last_seen"]
         users_html += (
             f"<tr><td><a href=\"/admin/user?email={_esc(email)}\">{_esc(email)}</a></td>"
             f"<td>{u['event_count']}</td>"
-            f"<td>{_esc(u['last_seen'][:19])}</td></tr>"
+            f"<td title=\"{_esc(last)}\">{_esc(_time_ago(last))}</td></tr>"
         )
 
     return HTMLResponse(f"""<!DOCTYPE html>
@@ -900,7 +937,8 @@ async def admin_search(
     rows_html = ""
     for r in results:
         rows_html += (
-            f"<tr><td>{_esc(r['timestamp'][:19])}</td><td>{_esc(r['event'])}</td>"
+            f"<tr><td title=\"{_esc(r['timestamp'])}\">{_esc(_time_ago(r['timestamp']))}</td>"
+            f"<td>{_esc(r['event'])}</td>"
             f"<td>{_esc(r['user_email']) or '—'}</td><td>{_esc(r['request_id']) or '—'}</td>"
             f"<td><small>{_esc(r['properties'][:200])}</small></td></tr>"
         )
@@ -953,8 +991,10 @@ async def admin_user_detail(
     if not profile or not profile.get("total_events"):
         return HTMLResponse(f"<h1>No events for {_esc(email)}</h1>", status_code=404)
 
-    first_seen = profile.get("first_seen", "")[:19]
-    last_seen = profile.get("last_seen", "")[:19]
+    first_seen_raw = profile.get("first_seen", "")
+    last_seen_raw = profile.get("last_seen", "")
+    first_seen = _time_ago(first_seen_raw)
+    last_seen = _time_ago(last_seen_raw)
 
     breakdown_html = ""
     for row in detail["event_breakdown"]:
@@ -963,7 +1003,7 @@ async def admin_user_detail(
     timeline_html = ""
     for e in detail["recent_events"]:
         timeline_html += (
-            f"<tr><td>{_esc(e['timestamp'][:19])}</td>"
+            f"<tr><td title=\"{_esc(e['timestamp'])}\">{_esc(_time_ago(e['timestamp']))}</td>"
             f"<td>{_esc(e['event'])}</td>"
             f"<td>{_esc(e['request_id']) or '—'}</td>"
             f"<td><small>{_esc((e['properties'] or '')[:200])}</small></td></tr>"
@@ -1024,7 +1064,7 @@ async def admin_diagnostics_list(
     for r in rows:
         size_kb = int((r.get("size_bytes") or 0) / 1024)
         rows_html += (
-            f"<tr><td>{_esc(r['timestamp'][:19])}</td>"
+            f"<tr><td title=\"{_esc(r['timestamp'])}\">{_esc(_time_ago(r['timestamp']))}</td>"
             f"<td><a href=\"/admin/user?email={_esc(r['user_email'] or '')}\">{_esc(r['user_email']) or '—'}</a></td>"
             f"<td>{_esc(r.get('client_version'))}</td>"
             f"<td>{size_kb} KB</td>"
@@ -1074,7 +1114,7 @@ async def admin_diagnostic_detail(
 <div class="meta">
   User: <strong>{_esc(diag.get('user_email')) or '—'}</strong> ·
   Client: {_esc(diag.get('client_version'))} ·
-  Uploaded: {_esc(diag.get('timestamp', '')[:19])} ·
+  Uploaded: <span title="{_esc(diag.get('timestamp', ''))}">{_esc(_time_ago(diag.get('timestamp', '')))}</span> ·
   Size: {int((diag.get('size_bytes') or 0)/1024)} KB
 </div>
 {f'<p><strong>Note:</strong> {_esc(diag.get("note"))}</p>' if diag.get('note') else ''}
