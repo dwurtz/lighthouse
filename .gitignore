@@ -45,7 +45,13 @@ tests/fixtures/screenshots/baseline_descriptions/
 # Temp / runtime outputs that only make sense on one machine
 logs/
 *.log
+*.err
+*.out
 .claude/scheduled_tasks.lock
+.claude/worktrees/
+
+# Obsidian index — stays local when devs open docs/ in Obsidian
+docs/.obsidian/
 
 # Vector dedup experiment raw dumps (regenerate via tools/vector_dedup_candidates.py)
 docs/vector-dedup-candidates-*.json
