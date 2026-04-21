@@ -78,7 +78,7 @@ flowchart LR
     class Idx,R1,R2,R3 idx
 ```
 
-Three different consumers read `index.md` top-down within an attention budget. The ordering is not cosmetic — it directly decides what each downstream LLM sees first. If you touch a page, it jumps to the top, and the screenshot classifier sees it before older stuff. This is the cheapest and most effective recency signal in the system.
+Three different consumers read `index.md` top-down within an attention budget. The ordering is not cosmetic — it directly decides what each downstream LLM sees first. If you touch a page, it jumps to the top, and the next integrate cycle sees it before older stuff. This is the cheapest and most effective recency signal in the system.
 
 !!! tip "Don't 'normalize' this"
     If you read the code and think "I could sort `index.md` alphabetically," don't. The mtime ordering is load-bearing in three places.

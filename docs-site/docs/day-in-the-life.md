@@ -78,32 +78,27 @@ The only visible result on Alex's side is that when they open the Calendar app l
 
 Alex is walking to a meeting, holds Option, and says: "remind me to send the vendor's W-9 request after lunch."
 
-Voice capture runs in the Swift process. On release, the WAV is sent to the web backend:
+Voice capture runs in the Swift process. On release, the WAV is sent to the web backend and the polished transcript goes straight to cos:
 
 ```mermaid
 sequenceDiagram
     participant Swift as VoiceRecorder
     participant Web as /api/mic/stop
-    participant Proxy as LLM proxy
-    participant Classify as command classifier
-    participant Goals as goals.py
+    participant Whisper as Groq Whisper
+    participant Cos as cos · command mode
 
     Swift->>Web: POST WAV file
-    Web->>Proxy: Groq Whisper transcribe
-    Proxy-->>Web: "remind me to send the vendor's W-9 request after lunch"
-    Web->>Proxy: Groq llama polish (no-op here)
-    Web->>Classify: classify
-    Classify-->>Web: type=goal
-    Web->>Goals: apply_tasks_update add_tasks
-    Goals-->>Web: {ok: true, artifact: "goal_line:..."}
-    Web->>Swift: {echo: "...", badge: "✓", confirmation: "Added task"}
+    Web->>Whisper: transcribe + polish
+    Whisper-->>Web: "remind me to send the vendor's W-9 request after lunch"
+    Web->>Cos: invoke_command_sync(user_message, recent_screens)
+    Cos->>Cos: add_reminder to goals.md
+    Cos-->>Web: "Added: send vendor W-9 request after lunch."
+    Web->>Swift: {echo: "...", confirmation: cos's final message}
 ```
 
-The echo pill pops onto the screen for three seconds: `✓ remind me to send the vendor's W-9...` with an **undo** button visible for five.
+The echo pill pops onto the screen: `Added: send vendor W-9 request after lunch.` Cos wrote the reminder into `goals.md` in one tool call and replied in a single line — no separate classifier, no rule dispatch.
 
-Alex doesn't undo. The task is in `goals.md`.
-
-A minute later, walking into the conference room, Alex holds Option again and says: "what did Jane from the vendor say about pricing last week?" This classifies as `query`. The query handler synthesizes from the wiki (`people/jane-pm.md`, relevant events) + goals + recent activity and returns a short answer in the notch. No wiki write, no cos invocation — just a retrieval.
+A minute later, walking into the conference room, Alex holds Option again: "what did Jane from the vendor say about pricing last week?" Same path — cos receives the transcript, calls `search_deja` against the wiki, and replies in the pill with a one-line answer. No wiki write, no separate query handler — just cos reading its own substrate.
 
 ## 13:15 · notch chat for context
 
@@ -201,18 +196,18 @@ No notification, no email. Future reflect passes will see the note and — if re
 
 ## Late-night · integrate cycle with a screenshot
 
-At 23:45 Alex is on a news site. Screen focus change triggers a capture. Apple Vision OCR runs on-device. The OCR yields 620 characters — above the 400-char preprocess gate — so Gemini Flash-Lite is called to condense:
+At 23:45 Alex is on a news site reading a competitor's quarterly earnings post. Screen focus change triggers a capture. The PNG is written to the raw-image sidecar; Apple's Vision framework also saves an OCR text sidecar for debugging. The observation row lands in `observations.jsonl` tagged T3 (ambient browsing).
+
+Five minutes later, the integrate cycle fires. Claude Opus reads the PNG directly — sees the page layout, the headlines, the quoted ARR and growth numbers — and decides this is worth a minimal event page:
 
 ```text
-TYPE: news article
-WHAT: quarterly results of a competing company, pricing and headcount
-SALIENT_FACTS:
-- competitor grew customer count 40% YoY
-- average contract size up 12%
-- ARR at ~$180M
+events/2026-04-19/competitor-q1-earnings.md
+  - competitor grew customer count 40% YoY
+  - average contract size up 12%
+  - ARR ~$180M
 ```
 
-That condensed block goes to `observations.jsonl` tagged T3 (ambient browsing). Next integrate cycle, the LLM sees it. There's nothing in the wiki that this attaches to cleanly, so integrate creates a minimal event page under `events/2026-04-19/competitor-q1-earnings.md` and leaves it at that.
+Nothing in the wiki attaches cleanly, so integrate leaves it at a standalone event with a topic tag.
 
 Cos isn't fired; the cycle wasn't substantive enough. But the event page is now findable via `search_deja` the next time Alex asks "how are our competitors doing?" at the notch chat.
 

@@ -53,7 +53,7 @@ A few details that matter in practice:
 
 - **Cadences vary.** iMessage and clipboard are checked every cycle. Email, calendar and drive are every 6 seconds. Browser is every 9 seconds. Screenshots are event-driven — app focus change, typing pause, window change, or a 60-second passive floor.
 - **Thread context is reconstructed.** For iMessage and WhatsApp, the last 30 messages in the thread get attached to each new observation so downstream LLMs can understand "ok" without guessing.
-- **Screenshots get a two-stage pretreatment.** On-device Apple Vision OCR runs first (fast, private). If there's enough text, Gemini Flash-Lite condenses it into a compact "TYPE / WHAT / SALIENT_FACTS" block. If the screen is useless noise, the preprocess step returns `None` and the frame is dropped before it reaches integrate. See [signal sources](signals.md#screenshots) for details.
+- **Screenshots go to integrate as raw pixels, not OCR text.** Integrate sends each screenshot's PNG directly to Claude Opus via the Anthropic multimodal API. Claude reads the pixels — window layout, focused-vs-inbox-preview distinction, calendar-cell grid position, bold/gray emphasis — without losing signal to an OCR intermediate. Apple's Vision framework still runs on every capture and writes the recognized text to `~/.deja/raw_ocr/<id>.txt` as a debugging sidecar, but the PNG is what integrate sees. See [signal sources](signals.md#screenshots) for details.
 
 ### Tiering
 
@@ -103,7 +103,7 @@ What integrate does, step by step:
 7. **Parse + apply** the JSON output: wiki writes, goal actions, task mutations.
 8. **Fire cos** if the cycle was substantive (not just "user typed three letters").
 
-The integrate LLM currently runs two ways — a production path on Claude Opus with multimodal screenshot inputs, and a shadow path on Gemini Flash for ongoing A/B evaluation. You pick via a config flag.
+The integrate LLM is Claude Opus with multimodal screenshot inputs, invoked via the `claude` CLI so the whole backend runs on the user's Pro/Max subscription — no separate API key.
 
 ### What the LLM emits
 

@@ -1,22 +1,21 @@
 # Chief of Staff
 
-Cos is Deja's decision layer. Everything else — the tiering, the screenshot preprocess, the vector similarity, the candidate generators — is cheap analyst work preparing material for cos.
+Cos is Deja's decision layer. Everything else — the tiering, the vector similarity, the clustering, the candidate generators — is cheap analyst work preparing material for cos.
 
 ```mermaid
 flowchart TB
     subgraph Analysts["Analysts — cheap, deterministic, high-volume"]
         T["Tiering (T1/T2/T3)"]
-        P["Flash preprocess<br/>(screenshots)"]
         V["Vector similarity (QMD)"]
         CL[Clustering]
         CG["Candidate generators<br/>(find_dedup, find_contradictions, ...)"]
-        OC["Apple Vision OCR"]
+        OC["Apple Vision OCR<br/>(sidecar for debugging)"]
         BM[BM25 retrieval]
     end
 
     subgraph Cos["Cos — one capable agent with tools"]
         direction TB
-        CA["Claude Opus<br/>via claude -p"]
+        CA["Claude Opus<br/>via claude -p (CLI)"]
         MCP["MCP tool surface:<br/>read · verify · write · escalate"]
         CA --- MCP
     end
@@ -34,7 +33,7 @@ flowchart TB
     classDef an fill:#1a365d,stroke:#2c5282,color:#f7fafc
     classDef cos fill:#744210,stroke:#975a16,color:#fefcbf
     classDef out fill:#22543d,stroke:#2f855a,color:#f7fafc
-    class Analysts,T,P,V,CL,CG,OC,BM an
+    class Analysts,T,V,CL,CG,OC,BM an
     class Cos,CA,MCP cos
     class Outputs,W,G,E,A out
 ```

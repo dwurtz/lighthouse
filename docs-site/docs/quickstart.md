@@ -14,12 +14,11 @@ Deja ships as a signed macOS app (Sparkle auto-updates) and as a Python backend 
 ```mermaid
 flowchart LR
     A[Google OAuth] --> B[TCC grants]
-    B --> C[Optional: vision model]
-    C --> D[30-day backfill]
-    D --> E[First monitor cycle]
+    B --> C[30-day backfill]
+    C --> D[First monitor cycle]
 
     classDef step fill:#1a365d,stroke:#2c5282,color:#f7fafc
-    class A,B,C,D,E step
+    class A,B,C,D step
 ```
 
 ### Google OAuth
@@ -36,10 +35,6 @@ macOS will prompt for four permissions. Each opens System Settings → Privacy &
 | **Screen Recording** | Capture screenshots for the vision path |
 | **Accessibility** | Read focused-app metadata for context |
 | **Microphone** | Push-to-talk voice commands |
-
-### Optional: local vision model
-
-If the build includes on-device vision, the setup panel will prompt to download FastVLM 0.5B (~2 GB). Optional — you can skip and always re-run later from the notch panel settings.
 
 ### 30-day backfill
 

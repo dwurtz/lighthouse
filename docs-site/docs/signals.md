@@ -91,58 +91,44 @@ A typing-pause detector on focused text fields. When you stop typing for about 2
 
 ## Screenshots {: #screenshots }
 
-The only source with serious post-processing. Two stages, both designed to avoid noise in the wiki.
+The only source with serious post-processing. Today, integrate reads the raw pixels directly.
 
 ```mermaid
 flowchart LR
-    subgraph Stage1["Stage 1 · On-device (local, free)"]
+    subgraph Capture["On-device capture (local, free)"]
         Cap[ScreenCaptureScheduler<br/>event-driven]
-        OCR[Apple Vision OCR<br/>~1.5s]
-        Sidecar[Raw PNG sidecar<br/>for vision path]
+        PNG[Raw PNG sidecar<br/>~/.deja/raw_images/]
+        OCR[Apple Vision OCR<br/>sidecar ~/.deja/raw_ocr/]
     end
 
-    subgraph Gate
-        G{"OCR ≥ 400 chars?"}
+    subgraph Integrate["Integrate (5-min cycle)"]
+        Claude[Claude Opus Vision<br/>reads PNG pixels directly]
     end
 
-    subgraph Stage2["Stage 2 · Cloud preprocess"]
-        FL[Gemini Flash-Lite<br/>condense or SKIP]
-    end
-
+    Cap --> PNG
     Cap --> OCR
-    OCR --> Sidecar
-    OCR --> G
-    G -->|yes| FL
-    G -->|no| Raw[raw text<br/>→ observations.jsonl]
-    FL -->|useful| Cond["TYPE / WHAT / SALIENT_FACTS<br/>→ observations.jsonl"]
-    FL -->|noise| Drop[drop this frame]
+    PNG --> Claude
+    OCR -.-> Debug[debugging / shadow eval<br/>not the primary path]
 
-    classDef stage1 fill:#1a365d,stroke:#2c5282,color:#f7fafc
-    classDef stage2 fill:#744210,stroke:#975a16,color:#fefcbf
-    classDef gate fill:#22543d,stroke:#2f855a,color:#f7fafc
-    classDef out fill:#22543d,stroke:#2f855a,color:#f7fafc
-    class Stage1,Cap,OCR,Sidecar stage1
-    class Stage2,FL stage2
-    class Gate,G gate
-    class Raw,Cond,Drop out
+    classDef local fill:#1a365d,stroke:#2c5282,color:#f7fafc
+    classDef primary fill:#22543d,stroke:#2f855a,color:#f7fafc
+    classDef aside fill:#3d3d3d,stroke:#555,color:#ccc
+    class Capture,Cap,PNG,OCR local
+    class Integrate,Claude primary
+    class Debug aside
 ```
 
 ### Capture is event-driven
 
 The old captor ran on a fixed 6-second timer and caught about **14,000 frames a day**. Most were redundant. The new scheduler is event-driven: app focus change, typing pause (≥2s), accessibility window-change notification, or a 60-second passive floor. Result: about **1,000 frames a day**, each marking an actual state transition.
 
-### OCR first, always
+### Pixels go to Claude, not text
 
-Apple Vision OCR runs on every capture — fast, on-device, free. The text is saved to `~/.deja/raw_ocr/<date>/<id>.txt` before any further processing. The raw PNG is saved to `~/.deja/raw_images/<date>/<id>.png` so the Claude Vision path (which reads pixels, not OCR text) has the original.
+`INTEGRATE_MODE=claude_vision` is the production integrate path. For each screenshot in a cycle's batch, the raw PNG is base64-embedded as an `image` content block in a `claude -p --input-format stream-json` call. Claude Opus reads the pixels directly — focused-vs-inbox-preview distinction, calendar grid cells, bold/gray emphasis, layout — none of which survive an OCR intermediate. The PNGs are anchored with timestamp + display-label captions so Claude can reason about sequence ("frame 3 was 2s after frame 2" vs "4 minutes later").
 
-### Preprocess gates integrate's input
+### OCR still runs — but as a sidecar
 
-If OCR yields fewer than 400 characters, the frame goes straight to integrate — probably not a lot of content to summarize. If it's above 400 characters, Gemini Flash-Lite is asked to do one of two things:
-
-1. Return a compact `TYPE / WHAT / SALIENT_FACTS` block (tells integrate what to care about).
-2. Return `None` — signaling "this is noise, skip it entirely."
-
-Skipped frames don't go to `observations.jsonl`. This is the single highest-leverage noise filter in the whole pipeline.
+Apple's Vision framework still OCRs every screenshot on-device in ~1.5s and saves the text to `~/.deja/raw_ocr/<date>/<id>.txt`. It's kept as a debugging aid — when an integrate decision looks wrong, the OCR sidecar tells you what text was actually on screen. Nothing downstream of the observation record reads the OCR sidecar in the production path — the raw PNG is what integrate sees.
 
 ## Voice
 
@@ -151,44 +137,38 @@ Push-to-talk via holding the Option (⌥) key. Capture happens in the Swift proc
 1. Groq Whisper transcribes via the LLM proxy.
 2. Groq `llama-3.1-8b-instant` polishes — strips fillers, fixes spoken symbols ("comma" → `,`), preserves word choice.
 3. Hard-coded filter drops known Whisper hallucinations on near-silent audio ("you", "thanks", "bye").
-4. The polished transcript goes to cos's command classifier (see below).
+4. The polished transcript goes straight to cos in command mode (see below).
 
-You can also type into the notch panel — same pipeline from the classifier onward.
+You can also type into the notch panel — same pipeline, same destination.
 
 ## Voice and chat — how commands are routed
 
-Voice and chat go through a single Flash-Lite classifier that picks one of five types:
+Both go straight to cos in `command` mode. No intermediate classifier, no rule table — cos reads the utterance and decides what to do, with access to its full MCP tool surface plus a preloaded snapshot of whatever is currently on each display (`recent_screens` — freshness-gated at 5 min, per-display OCR + frontmost window metadata, so cos can resolve "that thing" or "this email" without a tool call).
 
 ```mermaid
-flowchart TB
-    Input["Voice transcript<br/>or notch chat text"] --> Classify[Flash-Lite classifier]
+flowchart LR
+    Voice["Voice transcript<br/>(Groq Whisper + polish)"] --> Cos[cos · command mode]
+    Chat["Notch chat text"] --> Cos
+    Screens["recent_screens<br/>per-display OCR + AX"] -.preloaded.-> Cos
 
-    Classify -->|action| A["dispatch to<br/>goal_actions executor"]
-    Classify -->|goal| G["apply_tasks_update<br/>(goals.md)"]
-    Classify -->|automation| Auto["append to<br/>goals.md Automations"]
-    Classify -->|context| Ctx["append to observations.jsonl<br/>+ fire integrate"]
-    Classify -->|query| Q["synthesize answer<br/>from wiki + goals + activity"]
+    Cos -->|unambiguous action| A["execute_action<br/>(calendar_create,<br/>draft_email, etc.)"]
+    Cos -->|fact/preference| W["update_wiki"]
+    Cos -->|open loop| R["add_reminder / add_task /<br/>add_waiting_for"]
+    Cos -->|question| Q["search_deja + answer<br/>in the pill"]
+    Cos -->|ambiguous| Clarify[ask for clarification]
 
     classDef in fill:#1a365d,stroke:#2c5282,color:#f7fafc
-    classDef cl fill:#744210,stroke:#975a16,color:#fefcbf
-    classDef dis fill:#22543d,stroke:#2f855a,color:#f7fafc
-    class Input in
-    class Classify cl
-    class A,G,Auto,Ctx,Q dis
+    classDef cos fill:#744210,stroke:#975a16,color:#fefcbf
+    classDef out fill:#22543d,stroke:#2f855a,color:#f7fafc
+    class Voice,Chat,Screens in
+    class Cos cos
+    class A,W,R,Q,Clarify out
 ```
 
-| Type | Example | Dispatched to |
-| ---- | ------- | ------------- |
-| `action` | "put dentist on my calendar tomorrow 3pm" | goal_actions executor |
-| `goal` | "remind me to reply to Jane" | apply_tasks_update in goals.md |
-| `automation` | "when <co-parent> emails about pickup, auto-draft a reply" | appended to goals.md ## Automations |
-| `context` | "note that the coach said the team plays at 11am next Saturday" | appended to observations.jsonl + integrate fires |
-| `query` | "what did Jane say about the casita quote?" | synthesized answer from wiki + goals + activity |
-
-On response, a brief echo pill shows at the top of the screen: the transcript with a badge emoji by classification type, a one-line confirmation, and — for reversible actions — an **undo button** active for 5 seconds.
+Cos's final message is what shows in the notch pill — 1-3 lines, phone-readable, no preamble. Example replies: `Added: Dentist, Fri 3-3:30pm.` / `Noted on miles-gymnastics.md — safe-sport rule added.` / `Jane (Apr 16): quote coming next week; status looks fine.`
 
 ## Why all of this is worth the code
 
-Having many sources lets Deja stay quiet in a different way: it can **cross-reference**. A calendar event on Friday + an iMessage on Thursday + a Gmail thread on Wednesday might be three pieces of the same project. Flash-Lite won't notice; cos, with the wiki as substrate and MCP as its hands, often will.
+Having many sources lets Deja stay quiet in a different way: it can **cross-reference**. A calendar event on Friday + an iMessage on Thursday + a Gmail thread on Wednesday might be three pieces of the same project. A narrow classifier won't notice; cos, with the wiki as substrate and MCP as its hands, often will.
 
 The whole thing only works because of the shared observations log and the wiki. Every source is just another small feeder into the substrate described in [the wiki](wiki.md).
