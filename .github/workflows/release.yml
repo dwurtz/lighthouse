@@ -66,7 +66,7 @@ jobs:
           path: Deja.dmg
 
       - name: Sign DMG for Sparkle and update appcast
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') && env.SPARKLE_KEY != ''
         env:
           SPARKLE_KEY: ${{ secrets.SPARKLE_ED25519_KEY }}
         run: |
@@ -111,7 +111,9 @@ jobs:
           cat site/appcast.xml
 
       - name: Commit updated appcast
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') && env.SPARKLE_KEY != ''
+        env:
+          SPARKLE_KEY: ${{ secrets.SPARKLE_ED25519_KEY }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
