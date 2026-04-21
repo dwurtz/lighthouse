@@ -62,3 +62,7 @@ Deja.dmg
 !site/Deja.dmg
 client_secret.json
 openai_key
+
+# docs-site build output (teaching site — mkdocs generated HTML)
+docs-site/site/
+docs-site/venv/
