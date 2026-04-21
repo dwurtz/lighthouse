@@ -82,22 +82,26 @@ jobs:
           # Sign the DMG with Ed25519
           SIGNATURE=$(echo "$SPARKLE_KEY" | sparkle-tools/bin/sign_update Deja.dmg)
 
-          # Build the new appcast entry
+          # Build the new appcast entry (heredoc body must stay
+          # indented inside the YAML run block; shell strips the
+          # leading whitespace via <<- once a tab is used. Simpler:
+          # keep uniform indentation and live with the whitespace in
+          # the emitted XML — sed picks it up fine.)
           ENTRY=$(cat <<APPCAST_EOF
-      <item>
-        <title>Version ${VERSION}</title>
-        <sparkle:version>${VERSION}</sparkle:version>
-        <sparkle:shortVersionString>${VERSION}</sparkle:shortVersionString>
-        <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-        <pubDate>${PUB_DATE}</pubDate>
-        <enclosure
-          url="${DOWNLOAD_URL}"
-          type="application/x-apple-diskimage"
-          ${SIGNATURE}
-          length="${FILE_SIZE}"
-        />
-      </item>
-    APPCAST_EOF
+          <item>
+            <title>Version ${VERSION}</title>
+            <sparkle:version>${VERSION}</sparkle:version>
+            <sparkle:shortVersionString>${VERSION}</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <pubDate>${PUB_DATE}</pubDate>
+            <enclosure
+              url="${DOWNLOAD_URL}"
+              type="application/x-apple-diskimage"
+              ${SIGNATURE}
+              length="${FILE_SIZE}"
+            />
+          </item>
+          APPCAST_EOF
           )
 
           # Insert the new entry into appcast.xml (before closing </channel>)
