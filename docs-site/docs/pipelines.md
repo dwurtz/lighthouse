@@ -2,19 +2,16 @@
 
 Deja's monitor process runs three loops on three different cadences. They share the same storage substrate, so a signal picked up at 3 seconds becomes a wiki update at 5 minutes and a reflection candidate at sunset.
 
-```text
-OBSERVE ────────▶  every 3 seconds
-                   tail every source, dedupe, tier, persist
-                                │
-                                ▼
-INTEGRATE ──────▶  every 5 minutes
-                   read new signals + wiki context
-                   → LLM → wiki writes + events + tasks + narrative
-                                │
-                                ▼
-REFLECT ────────▶  3× per day (02:00 · 11:00 · 18:00 local)
-                   deterministic prep
-                   → cos reflective pass → cleanup + escalation
+```mermaid
+flowchart TB
+    O["OBSERVE · every 3s<br/>tail every source · dedupe · tier · persist"]
+    I["INTEGRATE · every 5 min<br/>new signals + wiki context → LLM<br/>→ wiki writes + events + tasks + narrative"]
+    R["REFLECT · 3× per day (02:00 · 11:00 · 18:00)<br/>deterministic prep → cos reflective pass<br/>→ cleanup + escalation"]
+
+    O --> I --> R
+
+    classDef pipe fill:#1a365d,stroke:#2c5282,color:#f7fafc
+    class O,I,R pipe
 ```
 
 Each one is cheap on its own — the work compounds because they share the wiki.
