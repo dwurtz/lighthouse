@@ -150,6 +150,21 @@ body,
   border-radius: 4px;
   padding: 0.15em 0.4em;
   border: none;
+  /* Keep a single pill per identifier even when the line breaks
+     around it; and prevent mid-identifier breaks inside tables so
+     signatures like get_context(topic) stay readable. */
+  -webkit-box-decoration-break: clone;
+          box-decoration-break: clone;
+  white-space: nowrap;
+}
+
+/* In flowing prose, allow code to wrap across line breaks — but still
+   as one styled pill per segment (via box-decoration-break above).
+   Only in tables do we enforce single-line to avoid mid-identifier
+   visual splits. */
+.md-typeset p code,
+.md-typeset li code {
+  white-space: normal;
 }
 
 .md-typeset pre > code {
