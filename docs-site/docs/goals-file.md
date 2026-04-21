@@ -1,13 +1,13 @@
 # `goals.md` — the working ledger
 
-Everything cos does for you, it does against a single markdown file: `~/Deja/goals.md`. It's where your operating rules live, where cos plants things it's considering, and where both of you can push and pull at the same document without stepping on each other. If the wiki is the agent's long-term memory, `goals.md` is its working memory — the thing it consults every invocation and writes to more than any other file.
+Everything [cos](cos.md) does for you, it does against a single markdown file: `~/Deja/goals.md`. It's where your operating rules live, where cos plants things it's considering, and where both of you can push and pull at the same document without stepping on each other. If [the wiki](wiki.md) is the agent's long-term memory, `goals.md` is its working memory — the thing it consults every invocation and writes to more than any other file.
 
 !!! tip "If you only read one page to understand how cos behaves, it should be this one."
     The way cos picks what to notify you about, what to silently handle, and what to ignore is almost entirely shaped by what's in `goals.md`.
 
 ## The shape
 
-A single file, seven sections. Each section is edited by both you (in Obsidian) and cos (via MCP tools), though different sections lean more one way or the other.
+A single file, seven sections. Each section is edited by both you (in Obsidian) and cos (via [MCP tools](mcp.md)), though different sections lean more one way or the other.
 
 ```mermaid
 flowchart LR
@@ -22,15 +22,17 @@ flowchart LR
     end
 
     You[You in Obsidian] -->|edits anytime| GM
-    Cos[Cos via MCP] -->|add_task · add_reminder<br/>add_waiting_for · update_wiki<br/>complete_task · resolve_*<br/>archive_*| GM
+    Cos[cos via MCP] -->|add_task · add_reminder<br/>add_waiting_for · update_wiki<br/>complete_task · resolve_*<br/>archive_*| GM
     GM -->|read every cycle| Cos
 
-    classDef file fill:#744210,stroke:#975a16,color:#fefcbf
-    classDef person fill:#1a365d,stroke:#2c5282,color:#f7fafc
-    classDef agent fill:#22543d,stroke:#2f855a,color:#f7fafc
-    class GM,SC,AM,TA,WF,RM,AR,RC file
-    class You person
-    class Cos agent
+    classDef source  fill:#1a365d,stroke:#2c5282,color:#f7fafc
+    classDef wiki    fill:#22543d,stroke:#2f855a,color:#f7fafc
+    classDef process fill:#744210,stroke:#975a16,color:#fefcbf
+    classDef cos     fill:#975a16,stroke:#d69e2e,color:#fefcbf
+    classDef aside   fill:#3d3d3d,stroke:#555,color:#ccc
+    class GM,SC,AM,TA,WF,RM,AR,RC wiki
+    class You source
+    class Cos cos
 ```
 
 ## Standing context
@@ -46,13 +48,13 @@ Durable rules that shape every cos decision. These change rarely — weeks or mo
 - When a Tuesday conflict surfaces, the younger kid's activity wins.
 ```
 
-**Who writes:** primarily you. Cos can propose additions when it catches a recurring pattern across cycles (e.g., "user always replies to co-parent within an hour — propose adding a rule"), but it surfaces these as proposals rather than writing them silently.
+**Who writes:** primarily you. cos can propose additions when it catches a recurring pattern across cycles (e.g., "user always replies to co-parent within an hour — propose adding a rule"), but it surfaces these as proposals rather than writing them silently.
 
 **How cos uses it:** loaded into every invocation's system prompt. When cos decides "should I bother the user?" it checks standing context first — if your rules say "don't surface carpool changes before Sunday evening," cos honors that over its own "act now" instinct.
 
 ## Automations
 
-Trigger → action rules that cos executes on a cadence or signal.
+Trigger → action rules that cos executes on a cadence or [signal](signals.md).
 
 ```markdown
 ## Automations
@@ -71,7 +73,7 @@ Trigger → action rules that cos executes on a cadence or signal.
   the project page. Email only if genuinely urgent.
 ```
 
-**Who writes:** both. You can hand-write an automation in Obsidian and cos will respect it. Cos also proposes new automations when it notices itself doing the same reasoning across weeks — "every Sunday I pull the sports schedule and propose drivers" is the kind of pattern that gets promoted into a rule here with evidence cited in the audit trail.
+**Who writes:** both. You can hand-write an automation in Obsidian and cos will respect it. cos also proposes new automations when it notices itself doing the same reasoning across weeks — "every Sunday I pull the sports schedule and propose drivers" is the kind of pattern that gets promoted into a rule here with evidence cited in the audit trail.
 
 **How cos uses it:** scanned every reflective pass. Each automation is matched against the current horizon — "morning pass, is this a morning-slot automation?" — and fired when conditions line up.
 

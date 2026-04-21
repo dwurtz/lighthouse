@@ -17,8 +17,12 @@ flowchart LR
     B --> C[30-day backfill]
     C --> D[First monitor cycle]
 
-    classDef step fill:#1a365d,stroke:#2c5282,color:#f7fafc
-    class A,B,C,D step
+    classDef source  fill:#1a365d,stroke:#2c5282,color:#f7fafc
+    classDef wiki    fill:#22543d,stroke:#2f855a,color:#f7fafc
+    classDef process fill:#744210,stroke:#975a16,color:#fefcbf
+    classDef cos     fill:#975a16,stroke:#d69e2e,color:#fefcbf
+    classDef aside   fill:#3d3d3d,stroke:#555,color:#ccc
+    class A,B,C,D process
 ```
 
 ### Google OAuth
@@ -38,13 +42,13 @@ macOS will prompt for four permissions. Each opens System Settings → Privacy &
 
 ### 30-day backfill
 
-The final setup step runs `deja onboard --days 30` in a subprocess: ingests 30 days of sent email, iMessage, WhatsApp, calendar, and Meet transcripts to bootstrap the wiki. Takes 3–10 minutes depending on volume. You can close the setup panel and the backfill keeps running; the monitor will start the 3-second observe loop as soon as it's done.
+The final setup step runs `deja onboard --days 30` in a subprocess: ingests 30 days of sent email, iMessage, WhatsApp, calendar, and Meet transcripts to bootstrap [the wiki](wiki.md). Takes 3–10 minutes depending on volume. You can close the setup panel and the backfill keeps running; the monitor will start the 3-second [observe](pipelines.md#observe) loop as soon as it's done.
 
 ### First monitor cycle
 
-After setup completes, the Swift app spawns `deja monitor` (the observe/integrate/reflect loop) and `deja web` (the FastAPI backend on a Unix socket). The first integrate pass fires about 5 minutes later.
+After setup completes, the Swift app spawns `deja monitor` (the observe/[integrate](pipelines.md#integrate)/[reflect](pipelines.md#reflect) pipelines) and `deja web` (the FastAPI backend on a Unix socket). The first integrate call fires about 5 minutes later.
 
-The app lives in the menu bar — a notch-docked panel is available by clicking the icon. The notch shows a **Now** tab (most-recent observation narrative), a **Tasks** tab (from goals.md), and a chat input.
+The app lives in the menu bar — a notch-docked panel is available by clicking the icon. The notch shows a **Now** tab (most-recent observation narrative), a **Tasks** tab (from [`goals.md`](goals-file.md)), and a chat input.
 
 ## Install from source
 
@@ -84,13 +88,13 @@ The wiki is at `~/Deja/`. Open it in Obsidian to browse by hand. Everything is a
 
 ### Disabling things
 
-- `deja cos disable` — stops cos from firing. Observe + integrate continue.
+- `deja cos disable` — stops [cos](cos.md) from firing. Observe + integrate continue.
 - Edit `~/.deja/config.yaml` → set `screenshot_enabled: false` to pause screen capture.
 - Quit the app and `deja monitor` / `deja web` stop too (PID files in `~/.deja/`).
 
 ### Auto-registering with AI clients
 
-During setup, `mcp_install.py` detects installed AI clients and writes MCP configs into each:
+During setup, `mcp_install.py` detects installed AI clients and writes [MCP](mcp.md) configs into each:
 
 - Claude Desktop
 - Claude Code
@@ -99,6 +103,7 @@ During setup, `mcp_install.py` detects installed AI clients and writes MCP confi
 - VS Code (if detected)
 
 Each client gets a stdio entry that runs `python -m deja mcp` against Deja's wiki. From your normal coding / writing surface, you can ask Claude or Cursor "what did I tell Jane last week?" and get a real answer from your own wiki.
+
 
 ## Support
 

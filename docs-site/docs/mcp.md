@@ -1,8 +1,12 @@
 # MCP tool surface
 
-Cos doesn't hard-code knowledge of Deja's internals. It talks to the rest of the system through an MCP server — a stdio process that exposes a tool catalog.
+[cos](cos.md) doesn't hard-code knowledge of Deja's internals. It talks to the rest of the system through an MCP server — a stdio process that exposes a tool catalog. Every read cos does against [the wiki](wiki.md), every wiki write, every calendar insert, every goals.md mutation happens through a tool. There is no back door.
 
-The same MCP server is auto-configured during setup into whatever AI clients you have installed: Claude Desktop, Claude Code, Cursor, Windsurf, VS Code. So the tools cos uses from inside Deja are also available to you from your normal editor, against the same wiki.
+The surface has a particular shape, and the shape is load-bearing. Reads are separated from writes: read tools assemble context (briefings, searches, page pulls, Gmail and Calendar lookups, reflect candidate generators); write tools mutate state (wiki writes, goals.md loops, outbound actions). A typical cos turn is **verify, then write** — pull `daily_briefing`, search for the relevant page, confirm the signal via a ground-truth Gmail or Calendar call, and only then emit a single `update_wiki` or `execute_action`. That pattern is reinforced by the prompt and by the tool surface itself: cheap reads, deliberate writes.
+
+Every write tool logs a row to `audit.jsonl` with `trigger.kind=mcp`, so `deja trail` shows the call and the resulting mutation in one stream. You can watch cos think.
+
+The same MCP server is auto-configured during setup into whatever AI clients you have installed: Claude Desktop, [Claude CLI](cos.md), Cursor, Windsurf, VS Code. So the tools cos uses from inside Deja are also available to you from your normal editor, against the same wiki.
 
 ```mermaid
 flowchart LR
@@ -41,21 +45,21 @@ flowchart LR
     W --> AUD
     W --> GWS
 
-    classDef client fill:#1a365d,stroke:#2c5282,color:#f7fafc
-    classDef mcp fill:#744210,stroke:#975a16,color:#fefcbf
-    classDef ops fill:#22543d,stroke:#2f855a,color:#f7fafc
-    classDef sub fill:#22543d,stroke:#2f855a,color:#f7fafc
-    class Clients,Cos,CD,CC,CU,WS client
-    class MCP mcp
-    class Ops,R,W ops
-    class Substrate,WK,GL,AUD,OBS,GWS sub
+    classDef source  fill:#1a365d,stroke:#2c5282,color:#f7fafc
+    classDef wiki    fill:#22543d,stroke:#2f855a,color:#f7fafc
+    classDef process fill:#744210,stroke:#975a16,color:#fefcbf
+    classDef cos     fill:#975a16,stroke:#d69e2e,color:#fefcbf
+    classDef aside   fill:#3d3d3d,stroke:#555,color:#ccc
+    class Clients,CD,CC,CU,WS source
+    class Cos cos
+    class MCP process
+    class Ops,R,W process
+    class Substrate,WK,GL,AUD,OBS,GWS wiki
 ```
-
-Every write tool logs a row to `audit.jsonl` with `trigger.kind=mcp`, so `deja trail` shows the call and the resulting mutation in one stream.
 
 ## Read tools
 
-Cos uses these to assemble context before it writes anything.
+cos uses these to assemble context before it writes anything.
 
 ### Briefing and search
 
@@ -83,14 +87,14 @@ When the local observation log might be stale or incomplete, cos goes straight t
 
 These are the four tools added during the reflect refactor. They replaced a set of narrow LLM sweeps (dedup-confirm, contradictions classification, events-to-projects proposal, goals-reconcile) with deterministic candidate generation plus cos's judgment.
 
-| Tool | Returns | Cos decides |
+| Tool | Returns | cos decides |
 | ---- | ------- | ----------- |
 | `find_dedup_candidates(category, threshold, limit)` | Page pairs above a vector-similarity threshold | Whether they're the same entity; if so, merge via `update_wiki` |
 | `find_orphan_event_clusters(min_size, sim_threshold)` | Event clusters that share people/projects and look parent-less | Whether to materialize a projects/ page |
 | `find_open_loops_with_evidence(days, limit)` | Open tasks + waiting-fors paired with recent events that might resolve them | Whether the loop is closed, still open, or needs user attention |
 | `find_contradictions(sim_min, sim_max, limit)` | Page pairs in the mid-similarity window — close enough to be about the same thing, far enough to possibly disagree | Which disposition (silent-fix / note in goals / email user) per the [contradiction escalation pattern](pipelines.md#cos-decides-what-to-do) |
 
-Cos can also call `browser_ask` to query recent browsing when it's trying to ground a question.
+cos can also call `browser_ask` to query recent browsing when it's trying to ground a question.
 
 ## Write tools
 
@@ -103,6 +107,8 @@ update_wiki(action, category, slug, content, reason)
 One tool, four actions: `create`, `update`, `delete`, or the partial-merge variant used by dedup. Every write is a git commit. The `reason` parameter is load-bearing — it shows up in the commit message and in `audit.jsonl`, and cos learns to explain itself clearly because future cos cycles read those reasons.
 
 ### Goals and loops
+
+These mutate [`goals.md`](goals-file.md) — the working ledger.
 
 | Tool | Effect |
 | ---- | ------ |
@@ -142,7 +148,7 @@ Three things to notice:
 
 ## The MCP config cos uses
 
-Cos's MCP client config lives at `~/.deja/chief_of_staff/mcp_config.json`. It points at `python -m deja mcp` — the same entry point your other AI clients use.
+cos's MCP client config lives at `~/.deja/chief_of_staff/mcp_config.json`. It points at `python -m deja mcp` — the same entry point your other AI clients use.
 
 ```json
 {

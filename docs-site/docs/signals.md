@@ -29,13 +29,15 @@ flowchart LR
     Google --> Obs
     Browser --> Obs
 
-    classDef nm fill:#1a365d,stroke:#2c5282,color:#f7fafc
-    classDef gw fill:#744210,stroke:#975a16,color:#fefcbf
-    classDef obs fill:#22543d,stroke:#2f855a,color:#f7fafc
-    class Native,IM,WA,CL,SS,TY,VO nm
-    class Google,EM,CA,DR,TK,MT gw
-    class Browser,BR nm
-    class Obs obs
+    classDef source  fill:#1a365d,stroke:#2c5282,color:#f7fafc
+    classDef wiki    fill:#22543d,stroke:#2f855a,color:#f7fafc
+    classDef process fill:#744210,stroke:#975a16,color:#fefcbf
+    classDef cos     fill:#975a16,stroke:#d69e2e,color:#fefcbf
+    classDef aside   fill:#3d3d3d,stroke:#555,color:#ccc
+    class Native,IM,WA,CL,SS,TY,VO source
+    class Google,EM,CA,DR,TK,MT source
+    class Browser,BR source
+    class Obs wiki
 ```
 
 All sources share one output: append a row to `observations.jsonl`. All sources share the same tiering system (T1/T2/T3, see [pipelines](pipelines.md#tiering)). What differs is how each one finds new material.
@@ -47,8 +49,8 @@ Both read from local SQLite databases: `~/Library/Messages/chat.db` for iMessage
 - **Cadence**: every 3-second cycle.
 - **Dedupe**: per-message `id_key` (e.g. `chat<chat_id>-<message_rowid>`).
 - **Contact resolution**: phone numbers and Apple IDs are matched against the macOS Contacts database to resolve display names.
-- **Thread context**: when a new message lands, the formatter walks backward through `observations.jsonl` and attaches the last 30 messages in the same thread. That way the integrate LLM can understand a terse "ok" or "sounds good" without guessing.
-- **Self-addressed messages** are a first-class channel. If you message yourself with `[Deja]` in the text, it routes to cos as a user-reply (same path as email replies).
+- **Thread context**: when a new message lands, the formatter walks backward through `observations.jsonl` and attaches the last 30 messages in the same thread. That way the [integrate](pipelines.md#integrate) call can understand a terse "ok" or "sounds good" without guessing.
+- **Self-addressed messages** are a first-class channel. If you message yourself with `[Deja]` in the text, it routes to [cos](cos.md) as a user-reply (same path as email replies).
 
 Permissions required: Full Disk Access for the Deja app and its bundled Python binary (macOS doesn't let you read the Messages database without it).
 
@@ -68,7 +70,7 @@ Google Calendar via incremental sync tokens.
 
 - **Cadence**: every ~6 seconds.
 - Captures events created, modified, or deleted since the last sync.
-- Calendar is also readable live via MCP `calendar_list_events` — cos uses the API directly when it wants authoritative ground truth rather than the local observation log.
+- Calendar is also readable live via [MCP](mcp.md) `calendar_list_events` — cos uses the API directly when it wants authoritative ground truth rather than the local observation log.
 
 ## Drive and Tasks
 
@@ -110,11 +112,14 @@ flowchart LR
     PNG --> Claude
     OCR -.-> Debug[debugging / shadow eval<br/>not the primary path]
 
-    classDef local fill:#1a365d,stroke:#2c5282,color:#f7fafc
-    classDef primary fill:#22543d,stroke:#2f855a,color:#f7fafc
-    classDef aside fill:#3d3d3d,stroke:#555,color:#ccc
-    class Capture,Cap,PNG,OCR local
-    class Integrate,Claude primary
+    classDef source  fill:#1a365d,stroke:#2c5282,color:#f7fafc
+    classDef wiki    fill:#22543d,stroke:#2f855a,color:#f7fafc
+    classDef process fill:#744210,stroke:#975a16,color:#fefcbf
+    classDef cos     fill:#975a16,stroke:#d69e2e,color:#fefcbf
+    classDef aside   fill:#3d3d3d,stroke:#555,color:#ccc
+    class Capture,Cap,PNG source
+    class OCR aside
+    class Integrate,Claude process
     class Debug aside
 ```
 
@@ -157,15 +162,17 @@ flowchart LR
     Cos -->|question| Q["search_deja + answer<br/>in the pill"]
     Cos -->|ambiguous| Clarify[ask for clarification]
 
-    classDef in fill:#1a365d,stroke:#2c5282,color:#f7fafc
-    classDef cos fill:#744210,stroke:#975a16,color:#fefcbf
-    classDef out fill:#22543d,stroke:#2f855a,color:#f7fafc
-    class Voice,Chat,Screens in
+    classDef source  fill:#1a365d,stroke:#2c5282,color:#f7fafc
+    classDef wiki    fill:#22543d,stroke:#2f855a,color:#f7fafc
+    classDef process fill:#744210,stroke:#975a16,color:#fefcbf
+    classDef cos     fill:#975a16,stroke:#d69e2e,color:#fefcbf
+    classDef aside   fill:#3d3d3d,stroke:#555,color:#ccc
+    class Voice,Chat,Screens source
     class Cos cos
-    class A,W,R,Q,Clarify out
+    class A,W,R,Q,Clarify wiki
 ```
 
-Cos's final message is what shows in the notch pill — 1-3 lines, phone-readable, no preamble. Example replies: `Added: Dentist, Fri 3-3:30pm.` / `Noted on miles-gymnastics.md — safe-sport rule added.` / `Jane (Apr 16): quote coming next week; status looks fine.`
+cos's final message is what shows in the notch pill — 1-3 lines, phone-readable, no preamble. Example replies: `Added: Dentist, Fri 3-3:30pm.` / `Noted on gymnastics-team.md — safe-sport rule added.` / `Jane (Apr 16): quote coming next week; status looks fine.`
 
 ## Why all of this is worth the code
 

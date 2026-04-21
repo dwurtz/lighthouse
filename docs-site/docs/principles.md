@@ -4,7 +4,7 @@ Deja has three design commitments, plus half a dozen practical rules that fall o
 
 ## Local-first
 
-Raw signals and the wiki stay on your machine. LLM calls go out to a lightweight proxy; nothing else.
+Raw [signals](signals.md) and [the wiki](wiki.md) stay on your machine. LLM calls go out to a lightweight proxy; nothing else.
 
 That rules out a lot of otherwise reasonable designs:
 
@@ -24,14 +24,14 @@ Local-first is an **engineering constraint**, not a marketing slogan. It shapes 
 
 The worst thing Deja can do is tell you something confidently wrong while you're glancing at your phone.
 
-The second-worst thing is cry wolf. If cos sends three emails a day and two of them are irrelevant, you stop reading.
+The second-worst thing is cry wolf. If [cos](cos.md) sends three emails a day and two of them are irrelevant, you stop reading.
 
 So the system is built around a disciplined filter:
 
-- **Tiering drops noise before integrate.** T3-only message batches never reach the wiki.
+- **Tiering drops noise before [integrate](pipelines.md#integrate).** T3-only message batches never reach the wiki.
 - **Screenshot preprocess can return `None`.** A noisy frame is dropped entirely, not summarized into the wiki.
 - **Cos defaults to SILENT.** NOTIFY is reserved for three specific cases: action within 24h the user isn't handling; a fact the user believes is wrong or just changed; a live opportunity about to close.
-- **Cos writes to `goals.md` instead of emailing.** Non-urgent thoughts go to the scratchpad and future cos cycles decide when (or whether) to surface them.
+- **Cos writes to [`goals.md`](goals-file.md) instead of emailing.** Non-urgent thoughts go to the scratchpad and future cos cycles decide when (or whether) to surface them.
 - **Integrate's prompt bans speculative writes.** If there's no concrete new fact, don't rewrite the page.
 
 !!! quote "A day with no email from Deja is a healthy day."
@@ -65,7 +65,7 @@ Analysts do things like:
 
 They're bad at anything resembling judgment. If you use a cheap LLM for a judgment call — "is this page pair really the same person?" — you get false positives that damage the wiki. That's where earlier Flash-confirm sweeps failed.
 
-Cos does judgment. It runs rarely (a few dozen times a day), it has tools to verify before it writes, and it has an MCP surface to ask the user when it genuinely can't resolve something.
+Cos does judgment. It runs rarely (a few dozen times a day), it has tools to verify before it writes, and it has an [MCP](mcp.md) surface to ask the user when it genuinely can't resolve something.
 
 **Practical consequence:** when you're tempted to add a narrow LLM sweep, the right move is almost always:
 

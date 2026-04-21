@@ -105,5 +105,7 @@ nav:
       - A day in the life: day-in-the-life.md
   - Principles:
       - Design principles: principles.md
+  - Reference:
+      - Glossary: glossary.md
 
 copyright: Built for a small, trusted audience. Treat what you see here as an early technical preview.

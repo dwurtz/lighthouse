@@ -1,6 +1,6 @@
 # The three pipelines
 
-Deja's monitor process runs three loops on three different cadences. They share the same storage substrate, so a signal picked up at 3 seconds becomes a wiki update at 5 minutes and a reflection candidate at sunset.
+Deja's monitor process runs three pipelines on three different cadences. They share the same storage substrate, so a [signal](signals.md) picked up at 3 seconds becomes a wiki update at 5 minutes and a reflection candidate at sunset.
 
 ```mermaid
 flowchart TB
@@ -10,15 +10,20 @@ flowchart TB
 
     O --> I --> R
 
-    classDef pipe fill:#1a365d,stroke:#2c5282,color:#f7fafc
-    class O,I,R pipe
+    classDef source  fill:#1a365d,stroke:#2c5282,color:#f7fafc
+    classDef wiki    fill:#22543d,stroke:#2f855a,color:#f7fafc
+    classDef process fill:#744210,stroke:#975a16,color:#fefcbf
+    classDef cos     fill:#975a16,stroke:#d69e2e,color:#fefcbf
+    classDef aside   fill:#3d3d3d,stroke:#555,color:#ccc
+    class O,I,R process
 ```
 
-Each one is cheap on its own — the work compounds because they share the wiki.
+Each one is cheap on its own — the work compounds because they share [the wiki](wiki.md).
 
-## Observe — every 3 seconds
+## Observe — every 3 seconds {: #observe }
 
 The observe loop is a polite poller. Every three seconds it walks a list of sources and asks each "anything new since last time?" Nothing heavy happens here: no LLM calls in the common path, no decisions about meaning, just **detect, dedupe, tier, persist**.
+
 
 ```mermaid
 flowchart LR
@@ -40,17 +45,21 @@ flowchart LR
     Dedupe --> Tier["Tier T1 / T2 / T3"]
     Tier --> Persist["observations.jsonl<br/>(append-only)"]
 
-    classDef src fill:#1a365d,stroke:#2c5282,color:#f7fafc
-    classDef op fill:#22543d,stroke:#2f855a,color:#f7fafc
-    class Sources,M,W,E,S,C,D,B,CL,T,V src
-    class Collect,Dedupe,Tier,Persist op
+    classDef source  fill:#1a365d,stroke:#2c5282,color:#f7fafc
+    classDef wiki    fill:#22543d,stroke:#2f855a,color:#f7fafc
+    classDef process fill:#744210,stroke:#975a16,color:#fefcbf
+    classDef cos     fill:#975a16,stroke:#d69e2e,color:#fefcbf
+    classDef aside   fill:#3d3d3d,stroke:#555,color:#ccc
+    class Sources,M,W,E,S,C,D,B,CL,T,V source
+    class Collect,Dedupe,Tier process
+    class Persist wiki
 ```
 
 A few details that matter in practice:
 
 - **Cadences vary.** iMessage and clipboard are checked every cycle. Email, calendar and drive are every 6 seconds. Browser is every 9 seconds. Screenshots are event-driven — app focus change, typing pause, window change, or a 60-second passive floor.
 - **Thread context is reconstructed.** For iMessage and WhatsApp, the last 30 messages in the thread get attached to each new observation so downstream LLMs can understand "ok" without guessing.
-- **Screenshots go to integrate as raw pixels, not OCR text.** Integrate sends each screenshot's PNG directly to Claude Opus via the Anthropic multimodal API. Claude reads the pixels — window layout, focused-vs-inbox-preview distinction, calendar-cell grid position, bold/gray emphasis — without losing signal to an OCR intermediate. Apple's Vision framework still runs on every capture and writes the recognized text to `~/.deja/raw_ocr/<id>.txt` as a debugging sidecar, but the PNG is what integrate sees. See [signal sources](signals.md#screenshots) for details.
+- **Screenshots go to integrate as raw pixels, not OCR text.** The integrate phase sends each screenshot's PNG directly to Claude Opus via the Anthropic multimodal API. Claude reads the pixels — window layout, focused-vs-inbox-preview distinction, calendar-cell grid position, bold/gray emphasis — without losing signal to an OCR intermediate. Apple's Vision framework still runs on every capture and writes the recognized text to `~/.deja/raw_ocr/<id>.txt` as a debugging sidecar, but the PNG is what integrate sees. See [signal sources](signals.md#screenshots) for details.
 
 ### Tiering
 
@@ -66,16 +75,16 @@ Integrate always keeps T1 and T2. It drops T3-only message batches — that's wh
 
 The output of this whole pipeline is one append-only file: `~/.deja/observations.jsonl`. That file is the input to the next stage.
 
-## Integrate — every 5 minutes
+## Integrate — every 5 minutes {: #integrate }
 
-Integrate is where raw observations become durable wiki content. It fires on a timer — or immediately, when a voice command or notch chat writes `~/.deja/integrate_trigger.json`.
+The integrate phase is where raw observations become durable wiki content. It fires on a timer — or immediately, when a voice command or notch chat writes `~/.deja/integrate_trigger.json`.
 
 ```mermaid
 sequenceDiagram
     participant Loop as AnalysisCycle
     participant Obs as observations.jsonl
     participant Wiki as ~/Deja wiki
-    participant LLM as Integrate LLM
+    participant LLM as integrate call
     participant Cos as cos (cycle mode)
 
     Loop->>Obs: read from last offset
@@ -96,11 +105,11 @@ What integrate does, step by step:
 3. **Triage** via tier.
 4. **Rebuild `index.md`** — the wiki's top-level catalog. Fast, deterministic, 100–500 ms. The ordering (most-recently-touched first) is load-bearing: three different downstream readers truncate to it.
 5. **Retrieve wiki context.** Hybrid BM25 over entity tokens plus QMD vector search, always including `index.md`.
-6. **Call the integrate LLM** with: formatted signals, retrieved wiki slice, `goals.md`, current time, contacts summary.
+6. **Make the integrate call** with: formatted signals, retrieved wiki slice, [`goals.md`](goals-file.md), current time, contacts summary.
 7. **Parse + apply** the JSON output: wiki writes, goal actions, task mutations.
-8. **Fire cos** if the cycle was substantive (not just "user typed three letters").
+8. **Fire [cos](cos.md)** if the cycle was substantive (not just "user typed three letters").
 
-The integrate LLM is Claude Opus with multimodal screenshot inputs, invoked via the `claude` CLI so the whole backend runs on the user's Pro/Max subscription — no separate API key.
+The integrate call uses Claude Opus with multimodal screenshot inputs, invoked via `claude -p` so the whole backend runs on the user's Pro/Max subscription — no separate API key.
 
 ### What the LLM emits
 
@@ -127,7 +136,7 @@ A single JSON object, applied in order:
 
 The integrate prompt is ~200 lines of rules. The load-bearing ones include: only write what signals actually say, never promote OCR names to person pages without structured grounding (email / phone / chat label / existing back-reference), never overwrite prose without a concrete new fact, promote durable facts to the entity body.
 
-## Reflect — three times a day
+## Reflect — three times a day {: #reflect }
 
 Reflect is Deja's cleanup and reconciliation pass. It runs at 02:00, 11:00, and 18:00 local (configurable). Sleep-safe: if your machine was shut during a slot, the next wake runs the pass once, no stampede.
 
@@ -159,12 +168,14 @@ flowchart LR
     Prep --> CosPass
     CosPass --> Writes
 
-    classDef prep fill:#1a365d,stroke:#2c5282,color:#f7fafc
-    classDef cos fill:#744210,stroke:#975a16,color:#fefcbf
-    classDef wr fill:#22543d,stroke:#2f855a,color:#f7fafc
-    class Prep,V,C1,C2,C3,C4,A prep
+    classDef source  fill:#1a365d,stroke:#2c5282,color:#f7fafc
+    classDef wiki    fill:#22543d,stroke:#2f855a,color:#f7fafc
+    classDef process fill:#744210,stroke:#975a16,color:#fefcbf
+    classDef cos     fill:#975a16,stroke:#d69e2e,color:#fefcbf
+    classDef aside   fill:#3d3d3d,stroke:#555,color:#ccc
+    class Prep,V,C1,C2,C3,C4,A process
     class CosPass,CP cos
-    class Writes,WK,GL,EM wr
+    class Writes,WK,GL,EM wiki
 ```
 
 ### Deterministic prep
@@ -199,7 +210,7 @@ This pattern — fix silently if you can, write to goals if you can't, email onl
 You could build a single every-minute loop that does everything. It would be simpler and much worse:
 
 - **Observe has to be cheap** or it can't be frequent. 3s polling demands zero LLM calls in the hot path.
-- **Integrate has to be bounded.** Its job is to assimilate a small batch into the wiki with a tight prompt. One focused LLM call per batch is the right budget.
+- **Integrate has to be bounded.** Its job is to assimilate a small batch into the wiki with a tight prompt. One focused integrate call per batch is the right budget.
 - **Reflect has to be wide.** Looking for duplicates, contradictions, stale loops requires whole-wiki context — you can't afford that every 5 minutes, and you don't need it.
 
 Three cadences, three budgets, one shared substrate. The next section shows the substrate.

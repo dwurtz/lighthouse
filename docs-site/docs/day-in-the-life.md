@@ -1,12 +1,12 @@
 # A day in the life
 
-The cleanest way to understand Deja is to watch a day. The cast is a hypothetical product person — call them **Alex**. Alex has a partner (role tag: `partner`), a kid on a gymnastics team (coach tag: `coach`), a running project at work (`project:relocation`), and a recent intro call with a vendor (`contact:jane-pm`).
+The cleanest way to understand Deja is to watch a day. The cast is a hypothetical product person — call them **Alex**. Alex has a partner Joe (role tag: `partner`), a kid on a gymnastics team (coach tag: `coach`), a running project at work (`project:relocation`), and a recent intro call with a vendor contact Jane (`contact:jane`).
 
-Every interaction below is grounded in a specific pipeline, a specific cos mode, and a specific wiki write.
+Every interaction below is grounded in a specific [pipeline](pipelines.md), a specific [cos](cos.md) mode, and a specific [wiki](wiki.md) write.
 
 ## 07:32 · morning reflect
 
-Alex's Mac wakes. The reflect scheduler notices that the 02:00 slot was missed (Mac was asleep) and the 11:00 slot isn't due yet. It picks one slot — the most recent missed one — and fires.
+Alex's Mac wakes. The [reflect](pipelines.md#reflect) scheduler notices that the 02:00 slot was missed (Mac was asleep) and the 11:00 slot isn't due yet. It picks one slot — the most recent missed one — and fires.
 
 ```mermaid
 sequenceDiagram
@@ -28,29 +28,29 @@ sequenceDiagram
 
 Two things happen in the wiki:
 
-- A stale section in `projects/relocation.md` gets cleaned up. Cos calls `find_dedup_candidates` on projects, sees that `projects/relocation.md` and `projects/office-move.md` score 0.89 similarity, reads both pages, cross-references with `search_deja`, and decides they're the same arc. It merges via `update_wiki`, with a reason citing the two events that tied them together.
-- Cos notices that the coach sent a schedule change on Friday evening that Alex hasn't acted on. The deadline isn't imminent — the new practice time is next Wednesday. Cos writes a reminder line to `goals.md` surfaced for Monday morning:
+- A stale section in `projects/relocation.md` gets cleaned up. cos calls `find_dedup_candidates` on projects, sees that `projects/relocation.md` and `projects/office-move.md` score 0.89 similarity, reads both pages, cross-references with `search_deja`, and decides they're the same arc. It merges via `update_wiki`, with a reason citing the two events that tied them together.
+- cos notices that the coach sent a schedule change on Friday evening that Alex hasn't acted on. The deadline isn't imminent — the new practice time is next Wednesday. cos writes a reminder line to [`goals.md`](goals-file.md) surfaced for Monday morning:
   ```text
   [2026-04-21] gymnastics Wed practice moved to 5:30pm → [[gymnastics-team]]
   ```
 
-Cos stays silent. No email, no notification. A day with no email is healthy.
+cos stays silent. No email, no notification. A day with no email is healthy.
 
 ## 08:10 · iMessage thread lands
 
-Alex's partner texts: "don't forget the dentist is moved to 3 on Friday." Two observations land in `observations.jsonl` within a second of each other — the original message, and a follow-up ("also they called about insurance").
+Alex's partner Joe texts: "don't forget the dentist is moved to 3 on Friday." Two observations land in `observations.jsonl` within a second of each other — the original message, and a follow-up ("also they called about insurance").
 
 The observe loop dedupes by `id_key`, tiers both as T1 (inner-circle inbound), attaches the last 30 messages of thread context, and persists.
 
-Five minutes later the integrate cycle fires:
+Five minutes later the [integrate](pipelines.md#integrate) cycle fires:
 
 ```mermaid
 sequenceDiagram
     participant Obs as observations.jsonl
     participant Analysis as analysis_cycle
-    participant LLM as Integrate LLM
+    participant LLM as integrate call
     participant Wiki
-    participant Cos
+    participant Cos as cos
 
     Analysis->>Obs: read new signals since offset
     Analysis->>Wiki: rebuild index.md
@@ -64,13 +64,13 @@ sequenceDiagram
     Cos-->>Analysis: return SILENT
 ```
 
-The integrate LLM emits:
+The integrate call emits:
 
 - A new event page at `events/2026-04-19/dentist-moved-to-friday-3pm.md` with `partner` in the people frontmatter.
 - A `tasks_update` with `add_tasks: ["Move dentist cal event to Friday 3pm"]`.
-- An `observation_narrative`: "Partner confirmed dentist moved to Fri 3pm; insurance call pending."
+- An `observation_narrative`: "Joe confirmed dentist moved to Fri 3pm; insurance call pending."
 
-Cos is fired in cycle mode. It reads the narrative, sees the task, checks `calendar_list_events` to find the existing dentist event, and calls `execute_action("calendar_update", {event_id: "...", start: "2026-04-24T15:00:00"})`. It marks the task complete in `goals.md` with a reason line. Cos's disposition: **SILENT**. No email — the user already knows, and cos just handled the mechanical piece.
+cos is fired in cycle mode. It reads the narrative, sees the task, checks `calendar_list_events` to find the existing dentist event, and calls `execute_action("calendar_update", {event_id: "...", start: "2026-04-24T15:00:00"})`. It marks the task complete in `goals.md` with a reason line. cos's disposition: **SILENT**. No email — the user already knows, and cos just handled the mechanical piece.
 
 The only visible result on Alex's side is that when they open the Calendar app later, the event is at 3pm instead of 2pm.
 
@@ -215,7 +215,7 @@ Cos isn't fired; the cycle wasn't substantive enough. But the event page is now 
 
 Every loop in the day is the same pattern repeated at different scales:
 
-1. A signal arrives.
+1. A [signal](signals.md) arrives.
 2. It's observed, deduped, tiered, persisted.
 3. At some cadence (5 min, 3×/day, or on-command), an LLM reads it.
 4. The LLM either writes to the wiki, fires an action, or stays silent.

@@ -2,7 +2,7 @@
 
 Deja's memory is a folder of Markdown files, committed to a local git repo, browsable in Obsidian. That's it.
 
-This choice carries most of the design. Every other decision — how cos reasons, how integrate writes, how the MCP tool surface looks — falls out of "the wiki is the source of truth and it has to stay legible to a human."
+This choice carries most of the design. Every other decision — how [cos](cos.md) reasons, how [integrate](pipelines.md#integrate) writes, how the [MCP tool](mcp.md) surface looks — falls out of "the wiki is the source of truth and it has to stay legible to a human."
 
 !!! info "The wiki is one of two on-disk roots"
     Deja's state lives in two separate directories, on purpose:
@@ -10,7 +10,7 @@ This choice carries most of the design. Every other decision — how cos reasons
     - **`~/Deja/`** — the wiki (what this page is about). Git-tracked, human-readable, reviewable, reversible. Share it with a private remote if you want; treat it like a notebook you and an agent co-author.
     - **`~/.deja/`** — raw state. Observations log, audit log, screenshot PNGs, OCR sidecars, cos config, sockets, cursors. Not git-tracked (too big, too noisy, too private at the raw level). You could delete it tomorrow; the wiki here still carries everything Deja actually "knows."
 
-    Integrate's job is to distill the raw stream into the wiki. If something matters enough to reason about twice, it ends up in `~/Deja/`. If it's just signal, it stays under `~/.deja/`.
+    The integrate phase's job is to distill the raw stream into the wiki. If something matters enough to reason about twice, it ends up in `~/Deja/`. If it's just signal, it stays under `~/.deja/`.
 
 ## Layout
 
@@ -35,19 +35,19 @@ There are only three durable categories: **people**, **projects**, **events**. E
 
 | Category | Describes | Example slug |
 | -------- | --------- | ------------ |
-| `people/` | A person — who they are, what's true about them now | `jane-pm` |
+| `people/` | A person — who they are, what's true about them now | `jane` |
 | `projects/` | A project, thread, or life arc — what it is, where it stands | `office-relocation` |
-| `events/<date>/` | Something that happened — timestamped, entity-linked | `2026-04-18/jane-pm-accepted-offer` |
+| `events/<date>/` | Something that happened — timestamped, entity-linked | `2026-04-18/jane-accepted-offer` |
 
-**Entity pages** (people, projects) are short prose — 100–400 words, present tense, leading with what's true right now. They're not a journal. When a new fact lands, the integrate LLM either updates the page body (if the fact is durable) or drops a line in the `## Recent` section with a wiki-link to the event page.
+**Entity pages** (people, projects) are short prose — 100–400 words, present tense, leading with what's true right now. They're not a journal. When a new fact lands, the integrate call either updates the page body (if the fact is durable) or drops a line in the `## Recent` section with a wiki-link to the event page.
 
-**Event pages** are the journal. They're short, they have YAML frontmatter for structured linking, and they get materialized from concrete signals (an email, a calendar event, an iMessage that resolves a loop). Example:
+**Event pages** are the journal. They're short, they have YAML frontmatter for structured linking, and they get materialized from concrete [signals](signals.md) (an email, a calendar event, an iMessage that resolves a loop). Example:
 
 ```yaml
 ---
 date: 2026-04-18
 time: "11:01"
-people: [jane-pm, joe-partner]
+people: [jane, joe]
 projects: [office-relocation]
 ---
 
@@ -55,7 +55,7 @@ Jane confirmed the new Pier 39 address over iMessage. Lease starts May 1.
 Joe is handling the move coordinator call tomorrow at 3pm.
 ```
 
-You don't write that frontmatter by hand. The integrate LLM emits a structured `event_metadata` field and the wiki writer serializes it into YAML.
+You don't write that frontmatter by hand. The integrate call emits a structured `event_metadata` field and the wiki writer serializes it into YAML.
 
 ## Why Markdown and git
 
@@ -80,13 +80,16 @@ flowchart LR
     Idx --> R2["triage prefilter<br/>(catalog-aware)"]
     Idx --> R3["vision prompt<br/>(truncated view)"]
 
-    classDef op fill:#1a365d,stroke:#2c5282,color:#f7fafc
-    classDef idx fill:#744210,stroke:#975a16,color:#fefcbf
-    class Writes,Rebuild op
-    class Idx,R1,R2,R3 idx
+    classDef source  fill:#1a365d,stroke:#2c5282,color:#f7fafc
+    classDef wiki    fill:#22543d,stroke:#2f855a,color:#f7fafc
+    classDef process fill:#744210,stroke:#975a16,color:#fefcbf
+    classDef cos     fill:#975a16,stroke:#d69e2e,color:#fefcbf
+    classDef aside   fill:#3d3d3d,stroke:#555,color:#ccc
+    class Writes,Rebuild process
+    class Idx,R1,R2,R3 wiki
 ```
 
-Three different consumers read `index.md` top-down within an attention budget. The ordering is not cosmetic — it directly decides what each downstream LLM sees first. If you touch a page, it jumps to the top, and the next integrate cycle sees it before older stuff. This is the cheapest and most effective recency signal in the system.
+Three different consumers read `index.md` top-down within an attention budget. The ordering is not cosmetic — it directly decides what each downstream LLM sees first. If you touch a page, it jumps to the top, and the next integrate call sees it before older stuff. This is the cheapest and most effective recency signal in the system.
 
 !!! tip "Don't 'normalize' this"
     If you read the code and think "I could sort `index.md` alphabetically," don't. The mtime ordering is load-bearing in three places.
@@ -95,7 +98,7 @@ Three different consumers read `index.md` top-down within an attention budget. T
 
 This file deserves its own page — it's where cos does most of its thinking-across-time, and understanding it is load-bearing for understanding how cos decides when to surface things. See [**goals.md — the working ledger**](goals-file.md) for the full tour of all seven sections (Standing context, Automations, Tasks, Waiting for, Reminders, Archive, Recurring), who writes to each, and why this one file shapes most of cos's behavior.
 
-## Rules the integrate LLM follows
+## Rules the integrate call follows
 
 The integrate prompt is ~200 lines. A few rules are load-bearing:
 
@@ -117,7 +120,7 @@ The wiki lives at `~/Deja/`. Deja's operational state lives separately at `~/.de
 | `audit.jsonl` | Every state mutation with reason + trigger |
 | `config.yaml` | User config — feature flags, slot hours, model choices |
 | `last_integration_offset` | Byte offset into observations.jsonl; resumption mark |
-| `chief_of_staff/` | Cos config + invocation log |
+| `chief_of_staff/` | cos config + invocation log |
 | `raw_ocr/<date>/<id>.txt` | Apple Vision OCR text for screenshots |
 | `raw_images/<date>/<id>.png` | Raw screenshot PNGs |
 | `deja.sock` | Unix socket FastAPI listens on |
