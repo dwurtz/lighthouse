@@ -8,6 +8,8 @@ on:
 jobs:
   build:
     runs-on: macos-latest
+    permissions:
+      contents: write   # needed to create the GitHub release + upload DMG
     steps:
       - uses: actions/checkout@v4
 
