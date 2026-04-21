@@ -155,7 +155,7 @@ flowchart LR
         A[audit.jsonl trim >7d]
     end
 
-    subgraph CosPass["Cos reflective invocation"]
+    subgraph CosPass["cos reflective invocation"]
         CP["claude -p<br/>+ MCP"]
     end
 
@@ -188,11 +188,11 @@ No LLM calls in this phase. It's pure:
 
 If cos doesn't ask for a single candidate set this slot, the whole prep bill is a few hundred vector ops.
 
-### Cos decides what to do
+### cos decides what to do
 
-Then a single `invoke_reflective_sync()` call. Cos reads its system prompt plus a reflective appendix, sees the slot (02/11/18) and horizon, and decides what to look into. It has four candidate-generator tools on top of its usual reads and writes:
+Then a single `invoke_reflective_sync()` call. cos reads its system prompt plus a reflective appendix, sees the slot (02/11/18) and horizon, and decides what to look into. It has four candidate-generator tools on top of its usual reads and writes:
 
-- `find_dedup_candidates(category, threshold, limit)` — high-similarity page pairs. Cos reads both and decides if they're the same entity.
+- `find_dedup_candidates(category, threshold, limit)` — high-similarity page pairs. cos reads both and decides if they're the same entity.
 - `find_orphan_event_clusters(min_size, sim_threshold)` — event clusters that might want a parent project page.
 - `find_open_loops_with_evidence(days, limit)` — open tasks and waiting-fors paired with recent events that might resolve them.
 - `find_contradictions(sim_min, sim_max, limit)` — page pairs that look close but might disagree on a fact.

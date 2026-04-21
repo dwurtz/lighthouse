@@ -30,8 +30,8 @@ So the system is built around a disciplined filter:
 
 - **Tiering drops noise before [integrate](pipelines.md#integrate).** T3-only message batches never reach the wiki.
 - **Screenshot preprocess can return `None`.** A noisy frame is dropped entirely, not summarized into the wiki.
-- **Cos defaults to SILENT.** NOTIFY is reserved for three specific cases: action within 24h the user isn't handling; a fact the user believes is wrong or just changed; a live opportunity about to close.
-- **Cos writes to [`goals.md`](goals-file.md) instead of emailing.** Non-urgent thoughts go to the scratchpad and future cos cycles decide when (or whether) to surface them.
+- **cos defaults to SILENT.** NOTIFY is reserved for three specific cases: action within 24h the user isn't handling; a fact the user believes is wrong or just changed; a live opportunity about to close.
+- **cos writes to [`goals.md`](goals-file.md) instead of emailing.** Non-urgent thoughts go to the scratchpad and future cos cycles decide when (or whether) to surface them.
 - **Integrate's prompt bans speculative writes.** If there's no concrete new fact, don't rewrite the page.
 
 !!! quote "A day with no email from Deja is a healthy day."
@@ -44,7 +44,7 @@ Every agent write is a commit. Every commit has a reason. Every mistake is rever
 
 This is cheap to implement and pays for itself the first time the agent gets something wrong. The wiki is plain text — you can:
 
-- `git log --oneline people/jane-pm.md` — see every change to a page and why.
+- `git log --oneline people/jane.md` — see every change to a page and why.
 - `git show <sha>` — read the agent's reasoning at the time.
 - `git revert <sha>` — undo a specific mistake without losing anything else.
 
@@ -52,7 +52,7 @@ Obsidian opens `~/Deja/` directly. You can edit by hand, and the next agent cycl
 
 The git commitment also pays off in human trust. When something surprising lands in the wiki, you can see who wrote it and why.
 
-## Cos is the decision layer; analysts are cheap
+## cos is the decision layer; analysts are cheap
 
 The mental model has two pieces: **analysts** (cheap, deterministic, high-volume) and **cos** (one capable agent with tools).
 
@@ -65,7 +65,7 @@ Analysts do things like:
 
 They're bad at anything resembling judgment. If you use a cheap LLM for a judgment call — "is this page pair really the same person?" — you get false positives that damage the wiki. That's where earlier Flash-confirm sweeps failed.
 
-Cos does judgment. It runs rarely (a few dozen times a day), it has tools to verify before it writes, and it has an [MCP](mcp.md) surface to ask the user when it genuinely can't resolve something.
+cos does judgment. It runs rarely (a few dozen times a day), it has tools to verify before it writes, and it has an [MCP](mcp.md) surface to ask the user when it genuinely can't resolve something.
 
 **Practical consequence:** when you're tempted to add a narrow LLM sweep, the right move is almost always:
 
@@ -76,7 +76,7 @@ Integrate is the exception. It's immediate, bounded, and its prompt is load-bear
 
 ## Silence is a legitimate output
 
-Most invocations of cos return SILENT. Most integrate cycles produce no wiki write. Most observations are T3 and get filtered.
+Most invocations of cos return SILENT. Most integrate calls produce no wiki write. Most observations are T3 and get filtered.
 
 This is the correct shape. A system that feels compelled to do something on every tick becomes an adversary. A system that's comfortable doing nothing most of the time becomes trustworthy.
 
@@ -84,7 +84,7 @@ Silence is also a testable output. `deja trail` shows what cos decided, includin
 
 ## Filter, don't plan
 
-Cos doesn't hold a plan about "today I will send a briefing at 7 AM and a closeout at 6 PM." Timing itself is a reasoning task.
+cos doesn't hold a plan about "today I will send a briefing at 7 AM and a closeout at 6 PM." Timing itself is a reasoning task.
 
 Goals.md is cos's scratchpad. Every invocation, cos reads the scratchpad along with whatever else it needs, and decides — given the time of day, day of week, recent user activity, natural batching opportunities — whether to surface each item right now.
 
@@ -104,7 +104,7 @@ This rules out "clever" storage:
 
 - No vector DB as the source of truth. QMD indexes are caches; the wiki is canonical.
 - No JSON blobs representing people. Each person is a paragraph of prose.
-- No opaque agent scratch space. Cos's thinking-over-time happens in `goals.md` and the wiki, both of which you can read.
+- No opaque agent scratch space. cos's thinking-over-time happens in `goals.md` and the wiki, both of which you can read.
 
 Write-through to plain files is slightly more expensive. It's also the difference between an agent you can trust and one you can't.
 

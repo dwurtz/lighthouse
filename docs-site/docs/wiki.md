@@ -66,7 +66,7 @@ Because every AI system eventually gets something wrong, and when it does, you w
 3. **Revert** individual mistakes without losing good work. `git revert <sha>`.
 4. **Trust** the local copy. Plain files are hard to lose. A corrupted SQLite file is catastrophic; a broken Markdown file is annoying.
 
-There's a secondary benefit: Obsidian. You can open `~/Deja/` in Obsidian, edit pages by hand, follow `[[wiki-links]]`, and the next agent cycle sees your edits. The wiki is yours, not the agent's.
+There's a secondary benefit: Obsidian. You can open `~/Deja/` in Obsidian, edit pages by hand, follow `[[wiki-links]]`, and the next integrate call sees your edits. The wiki is yours, not Deja's.
 
 ## `index.md` is load-bearing
 

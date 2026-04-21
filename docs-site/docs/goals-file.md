@@ -90,9 +90,9 @@ Things you've committed to doing yourself.
 - [x] Review and send draft email to Jane re: interview follow-up
 ```
 
-**Who writes:** both. You add tasks in Obsidian when you commit to something. Cos adds tasks when it sees you commit in an outbound email or message ("I'll send the deck by Friday" → `add_task`). Either of you can check them off; cos also closes them via `complete_task` when it sees evidence of completion in later signals.
+**Who writes:** both. You add tasks in Obsidian when you commit to something. cos adds tasks when it sees you commit in an outbound email or message ("I'll send the deck by Friday" → `add_task`). Either of you can check them off; cos also closes them via `complete_task` when it sees evidence of completion in later signals.
 
-**How cos uses it:** reviewed every cycle. Due-today and approaching-deadline items are candidates for notification. Cos also auto-resolves tasks when new signals prove they're already done, to keep the ledger honest.
+**How cos uses it:** reviewed every cycle. Due-today and approaching-deadline items are candidates for notification. cos also auto-resolves tasks when new signals prove they're already done, to keep the ledger honest.
 
 ## Waiting for
 
@@ -101,13 +101,13 @@ Things other people owe you.
 ```markdown
 ## Waiting for
 
-- [ ] **Jane Doe** — feedback on draft before we ship (so we can publish live)
-- [ ] **Joe Smith** — builder contact for garage project (added 2026-04-13)
-- [x] **Acme Recruiter** — registration code for next conference
-- [x] **Billing vendor** — confirmation that distribution wire was sent
+- [ ] **Jane** — feedback on draft before we ship (so we can publish live)
+- [ ] **Joe** — builder contact for garage project (added 2026-04-13)
+- [x] **recruiter** — registration code for next conference
+- [x] **billing vendor** — confirmation that distribution wire was sent
 ```
 
-**Who writes:** both. You add when you know someone owes you something. Cos adds when it sees promises in messages addressed to you ("I'll get back to you next week" → `add_waiting_for` tagged with the person). Cos resolves (directly or by chain of evidence — if Joe promised you Jane's contact and Jane emails you, that satisfies Joe's waiting-for).
+**Who writes:** both. You add when you know someone owes you something. cos adds when it sees promises in messages addressed to you ("I'll get back to you next week" → `add_waiting_for` tagged with the person). cos resolves (directly or by chain of evidence — if Joe promised you Jane's contact and Jane emails you, that satisfies Joe's waiting-for).
 
 **How cos uses it:** the most actionable section for "follow-up" decisions. If a waiting-for is past its expected date, cos can draft a nudge email for you to review. The `find_open_loops_with_evidence` MCP tool sweeps this section against recent events to detect indirect satisfaction.
 
@@ -119,14 +119,14 @@ Date-tagged nudges cos will surface on or after a specific date. Format: `[YYYY-
 ## Reminders
 
 - [2026-05-08] Did Joe send the demo? Check back if silent.
-  → [[joe-smith]], [[project-x]]
+  → [[joe]], [[project-x]]
 - [2026-04-22] Did the dev server bind fix actually get committed?
-  Flagged 2026-04-18 but still uncommitted. → [[tru-project]]
+  Flagged 2026-04-18 but still uncommitted. → [[relocation]]
 - [2026-05-06] Did user put on the parked position before earnings?
   Venue + trading-window considerations worth a quick think.
 ```
 
-**Who writes:** both. You add via `/remind` in the notch or "remind me in a week..." by voice. Cos adds future-dated checkpoints when it's not sure a thread has resolved ("close of business next Monday, check if we got an answer"). Topic tags at the end help cos route reminders to the right cycle context.
+**Who writes:** both. You add via `/remind` in the notch or "remind me in a week..." by voice. cos adds future-dated checkpoints when it's not sure a thread has resolved ("close of business next Monday, check if we got an answer"). Topic tags at the end help cos route reminders to the right cycle context.
 
 **How cos uses it:** reviewed every cycle. When a reminder's date is today or past, cos re-evaluates whether it's still relevant — signals may have already resolved the concern. If so, cos auto-resolves via `resolve_reminder`. Otherwise it surfaces as a nudge at the appropriate moment of day.
 
@@ -171,6 +171,6 @@ Sweeps that fire on schedule, not in response to signals.
 
 3. **Codifying patterns without retraining.** When cos catches itself doing the same reasoning twice — "I always check Slack for messages from Joe and Jane before surfacing a new thread" — you can promote that into an Automation. No code change, no prompt-engineering session. It's in the ledger, cos reads it next cycle, done.
 
-4. **Fallback for notification discipline.** Cos's default disposition is "add to goals.md rather than email." Something non-urgent that might matter later doesn't interrupt you — it goes in as a task or reminder, and a future cos cycle decides when (or if) to surface it. A schedule hint noted at 3pm Friday doesn't wake you up; cos plants it and surfaces it at Monday's morning pass if it's still relevant.
+4. **Fallback for notification discipline.** cos's default disposition is "add to goals.md rather than email." Something non-urgent that might matter later doesn't interrupt you — it goes in as a task or reminder, and a future cos cycle decides when (or if) to surface it. A schedule hint noted at 3pm Friday doesn't wake you up; cos plants it and surfaces it at Monday's morning pass if it's still relevant.
 
-5. **Bidirectional source of truth.** You own this file. You can rewrite a task, delete an Automation you don't want, rearrange the whole Standing context section. Cos re-reads it next cycle and adjusts. It's not a queue cos processes once — it's a living document cos orbits.
+5. **Bidirectional source of truth.** You own this file. You can rewrite a task, delete an Automation you don't want, rearrange the whole Standing context section. cos re-reads it next cycle and adjusts. It's not a queue cos processes once — it's a living document cos orbits.

@@ -47,7 +47,7 @@ Analysts are good at mechanical, narrow work: "here are 40 pairs of pages above 
 
 cos doesn't need to be cheap because it runs rarely. It runs:
 
-- After a **substantive [integrate](pipelines.md#integrate) cycle** — maybe a dozen times a day.
+- After a **substantive [integrate](pipelines.md#integrate) call** — maybe a dozen times a day.
 - At **three [reflect](pipelines.md#reflect) slots** (02 / 11 / 18 local) — three times a day.
 - On **user-initiated commands** — voice, notch chat, self-addressed email or iMessage.
 
@@ -60,7 +60,7 @@ Every cos invocation is a fresh `claude -p` subprocess with the Deja [MCP](mcp.m
 ```mermaid
 flowchart TB
     subgraph Triggers
-        T1["Substantive<br/>integrate cycle"]
+        T1["Substantive<br/>integrate call"]
         T2["Clock slot<br/>(02 / 11 / 18)"]
         T3["User-addressed<br/>email · iMessage · WhatsApp"]
         T4["Notch chat / voice<br/>push-to-talk"]
@@ -98,7 +98,7 @@ flowchart TB
 
 | Mode | Trigger | Payload |
 | ---- | ------- | ------- |
-| `cycle` | After a substantive integrate cycle | cycle_id, narrative, wiki update slugs, goal changes count, due reminders count, new T1 signals |
+| `cycle` | After a substantive integrate call | cycle_id, narrative, wiki update slugs, goal changes count, due reminders count, new T1 signals |
 | `reflective` | Clock slot (runs inside `run_reflection`) | slot, horizon, timestamp |
 | `user_reply` | Self-addressed email / iMessage / WhatsApp | subject, user message, thread_id, in_reply_to, conversation slug |
 | `command` | Notch chat or voice push-to-talk | user message, source, conversation slug, recent_screens, timestamp |

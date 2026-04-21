@@ -4,7 +4,7 @@ A quick reference for the terms used throughout this site. Alphabetized; each de
 
 ## audit
 
-The append-only trail of every state mutation, kept at `~/.deja/audit.jsonl`. Rows carry the tool called, the reason, and the trigger (integrate cycle, cos, or direct MCP). Audit entries surfaced in a standard format are tagged **Hermes** — that's the audit bus, not a separate agent. Inspect with `deja trail`.
+The append-only trail of every state mutation, kept at `~/.deja/audit.jsonl`. Rows carry the tool called, the reason, and the trigger (integrate, cos, or direct MCP). Audit entries surfaced in a standard format are tagged **Hermes** — that's the audit bus, not a separate agent. Inspect with `deja trail`.
 
 ## cos
 

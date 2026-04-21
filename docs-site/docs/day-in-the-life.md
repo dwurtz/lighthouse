@@ -96,7 +96,7 @@ sequenceDiagram
     Web->>Swift: {echo: "...", confirmation: cos's final message}
 ```
 
-The echo pill pops onto the screen: `Added: send vendor W-9 request after lunch.` Cos wrote the reminder into `goals.md` in one tool call and replied in a single line — no separate classifier, no rule dispatch.
+The echo pill pops onto the screen: `Added: send vendor W-9 request after lunch.` cos wrote the reminder into `goals.md` in one tool call and replied in a single line — no separate classifier, no rule dispatch.
 
 A minute later, walking into the conference room, Alex holds Option again: "what did Jane from the vendor say about pricing last week?" Same path — cos receives the transcript, calls `search_deja` against the wiki, and replies in the pill with a one-line answer. No wiki write, no separate query handler — just cos reading its own substrate.
 
@@ -104,9 +104,9 @@ A minute later, walking into the conference room, Alex holds Option again: "what
 
 Alex opens the notch panel (click the menubar icon) and types: "note that the vendor quoted $4,200/month with 90 days of onboarding." This classifies as `context`.
 
-The dispatcher appends a synthetic observation to `observations.jsonl` with source `typed` and the full text, then writes `~/.deja/integrate_trigger.json` — which wakes the integrate loop ahead of its next 5-minute slot.
+The dispatcher appends a synthetic observation to `observations.jsonl` with source `typed` and the full text, then writes `~/.deja/integrate_trigger.json` — which wakes the integrate phase ahead of its next 5-minute slot.
 
-Integrate fires. The LLM promotes this to a durable fact on `people/jane-pm.md` and `projects/relocation.md` (Rule 9: durable facts get promoted to the entity body). A new event page is materialized: `events/2026-04-19/vendor-quote-4200.md`.
+Integrate fires. The LLM promotes this to a durable fact on `people/jane.md` and `projects/relocation.md` (Rule 9: durable facts get promoted to the entity body). A new event page is materialized: `events/2026-04-19/vendor-quote-4200.md`.
 
 No cos call — it wasn't a substantive-enough cycle to fire cos, and there's nothing to decide yet.
 
@@ -120,7 +120,7 @@ Five minutes later integrate fires. It creates an event page and, because `goals
 {
   "type": "calendar_create",
   "params": {
-    "summary": "Demo — Jane's vendor",
+    "summary": "Demo — Jane (vendor)",
     "start": "2026-04-23T16:00:00",
     "end": "2026-04-23T16:45:00",
     "kind": "firm"
@@ -131,14 +131,14 @@ Five minutes later integrate fires. It creates an event page and, because `goals
 
 Integrate runs the executor, inserts the calendar event, and then fires cos in cycle mode.
 
-Cos reads the narrative, sees the new event, cross-references `calendar_list_events` for conflicts. There's a potential conflict — a standing 1:1 at 4pm on Tuesdays. Cos picks **NOTIFY**: this needs the user to decide, it's within the 24h-ish window, and the call window is closing (vendor expected a time back soon).
+cos reads the narrative, sees the new event, cross-references `calendar_list_events` for conflicts. There's a potential conflict — a standing 1:1 at 4pm on Tuesdays. cos picks **NOTIFY**: this needs the user to decide, it's within the 24h-ish window, and the call window is closing (vendor expected a time back soon).
 
 ```json
 {
   "type": "send_email_to_self",
   "params": {
     "subject": "[Deja] vendor demo Tuesday 4pm conflicts with weekly 1:1",
-    "body": "Jane's vendor confirmed Tuesday 4pm for the demo. That's your standing 1:1 with Pat.\n\nOptions I see:\n- Reschedule the 1:1 to Wed morning (Pat usually has Wed open).\n- Push the demo to Weds 4pm (you have a hold that could move).\n- Keep the 1:1 short and take the demo right after.\n\nReply to this email with what you want me to do."
+    "body": "Jane (vendor) confirmed Tuesday 4pm for the demo. That's your standing 1:1.\n\nOptions I see:\n- Reschedule the 1:1 to Wed morning (usually open).\n- Push the demo to Weds 4pm (you have a hold that could move).\n- Keep the 1:1 short and take the demo right after.\n\nReply to this email with what you want me to do."
   },
   "reason": "demo confirmed but conflicts with weekly 1:1; needs user decision"
 }
@@ -173,7 +173,7 @@ sequenceDiagram
     Cos->>Mail: send_email_to_self threaded reply ("done — moved demo, drafted reply to Jane for your review")
 ```
 
-Cos's reply threads cleanly in Gmail:
+cos's reply threads cleanly in Gmail:
 
 > **Re: [Deja] vendor demo Tuesday 4pm conflicts with weekly 1:1**
 > Moved the demo to Wed 4pm. Drafted a reply to Jane asking if Wed works — it's sitting in your Drafts, review and send when you have a sec.
@@ -186,7 +186,7 @@ Alex, winding down, sends themselves an iMessage: "[Deja] remember to think abou
 
 Self-addressed messages with `[Deja]` route to cos as a **user_reply** (same as self-email, just different channel).
 
-Cos reads it. This isn't actionable now; it's a thought worth returning to. Cos appends it to `goals.md ## Standing context` as a question the user is carrying, with a surface date of next Monday:
+cos reads it. This isn't actionable now; it's a thought worth returning to. cos appends it to `goals.md ## Standing context` as a question the user is carrying, with a surface date of next Monday:
 
 ```text
 - [2026-04-22] Revisit: do we actually need two vendors for Q3? User leaning toward consolidate.
@@ -194,11 +194,11 @@ Cos reads it. This isn't actionable now; it's a thought worth returning to. Cos 
 
 No notification, no email. Future reflect passes will see the note and — if relevant signals come in over the weekend — cos can bring it up Monday morning.
 
-## Late-night · integrate cycle with a screenshot
+## Late-night · integrate call with a screenshot
 
 At 23:45 Alex is on a news site reading a competitor's quarterly earnings post. Screen focus change triggers a capture. The PNG is written to the raw-image sidecar; Apple's Vision framework also saves an OCR text sidecar for debugging. The observation row lands in `observations.jsonl` tagged T3 (ambient browsing).
 
-Five minutes later, the integrate cycle fires. Claude Opus reads the PNG directly — sees the page layout, the headlines, the quoted ARR and growth numbers — and decides this is worth a minimal event page:
+Five minutes later, the integrate phase fires. Claude Opus reads the PNG directly — sees the page layout, the headlines, the quoted ARR and growth numbers — and decides this is worth a minimal event page:
 
 ```text
 events/2026-04-19/competitor-q1-earnings.md
@@ -209,7 +209,7 @@ events/2026-04-19/competitor-q1-earnings.md
 
 Nothing in the wiki attaches cleanly, so integrate leaves it at a standalone event with a topic tag.
 
-Cos isn't fired; the cycle wasn't substantive enough. But the event page is now findable via `search_deja` the next time Alex asks "how are our competitors doing?" at the notch chat.
+cos isn't fired; the cycle wasn't substantive enough. But the event page is now findable via `search_deja` the next time Alex asks "how are our competitors doing?" at the notch chat.
 
 ## The pattern
 
@@ -219,6 +219,6 @@ Every loop in the day is the same pattern repeated at different scales:
 2. It's observed, deduped, tiered, persisted.
 3. At some cadence (5 min, 3×/day, or on-command), an LLM reads it.
 4. The LLM either writes to the wiki, fires an action, or stays silent.
-5. Cos — if invoked — filters what gets to you.
+5. cos — if invoked — filters what gets to you.
 
 The goal isn't volume of activity. The goal is that by the end of the day, the wiki knows a little more than it did this morning, a handful of small things got quietly handled, and exactly one thing that genuinely needed you bounced through your inbox and back.
