@@ -18,9 +18,9 @@ flowchart TB
         Web["deja web<br/>(FastAPI on Unix socket)"]
     end
 
-    subgraph Storage["Shared substrate"]
-        Wiki["$HOME/Deja/<br/>markdown + git"]
-        State["$HOME/.deja/<br/>jsonl + state"]
+    subgraph Storage["Shared substrate — two directories, one discipline"]
+        Wiki["$HOME/Deja/<br/><b>Curated memory</b><br/>markdown + git (committed)"]
+        State["$HOME/.deja/<br/><b>Raw state</b><br/>jsonl · caches · sidecars"]
     end
 
     subgraph Cos["Chief of Staff"]
@@ -53,6 +53,19 @@ Everything below is either a consequence of that picture, or a choice about how 
 - The **Python backend** is two subprocesses — a monitor loop and a FastAPI web server. They share the same on-disk state.
 - The **wiki** at `~/Deja/` is where Deja's memory lives: one Markdown file per person, per project, per event, all committed to a local git repo.
 - **Cos** is the decision layer. It's a fresh Claude subprocess spawned on demand, wired to the wiki and actions through an MCP tool surface.
+
+### Two directories, one discipline
+
+Deja splits storage into two places on purpose:
+
+| | `~/Deja/` | `~/.deja/` |
+|---|---|---|
+| **What** | Curated memory — people, projects, events, `goals.md` | Raw state — observations log, audit log, screenshot PNGs, OCR sidecars, caches, sockets, cos config |
+| **Git?** | Yes, local repo. Every agent write is a commit with a `reason`. You can diff, revert, walk history. | No. It grows fast (thousands of JSONL lines + tens of MB of PNGs per day) and isn't meant to be reviewed entry-by-entry. |
+| **Audience** | Human-readable. Open it in Obsidian. Share / publish / back up if you want. | Infrastructure. Caches and sidecars. Privacy floor — raw screenshots of in-flight work that the wiki has already distilled away from. |
+| **Reversibility** | `git revert` any bad write. | Append-only by design; nothing to reverse. Safe to throw away; most of it rebuilds from cursors. |
+
+The split enforces a useful discipline: if something matters enough to reason about again, integrate distills it into the wiki. If it's just raw signal, it stays under `.deja/`. You could delete `~/.deja/` tomorrow and the wiki would still carry everything Deja actually "knows."
 
 ## Three commitments that shape the design
 
