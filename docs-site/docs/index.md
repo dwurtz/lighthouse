@@ -19,8 +19,8 @@ flowchart TB
     end
 
     subgraph Storage["Shared substrate"]
-        Wiki["~/Deja/<br/>markdown + git"]
-        State["~/.deja/<br/>jsonl + state"]
+        Wiki["$HOME/Deja/<br/>markdown + git"]
+        State["$HOME/.deja/<br/>jsonl + state"]
     end
 
     subgraph Cos["Chief of Staff"]
