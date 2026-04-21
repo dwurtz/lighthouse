@@ -97,6 +97,7 @@ nav:
   - Architecture:
       - The three pipelines: pipelines.md
       - The wiki: wiki.md
+      - 'goals.md — the working ledger': goals-file.md
       - Chief of Staff: cos.md
       - Signal sources: signals.md
       - MCP tool surface: mcp.md

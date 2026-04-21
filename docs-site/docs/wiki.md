@@ -85,20 +85,7 @@ Three different consumers read `index.md` top-down within an attention budget. T
 
 ## `goals.md` — the working ledger
 
-`goals.md` is the bridge between your intent and the agent's behavior. It's editable in Obsidian, read every cycle by the agent, and written by the agent in narrow ways.
-
-Six sections:
-
-| Section | Who writes | Purpose |
-| ------- | ---------- | ------- |
-| **Standing context** | You | Durable facts — schedules, relationships, priorities |
-| **Automations** | You | Trigger→action rules the agent executes ("TeamSnap email → calendar event") |
-| **Tasks** | Agent | Commitments you made, extracted from outbound messages |
-| **Waiting for** | Agent | Things others owe you (21-day auto-expire) |
-| **Reminders** | Agent | Date-keyed nudges |
-| **Archive** | Agent | Resolved items with timestamps and reasons |
-
-Cos uses `goals.md` as its scratchpad. Its disposition is "**add to goals.md rather than email**" for anything non-urgent. Future cos cycles read `goals.md` and decide *when* (or whether) to actually surface each item. A sports-practice schedule change noted at 3 PM on Friday doesn't need to wake you up — cos can plant it and surface it during Monday morning's briefing if it's still relevant.
+This file deserves its own page — it's where cos does most of its thinking-across-time, and understanding it is load-bearing for understanding how cos decides when to surface things. See [**goals.md — the working ledger**](goals-file.md) for the full tour of all seven sections (Standing context, Automations, Tasks, Waiting for, Reminders, Archive, Recurring), who writes to each, and why this one file shapes most of cos's behavior.
 
 ## Rules the integrate LLM follows
 
