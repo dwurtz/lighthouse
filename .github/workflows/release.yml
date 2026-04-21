@@ -28,10 +28,18 @@ jobs:
           # (and any other SPM deps the Xcode project declares). Raw
           # swiftc misses SPM entirely, which is why this step used
           # to fail with "no such module 'Sparkle'".
+          #
+          # Override signing to ad-hoc — the project's default
+          # CODE_SIGN_IDENTITY is the local "Deja Dev" cert which
+          # lives in a dev machine's Keychain, not on CI runners.
+          # The Ad-hoc codesign step below re-signs with `-` anyway.
           xcodebuild -project Deja.xcodeproj \
             -scheme Deja \
             -configuration Release \
             -derivedDataPath build \
+            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
             build
 
           # Copy the built .app to the repo root where subsequent
