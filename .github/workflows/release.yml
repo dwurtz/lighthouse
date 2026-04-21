@@ -22,31 +22,23 @@ jobs:
           source venv/bin/activate
           pip install -e .
 
-      - name: Compile Swift menubar app
+      - name: Build Deja.app via Xcode
         run: |
-          xcrun swiftc -parse-as-library \
-            -framework SwiftUI -framework AppKit -framework ServiceManagement \
-            -o menubar/Deja menubar/Sources/**/*.swift
+          # Use xcodebuild so Swift Package Manager resolves Sparkle
+          # (and any other SPM deps the Xcode project declares). Raw
+          # swiftc misses SPM entirely, which is why this step used
+          # to fail with "no such module 'Sparkle'".
+          xcodebuild -project Deja.xcodeproj \
+            -scheme Deja \
+            -configuration Release \
+            -derivedDataPath build \
+            build
 
-      - name: Compile DejaRecorder
-        run: |
-          xcrun swiftc \
-            -framework Foundation -framework ScreenCaptureKit \
-            -framework AVFoundation -framework CoreMedia \
-            -o menubar/DejaRecorder menubar/DejaRecorder.swift
+          # Copy the built .app to the repo root where subsequent
+          # steps (codesign, DMG) expect it.
+          cp -R build/Build/Products/Release/Deja.app ./Deja.app
 
-      - name: Assemble app bundle
-        run: |
-          mkdir -p Deja.app/Contents/MacOS
-          mkdir -p Deja.app/Contents/Resources
-          cp menubar/Deja Deja.app/Contents/MacOS/Deja
-          cp menubar/DejaRecorder Deja.app/Contents/MacOS/DejaRecorder
-
-          # Resources
-          cp Resources/tray-icon.png Deja.app/Contents/Resources/
-          cp Resources/AppIcon.icns Deja.app/Contents/Resources/
-
-          # Bundle Python environment
+          # Bundle the Python environment into the app
           bash menubar/bundle-python.sh
 
       - name: Ad-hoc codesign
