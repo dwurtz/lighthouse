@@ -15,7 +15,7 @@ from telemetry import log_event
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Deja API", version="0.2.0")
+app = FastAPI(title="Deja API", version="0.3.0")
 
 # Rate limiting
 from slowapi import Limiter, _rate_limit_exceeded_handler

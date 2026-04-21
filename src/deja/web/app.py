@@ -57,7 +57,7 @@ def create_app() -> FastAPI:
     permissions (``~/.deja/`` is chmod 700), so no shared-secret
     middleware is needed.
     """
-    application = FastAPI(title="deja", version="0.2.0", lifespan=_lifespan)
+    application = FastAPI(title="deja", version="0.3.0", lifespan=_lifespan)
 
     # Include routers
     application.include_router(setup_router)

@@ -106,7 +106,7 @@ def create_server() -> Server:
     """Build and return a configured MCP Server instance."""
     app = Server(
         name="deja",
-        version="0.2.0",
+        version="0.3.0",
         instructions=_INSTRUCTIONS,
     )
 
