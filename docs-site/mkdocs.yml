@@ -12,29 +12,11 @@ theme:
   language: en
   font:
     text: Inter
-    code: JetBrains Mono
+    code: DM Mono
   palette:
-    - media: "(prefers-color-scheme)"
-      scheme: slate
-      primary: indigo
-      accent: indigo
-      toggle:
-        icon: material/brightness-auto
-        name: Switch to light mode
-    - media: "(prefers-color-scheme: light)"
-      scheme: default
-      primary: indigo
-      accent: indigo
-      toggle:
-        icon: material/brightness-7
-        name: Switch to dark mode
-    - media: "(prefers-color-scheme: dark)"
-      scheme: slate
-      primary: indigo
-      accent: indigo
-      toggle:
-        icon: material/brightness-4
-        name: Switch to system preference
+    scheme: slate
+    primary: black
+    accent: white
   features:
     - navigation.instant
     - navigation.tracking
@@ -57,6 +39,9 @@ extra:
     - icon: fontawesome/brands/github
       link: https://github.com/dwurtz/deja
   generator: false
+
+extra_css:
+  - stylesheets/deja.css
 
 markdown_extensions:
   - admonition
