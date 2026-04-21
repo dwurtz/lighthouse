@@ -66,10 +66,10 @@ INTEGRATE (every 5min)
    ↓ reads new signals + retrieves wiki context → LLM → writes wiki pages,
    ↓ event pages, goal mutations; emits observation_narrative
 REFLECT (3×/day, 02/11/18 local)
-   ↓ deterministic prep: vector-embedding refresh, candidate generation
-   ↓ (dedup pairs, orphan-event clusters, open-loop evidence,
-   ↓  contradiction pairs) — then a single cos reflective pass that
-   ↓ decides what to do about any of it
+   ↓ thin prep (QMD vector-index refresh) → single cos reflective pass.
+   ↓ Cos invokes candidate-generator MCP tools (dedup pairs,
+   ↓ orphan-event clusters, open-loop evidence, contradiction pairs)
+   ↓ on demand, judges each candidate, writes via the usual MCP tools.
 ```
 
 **Cos is the decision layer.** Everything else — the signal tiering, the Flash preprocess, vector similarity, clustering, candidate generators — is cheap analyst work preparing material for cos. The integrate LLM still writes the wiki directly (it's an immediate classifier over a bounded signal batch), but reflect's old Flash-confirm sweeps are gone: cos itself now makes every judgment call in reflect, using its MCP tool surface to verify and, when necessary, asking the user via `send_email_to_self`.
@@ -190,9 +190,18 @@ Every state mutation writes one row here. Inspected with `deja trail`. Schema:
   "kind": "goal_action" | "cos_invoke" | "cycle" | "reflect" | "voice_transcript" | "voice_undo" | "reply_auth_reject" | ...,
   "target": "action/calendar_create" | "cycle/c_8fa43a1226b3" | "projects/<slug>" | ...,
   "reason": "concrete human-readable why",
-  "trigger": {"kind": "mcp" | "user_cmd" | "webhook" | "cron", "detail": "..."}
+  "trigger": {"kind": "mcp" | "signal" | "manual" | "webhook" | "cron", "detail": "..."}
 }
 ```
+
+`trigger.kind` tells you who drove the mutation:
+
+- `signal` — an integrate cycle (observe → analysis → wiki write).
+- `mcp` — a write came through the MCP server. The common `detail` is `hermes` (see below).
+- `manual` — user or CLI (`deja cos test`, `deja linkify`, etc.).
+- `webhook` / `cron` — external trigger.
+
+**Hermes is the old name for cos**, kept as the MCP-surface audit tag. When you see `trigger.kind=mcp, trigger.detail=hermes` in `audit.jsonl`, that means cos did the action (via one of its MCP write tools). The tag is stamped in `mcp_server.py:1115` — every MCP-invocation sets `audit.set_context(trigger_kind="mcp", trigger_detail="hermes")` before dispatching tool handlers. The CLI alias `deja hermes-trail` is also retained for back-compat.
 
 Rows older than 7 days are trimmed during each reflect pass.
 
@@ -371,32 +380,39 @@ Reflect used to be a sequence of narrow Flash-Lite confirmation sweeps — dedup
 ```
   DETERMINISTIC PREP              COS REFLECTIVE                 WRITES
 ┌──────────────────────┐        ┌──────────────────┐        ┌────────────────┐
-│ vector embeddings    │        │  claude -p       │        │ wiki merges /  │
-│ refresh (QMD)        │        │  (fresh subproc, │        │ updates        │
-│                      │        │   MCP attached)  │        │                │
-│ candidate generators │        │                  │        │ goals.md:      │
-│  - dedup pairs       │──────► │ calls the four   │──────► │  new tasks,    │
-│  - orphan event      │        │ find_* tools as  │        │  notes,        │
-│    clusters          │        │ needed, plus     │        │  contradictions│
-│  - open loops +      │        │ search_deja,     │        │                │
-│    evidence          │        │ gmail_search,    │        │ optional       │
-│  - contradiction     │        │ get_page,        │        │  [Deja] email  │
-│    pairs             │        │ recent_activity  │        │  (send_email_  │
-│                      │        │                  │        │   to_self)     │
-│ audit trim (>7d)     │        │ decides per      │        │                │
-│                      │        │ escalation rules │        │                │
+│ qmd update           │        │  claude -p       │        │ wiki merges /  │
+│ qmd embed            │        │  (fresh subproc, │        │ updates        │
+│ (refresh QMD         │──────► │   MCP attached)  │──────► │                │
+│  vector index)       │        │                  │        │ goals.md:      │
+│                      │        │ calls the four   │        │  new tasks,    │
+│ (audit trim          │        │ find_* tools     │        │  notes,        │
+│  runs AFTER cos)     │        │ on demand, plus  │        │  contradictions│
+│                      │        │ search_deja,     │        │                │
+│                      │        │ gmail_search,    │        │ optional       │
+│                      │        │ get_page,        │        │  [Deja] email  │
+│                      │        │ recent_activity, │        │  (send_email_  │
+│                      │        │ calendar_*       │        │   to_self)     │
+│                      │        │                  │        │                │
+│                      │        │ decides per      │        │                │
+│                      │        │ three-path       │        │                │
+│                      │        │ escalation (§7.3)│        │                │
 └──────────────────────┘        └──────────────────┘        └────────────────┘
+
+  Note: the find_* tools (find_dedup_candidates, find_orphan_event_clusters,
+  find_open_loops_with_evidence, find_contradictions) are MCP tools, not prep
+  steps. Cos invokes them from inside its loop — if it doesn't ask, the work
+  doesn't run.
 ```
 
 ### 7.1 Deterministic prep
 
-Cheap, pure, testable. Entry point `run_reflection()` in `src/deja/reflection.py`:
+`run_reflection()` (in `src/deja/reflection_scheduler.py:134`, re-exported from `deja.reflection` for back-compat) is deliberately thin:
 
-1. **Refresh QMD vector embeddings** over people/projects/events pages — cos's candidate tools and `search_deja` both need fresh vectors.
-2. **Cache candidate inputs** that cos will most likely want this slot: recent activity window, list of open tasks/waiting-fors, slugs touched since the last reflect. These are precomputed so cos isn't paying latency on them inside its loop.
-3. **Audit trim** — drop `audit.jsonl` rows older than 7 days.
+1. **Refresh the QMD vector index** (`qmd update` then `qmd embed`) so cos's candidate-generator tools and `search_deja` both see the current wiki state. Failure is non-fatal — reflect continues against stale embeddings and logs.
+2. **Invoke cos in reflective mode.** `chief_of_staff.invoke_reflective_sync()` — one subprocess, one decision loop.
+3. **Audit trim** — `trim_older_than(days=7)` drops stale rows from `audit.jsonl`.
 
-No LLM calls in this phase. If cos never asks for a candidate set, the cost of prep is bounded by vector math over a few hundred pages.
+No LLM calls outside cos itself. The cheap analyst work that used to live here (dedup-confirm, events→projects proposal, goals reconcile, contradiction classification) is gone as an explicit step — the candidate-generation logic survives but now lives behind the `find_*` MCP tools, which cos calls only when it decides to. If cos chooses not to ask for a given candidate set this slot, that work never runs.
 
 ### 7.2 Cos reflective invocation
 
@@ -409,15 +425,15 @@ A single `chief_of_staff.invoke_reflective_sync()` call. Cos reads its system pr
 
 Because cos is the one deciding, verification is no longer a rigid prompt contract — cos can call `gmail_search`, `search_deja`, `get_page`, `recent_activity`, `calendar_list_events` to gather evidence before it commits to a call. That's the whole point of the refactor: judgment moves from a dozen narrow Flash calls to one capable agent with tools.
 
-### 7.3 Escalation pattern for contradictions
+### 7.3 Three-path escalation pattern
 
-When `find_contradictions` surfaces a pair, cos picks one of three dispositions:
+Any time cos faces a judgment call on a `find_*` candidate — dedup pairs, contradictions, maybe-closed open loops — it picks one of three dispositions:
 
-- **Resolvable via tools** → cos silently fixes via `update_wiki`. A contradicting fact that `gmail_search` or `calendar_list_events` can adjudicate doesn't need the user — cos just writes the correct version with a `reason` that names the evidence.
-- **Unresolvable but not blocking** → cos notes it in `goals.md` with both claims and the tool evidence it checked. Future cos cycles see the note and can revisit if new signals land.
-- **Blocking an open loop or critical fact** → cos asks the user via `send_email_to_self`. Just the question and the two claims, no padding. The user's reply routes back through the user_reply channel (§12) and cos resolves the write.
+- **Resolvable via tools** → cos silently fixes via the appropriate write: `update_wiki` / `complete_task` / `resolve_waiting_for`. If `gmail_search`, `calendar_list_events`, or `search_deja` can adjudicate, the user doesn't need to. The mutation's `reason` names the evidence that closed the call.
+- **Unresolvable but not blocking** → cos writes a note to `goals.md` with both claims (or both candidates) and the tool evidence it checked. Future cos cycles see the note and can revisit if new signals land.
+- **Blocking an open loop or critical fact** → cos asks the user via `send_email_to_self`. Just the question and the two claims / candidates, no padding. The user's reply routes back through the user_reply channel (§12) and cos resolves the write.
 
-This is the general pattern for any judgment call cos makes in reflect: fix silently if you can, write to goals if you can't but it's not urgent, email the user only when you genuinely need them.
+Fix silently if you can, write to goals if you can't but it's not urgent, email the user only when you genuinely need them. This is how `find_contradictions` was revived after the Flash classifier was disabled — not with a tighter prompt, but by making the escalation path explicit and giving cos the tools to execute it.
 
 ### 7.4 What's gone
 
@@ -471,9 +487,12 @@ Practical consequence: when you're tempted to add a narrow LLM sweep somewhere �
          │ cycle │  │reflective│  │user_reply│  │  command     │
          └───▲───┘  └────▲─────┘  └────▲─────┘  └──────▲───────┘
              │           │             │               │
-    substantive     clock slots    self-addressed   notch chat /
-    integrate       (02/11/18)     email, iMessage, voice  push-
-    cycle                          WhatsApp in       to-talk
+    substantive     clock slots    user→user msg    notch chat /
+    integrate       (02/11/18)     in ANY channel:  voice  push-
+    cycle                          email, iMessage  to-talk
+                                   self-chat,
+                                   WhatsApp self-
+                                   chat
              │           │             │               │
         DEFAULT    + REFLECTIVE   + USER_REPLY    + COMMAND
         SYSTEM      APPENDIX       APPENDIX        APPENDIX
@@ -485,7 +504,7 @@ Practical consequence: when you're tempted to add a narrow LLM sweep somewhere �
 |---|---|---|---|
 | `cycle` | After a substantive integrate cycle | `{mode, cycle_id, narrative, wiki_update_slugs, goal_changes_count, due_reminders_count, new_t1_signal_count}` | DEFAULT_SYSTEM_PROMPT |
 | `reflective` | Clock slot (02/11/18, runs inside `run_reflection`) | `{mode: "reflective", slot, horizon, ts}` | + REFLECTIVE_APPENDIX |
-| `user_reply` | Any self-addressed message — email, iMessage self-chat, WhatsApp self-chat — routes to cos | `{mode: "user_reply", subject, user_message, thread_id, in_reply_to, conversation_slug}` | + USER_REPLY_APPENDIX |
+| `user_reply` | Any user→user message — email-to-self, iMessage self-chat, WhatsApp self-chat. No `Re: [Deja]` requirement anymore; ANY user→user message routes here. Only exception: cos's own outbound `[Deja] ...` emails (non-`Re:`) are dropped to avoid self-feeding. | `{mode: "user_reply", subject, user_message, thread_id, in_reply_to, conversation_slug}` | + USER_REPLY_APPENDIX |
 | `command` | Notch chat / voice push-to-talk (`/api/command`, `/api/mic/stop`) | `{mode: "command", user_message, source, conversation_slug, recent_screens, ts}` | + COMMAND_APPENDIX |
 
 Entry points in `src/deja/chief_of_staff.py`:
@@ -495,7 +514,9 @@ Entry points in `src/deja/chief_of_staff.py`:
 - `invoke_user_reply_sync()` — user_reply mode (called by self-channel observers).
 - `invoke_command_sync()` — command mode (called by `/api/command` and mic stop).
 
-All spawn `claude -p` with `--mcp-config` pointing at `~/.deja/chief_of_staff/mcp_config.json`, a 10-minute hard timeout, and the system prompt appended inline per mode. Command mode also preloads `recent_screens` — per-display OCR + AX frontmost-window metadata — so cos can ground pronouns like "this email" or "that person" when the user is verifiably at their screen.
+All spawn `claude -p` with `--mcp-config` pointing at `~/.deja/chief_of_staff/mcp_config.json`, a 10-minute hard timeout, and the system prompt appended inline per mode.
+
+**Command-mode screenshot preload.** Unlike the other modes (where the user is typically on their phone), the notch panel is a signal that the user is AT their Mac. `_recent_screens_snapshot()` in `chief_of_staff.py:1614` assembles `{display_id: {app, window_title, ocr, age_sec}}` from the freshest per-display OCR sidecars in `~/.deja/raw_ocr/<today>/` plus the AX sidecars at `~/.deja/screen_<N>_ax.json`. A 5-minute freshness gate drops stale displays entirely rather than misrepresent them as current. Cos reads this to resolve referents like "this email," "that person," "the window on the left" without paying a `recent_activity` tool call. Empty dict = no display had a fresh capture; cos is instructed (in `COMMAND_APPENDIX`) not to assume screen context in that case.
 
 ### 8.3 Decision tree (disposition)
 
@@ -520,7 +541,14 @@ Cos is stateless per-invocation (each call is a fresh subprocess) but **stateful
 
 So cos can plant a thought now and revisit it later. A future cos reads what a prior cos wrote. This is the mechanism for getting more useful over time.
 
-### 8.5 `~/.deja/chief_of_staff/` layout
+### 8.5 Cos guardrails in the system prompt
+
+Two rules that matter enough to call out here (rather than leaving them buried in `DEFAULT_SYSTEM_PROMPT`):
+
+- **Stale auto-reminder FYI rule.** When cos's only evidence for an event is an automated reminder from a service that silent-deletes on cancellation (TeamSnap event reminders, Eventbrite, auto-calendar-invites), it must cite the uncertainty rather than assert the event is on. Required format: *"Practice might still be on per the April 18 TeamSnap reminder — no cancellation email since, but TeamSnap silent-deletes. FYI."* Services that don't email on DELETE (only on add/update) make absence-of-cancellation evidence of nothing. See `chief_of_staff.py:541-556`.
+- **No double `calendar_create` for the same underlying event.** Cos picks ONE kind per event — `firm`, `reminder`, or `question` — and calls `calendar_create` exactly once. A firm meeting plus a reminder for the same moment puts two overlapping blocks on the user's calendar; that's the bug this rule prevents. Calendar + `add_reminder` (goals.md) together is fine — different surfaces — but two `calendar_create` calls is not. See `chief_of_staff.py:694-708`.
+
+### 8.6 `~/.deja/chief_of_staff/` layout
 
 | File | Purpose |
 |---|---|
@@ -528,7 +556,9 @@ So cos can plant a thought now and revisit it later. A future cos reads what a p
 | `system_prompt.md` | The DEFAULT_SYSTEM_PROMPT copy. Editable by the user; kept in sync with source via the agent. |
 | `mcp_config.json` | MCP server config for the claude subprocess (points at `python -m deja mcp`). |
 | `invocations.jsonl` | Log of every cos invocation (payload, rc, stdout/stderr). Tailable with `deja cos tail`. |
-| `processed_replies` | Line-per-Message-Id dedupe for the email reply channel. |
+| `processed_replies` | Line-per-Message-Id dedupe for the email self-channel. |
+| `processed_self_imessages` | Line-per-id_key dedupe for the iMessage self-chat channel. |
+| `processed_self_whatsapp_messages` | Line-per-id_key dedupe for the WhatsApp self-chat channel. |
 
 ## 9. MCP server
 
@@ -551,6 +581,7 @@ So cos can plant a thought now and revisit it later. A future cos reads what a p
 | `find_orphan_event_clusters(min_size, sim_threshold)` | Clusters of events that share people/projects and look like they want a parent project page. Reflect candidate generator — cos decides whether to materialize. |
 | `find_open_loops_with_evidence(days, limit)` | Open tasks + waiting-fors paired with recent events that might resolve them. Reflect candidate generator — cos decides whether the loop is closed. |
 | `find_contradictions(sim_min, sim_max, limit)` | Page pairs in the mid-similarity window that might disagree on a fact. Reflect candidate generator — cos resolves per the §7.3 escalation pattern. |
+| `browser_ask(prompt, timeout_sec=180)` | Shells out to `claude -p --chrome "<prompt>"` — drives Claude's Chrome extension non-interactively against the user's logged-in sites (Google Photos, Slack, Spotify podcasts, TeamSnap, etc.). ~60-120s per call; flat-fee on the user's Claude Pro/Max plan, not metered. Use only for services Deja has no direct API for. Implementation at `mcp_server.py:1544`. **Caveat:** can be blocked by Cloudflare bot-challenge pages (TeamSnap is a known offender) — in that case cos is expected to report the auth wall back to the user rather than retry or hallucinate. |
 
 ### 9.2 Write tools
 
@@ -561,6 +592,8 @@ So cos can plant a thought now and revisit it later. A future cos reads what a p
 | `add_waiting_for` / `resolve_waiting_for` / `archive_waiting_for` | Waiting-fors (21-day auto-expire). |
 | `add_reminder` / `resolve_reminder` / `archive_reminder` | Date-keyed reminders. |
 | `execute_action(type, params, reason)` | Route to `goal_actions` executor (see §10). |
+| `draft_imessage(handle, text)` | Background-stage a Messages compose field via `open -g imessage://<handle>?body=<text>`. No focus steal — user reviews on next switch to Messages and presses Return to send. **Default for any outbound iMessage to another human**; non-destructive, user-in-the-loop. Implementation at `mcp_server.py:1629`. |
+| `send_imessage(handle, text)` | Immediate send via AppleScript (`tell application "Messages" ... send`). No review. **Reserved for unambiguous user directives** ("text X that Y") or self-chat acks. TCC caveat: first use requires a one-time Apple Events → MobileSMS approval from inside Deja.app. Implementation at `mcp_server.py:1665`. |
 
 All writes tag the audit entry with `trigger.kind=mcp`, so `deja trail` shows both the trigger and the resulting mutation.
 
@@ -622,33 +655,42 @@ On response, `MonitorState` renders the echo pill for 3 seconds:
 - Confirmation line below in secondary style ("Created event: Dentist, Fri 3:00pm").
 - **Undo button** for 5 seconds when the dispatch was reversible. Click → POST `/api/command/undo/{token}` → reverses the artifact → shows "Undone" in orange for 2s.
 
-## 12. User→cos email reply channel
+## 12. User→cos self-channel (email, iMessage, WhatsApp)
 
-You can reply to any `[Deja]` cos email and cos will read it as a first-class message. Works from any device (including phone) because the email path doesn't depend on vision seeing the screen.
+Any user→user message — email-to-self, iMessage self-chat, WhatsApp self-chat — routes straight to cos in `user_reply` mode. This gives the user one uniform "tell cos anything, from anywhere" channel that works on phone, desktop, or any client, without needing vision to see a screen.
 
-### 12.1 Detection + auth
+The routing is channel-specific but the contract is the same: suppress the normal observation flow, log the user turn to the per-thread conversation file, and fire `chief_of_staff.invoke_user_reply()` non-blocking.
 
-`src/deja/observations/email.py:_build_observation_from_thread()` catches self-emails:
+### 12.1 Email (`observations/email.py`)
 
-- `From` = `To` = user's Gmail identity.
-- Subject contains `[Deja]` (case-insensitive).
-- If subject starts with `Re:` → route to cos; otherwise drop as cos's own outbound (prevents feedback loop).
+`_build_observation_from_thread()` catches self-emails where `From` = `To` = user's Gmail identity. Subject no longer needs to start with `Re: [Deja]` — *any* user-to-user email routes to cos. The only exception is cos's own outbound `[Deja] ...` notifications (non-`Re:`), which are dropped at `email.py:739-745` to prevent a self-feeding loop.
 
-**Anti-spoofing** (`_verify_reply_auth()`):
+The detailed handler is `_handle_user_reply_to_cos` (`email.py:559`). It:
 
-1. Parsed `From:` email must **exactly match** `load_user().email` (the Google-authenticated identity). Substring matches rejected.
-2. Gmail's `Authentication-Results` header must show `dmarc=pass` with `header.from=<user's domain>`. DMARC enforcement requires DKIM or SPF alignment, so `dmarc=pass` means either a valid DKIM signature from the domain or SPF-authorized path.
+1. Pulls `Message-Id` + `threadId` from the latest message in the thread.
+2. Dedupes on `Message-Id` via `~/.deja/chief_of_staff/processed_replies` (Gmail history may re-scan the same message).
+3. Runs `_verify_reply_auth()` anti-spoofing:
+   - Parsed `From:` email must **exactly match** `load_user().email`. Substring matches rejected.
+   - Gmail's `Authentication-Results` header must show `dmarc=pass` with `header.from=<user's domain>`. DMARC enforcement requires DKIM or SPF alignment.
+4. Rejections audit as `reply_auth_reject` — visible in `deja trail`.
+5. Logs the user turn to `~/Deja/conversations/<date>/<thread-slug>.md`.
+6. Fires `chief_of_staff.invoke_user_reply()`.
+7. Returns `None` so the thread never lands in `observations.jsonl`.
 
-Rejections audit as `reply_auth_reject` — you can see probing attempts in `deja trail`.
+Cos reads the conversation file via MCP `get_page("conversations", "<date>/<slug>")` to see the full thread, uses `search_deja` for cross-thread topical lookups, and replies through `execute_action("send_email_to_self", {..., in_reply_to, thread_id})` which threads cleanly in Gmail.
 
-### 12.2 Routing
+### 12.2 iMessage self-chat (`observations/imessage.py`)
 
-1. Dedupe on `Message-Id` via `~/.deja/chief_of_staff/processed_replies` (Gmail may re-scan the same message).
-2. Log the user turn to the conversation's Markdown file under `~/Deja/conversations/`.
-3. Fire `chief_of_staff.invoke_user_reply()` non-blocking.
-4. Drop from the normal observation log — integrate doesn't see it as generic email noise.
+`_is_self_chat_turn()` (`imessage.py:69`) detects iMessage's built-in single-participant self-chat: `raw_speaker == "me"` and `chat_label` matches the user's own email, phone, or display name. Matching turns are routed to `_dispatch_self_imessage_to_cos` (`imessage.py:118`) which:
 
-Cos reads the conversation file via MCP `get_page("conversations", "<date>/<slug>")` to see the full thread, and uses `search_deja` for cross-thread topical lookups. Its reply goes through `send_email_to_self` with `in_reply_to` + `thread_id`, which threads cleanly in Gmail.
+- Dedupes on `id_key` via `~/.deja/chief_of_staff/processed_self_imessages`.
+- Uses `thread_id = "imessage-self-YYYYMMDD"` so a day's self-notes cluster in one conversation file.
+- Logs the turn and fires `invoke_user_reply`.
+- Skips the `results.append(...)` in `_collect_imessages` — integrate never sees it.
+
+### 12.3 WhatsApp self-chat (`observations/whatsapp.py`)
+
+Same contract as iMessage. `_dispatch_self_whatsapp_to_cos` (`whatsapp.py:114`) with `thread_id = "whatsapp-self-YYYYMMDD"` and dedupe via `~/.deja/chief_of_staff/processed_self_whatsapp_messages`. WhatsApp doesn't have a first-class "self-chat" UI the way iMessage does, but the `me → me` pattern works the same way once WhatsApp is configured to allow it.
 
 ## 13. Setup flow
 
@@ -768,7 +810,7 @@ The ones you'll trip on if you don't know:
 - **TCC grants are per code-signing-identity.** Don't rebuild with ad-hoc signing in an environment where TCC has been granted — you'll re-prompt.
 - **Bundled Python can't write .pyc at runtime.** Set `PYTHONDONTWRITEBYTECODE=1` or face Gatekeeper errors.
 - **Screenshots are dedupe'd by perceptual hash.** Terminal frames with slightly different text can collide. `observations/screenshot.py` has a 90s time-based override for that case.
-- **Self-emails with `[Deja]` subject are dropped by the observer** unless they start with `Re:` (which routes to cos). Makes cos outbound not feed back into integrate, but means reminders the user manually labels `[Deja]` never enter the pipeline.
+- **User→user messages (any channel) route straight to cos, not integrate.** Email-to-self, iMessage self-chat, WhatsApp self-chat — all bypass the observation log and fire cos in `user_reply` mode. The sole exception is cos's own outbound `[Deja] ...` emails (non-`Re:`), which are dropped to prevent a self-feeding loop. Practical consequence: reminders the user manually labels `[Deja]` in a subject line never enter the pipeline as observations — route them through the self-channel instead.
 - **The integrate prompt Rule 7 is strict on person-page creation.** Names in screenshot OCR alone (no email, no phone, no prior `[[slug]]`) won't create people pages. This is intentional — prevents "ghost people" from inbox previews.
 - **Preprocess gate is 400 chars.** Screenshots with <400 chars of OCR skip Flash-Lite and go raw to integrate. Tune `_PREPROCESS_MIN_CHARS` if you want more/less summarization.
 - **Reflect is missed-fire-safe.** If the machine was asleep during a slot, the next wake runs the pass once. If multiple slots were missed, they coalesce — no stampede.
