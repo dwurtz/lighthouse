@@ -7,10 +7,10 @@ This choice carries most of the design. Every other decision — how cos reasons
 !!! info "The wiki is one of two on-disk roots"
     Deja's state lives in two separate directories, on purpose:
 
-    - **`~/Deja/`** — this file. Curated memory. Git-tracked, human-readable, reviewable, reversible. Share it with a private remote if you want; treat it like a notebook you and an agent co-author.
+    - **`~/Deja/`** — the wiki (what this page is about). Git-tracked, human-readable, reviewable, reversible. Share it with a private remote if you want; treat it like a notebook you and an agent co-author.
     - **`~/.deja/`** — raw state. Observations log, audit log, screenshot PNGs, OCR sidecars, cos config, sockets, cursors. Not git-tracked (too big, too noisy, too private at the raw level). You could delete it tomorrow; the wiki here still carries everything Deja actually "knows."
 
-    Integrate's job is to distill the raw stream into the curated wiki. If something matters enough to reason about twice, it ends up in `~/Deja/`. If it's just signal, it stays under `~/.deja/`.
+    Integrate's job is to distill the raw stream into the wiki. If something matters enough to reason about twice, it ends up in `~/Deja/`. If it's just signal, it stays under `~/.deja/`.
 
 ## Layout
 

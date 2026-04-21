@@ -19,7 +19,7 @@ flowchart TB
     end
 
     subgraph Storage["Shared substrate — two directories, one discipline"]
-        Wiki["$HOME/Deja/<br/><b>Curated memory</b><br/>markdown + git (committed)"]
+        Wiki["$HOME/Deja/<br/><b>The wiki</b><br/>markdown + git (committed)"]
         State["$HOME/.deja/<br/><b>Raw state</b><br/>jsonl · caches · sidecars"]
     end
 
@@ -58,11 +58,11 @@ Everything below is either a consequence of that picture, or a choice about how 
 
 Deja splits storage into two places on purpose:
 
-| | `~/Deja/` | `~/.deja/` |
+| | `~/Deja/` — **the wiki** | `~/.deja/` — **raw state** |
 |---|---|---|
-| **What** | Curated memory — people, projects, events, `goals.md` | Raw state — observations log, audit log, screenshot PNGs, OCR sidecars, caches, sockets, cos config |
+| **What** | People, projects, events, `goals.md` | Observations log, audit log, screenshot PNGs, OCR sidecars, caches, sockets, cos config |
 | **Git?** | Yes, local repo. Every agent write is a commit with a `reason`. You can diff, revert, walk history. | No. It grows fast (thousands of JSONL lines + tens of MB of PNGs per day) and isn't meant to be reviewed entry-by-entry. |
-| **Audience** | Human-readable. Open it in Obsidian. Share / publish / back up if you want. | Infrastructure. Caches and sidecars. Privacy floor — raw screenshots of in-flight work that the wiki has already distilled away from. |
+| **Audience** | Human-readable. Open it in Obsidian. Share / publish / back up if you want. | Infrastructure. Caches and sidecars. Privacy floor — raw screenshots of in-flight work the wiki has already distilled away from. |
 | **Reversibility** | `git revert` any bad write. | Append-only by design; nothing to reverse. Safe to throw away; most of it rebuilds from cursors. |
 
 The split enforces a useful discipline: if something matters enough to reason about again, integrate distills it into the wiki. If it's just raw signal, it stays under `.deja/`. You could delete `~/.deja/` tomorrow and the wiki would still carry everything Deja actually "knows."
