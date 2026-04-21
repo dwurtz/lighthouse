@@ -39,7 +39,7 @@ flowchart LR
 
 Durable rules that shape every cos decision. These change rarely — weeks or months, not days — and cos treats them as first-class guidance.
 
-```markdown
+```json
 ## Standing context
 
 - Joe drives carpool Monday and Wednesday. Jane drives Tuesday and Thursday.
@@ -56,7 +56,7 @@ Durable rules that shape every cos decision. These change rarely — weeks or mo
 
 Trigger → action rules that cos executes on a cadence or [signal](signals.md).
 
-```markdown
+```
 ## Automations
 
 - **TeamSnap → Calendar**: When a TeamSnap email arrives with a new/updated
@@ -81,7 +81,7 @@ Trigger → action rules that cos executes on a cadence or [signal](signals.md).
 
 Things you've committed to doing yourself.
 
-```markdown
+```
 ## Tasks
 
 - [ ] Finish and ship <project> before start date
@@ -98,7 +98,7 @@ Things you've committed to doing yourself.
 
 Things other people owe you.
 
-```markdown
+```
 ## Waiting for
 
 - [ ] **Jane** — feedback on draft before we ship (so we can publish live)
@@ -115,7 +115,7 @@ Things other people owe you.
 
 Date-tagged nudges cos will surface on or after a specific date. Format: `[YYYY-MM-DD]`.
 
-```markdown
+```
 ## Reminders
 
 - [2026-05-08] Did Joe send the demo? Check back if silent.
@@ -134,7 +134,7 @@ Date-tagged nudges cos will surface on or after a specific date. Format: `[YYYY-
 
 Resolved items with their resolution reasons and timestamps. Never gets re-read for decisions — it's for you and for debugging.
 
-```markdown
+```
 ## Archive
 
 - [2026-04-14] Run the blind shadow eval for integrate-model comparison.
@@ -150,7 +150,7 @@ Resolved items with their resolution reasons and timestamps. Never gets re-read 
 
 Sweeps that fire on schedule, not in response to signals.
 
-```markdown
+```
 ## Recurring
 
 - **Sunday night**: Confirm carpool plan is set for the upcoming week
