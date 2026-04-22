@@ -354,6 +354,13 @@ class GeminiClient:
 
             duration = int((_time.time() - t0) * 1000)
             track_llm_call(model=model, duration_ms=duration, ok=True, request_id=request_id)
+            # Successful proxy call — reset the consecutive-failure
+            # debounce counter so the next transient blip starts fresh.
+            try:
+                from deja.observability.reporter import mark_proxy_ok
+                mark_proxy_ok()
+            except Exception:
+                pass
             return resp.json()["text"]
         except Exception as e:
             duration = int((_time.time() - t0) * 1000)

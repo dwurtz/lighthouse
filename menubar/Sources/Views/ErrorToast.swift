@@ -69,11 +69,17 @@ struct ErrorToast: View {
 
             Button(action: onDismiss) {
                 Image(systemName: "xmark")
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundColor(.white.opacity(0.4))
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.85))
+                    .frame(width: 22, height: 22)
+                    .background(
+                        Circle().fill(Color.white.opacity(0.10))
+                    )
+                    .contentShape(Circle())
             }
             .buttonStyle(.plain)
-            .padding(.top, 2)
+            .padding(.top, -2)
+            .help("Dismiss this error")
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
