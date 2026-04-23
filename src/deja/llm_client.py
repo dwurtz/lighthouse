@@ -305,17 +305,50 @@ class GeminiClient:
             if token:
                 headers["Authorization"] = f"Bearer {token}"
             serialized = self._serialize_contents(contents)
-            try:
-                resp = await self._http.post("/v1/generate", json={
-                    "model": model,
-                    "contents": serialized,
-                    "config": config_dict,
-                }, headers=headers)
-            except (httpx.TimeoutException, httpx.ConnectError, httpx.NetworkError) as e:
+            # Retry with backoff on transient connection errors — laptop
+            # wake, Render cold start, or a brief Wi-Fi dropout. 3 attempts
+            # total with 2s / 5s waits absorbs ~7s of disruption before
+            # the user ever sees a ProxyUnavailable. Real outages still
+            # surface (all three fail) after ~7s; transient blips silently
+            # succeed on retry. Non-retriable httpx errors bypass this.
+            import asyncio as _asyncio
+            _backoffs = (0, 2, 5)
+            _last_exc: Exception | None = None
+            resp = None
+            for _attempt, _wait in enumerate(_backoffs):
+                if _wait:
+                    await _asyncio.sleep(_wait)
+                try:
+                    resp = await self._http.post("/v1/generate", json={
+                        "model": model,
+                        "contents": serialized,
+                        "config": config_dict,
+                    }, headers=headers)
+                    break
+                except (httpx.ConnectError, httpx.NetworkError, httpx.ReadTimeout) as e:
+                    _last_exc = e
+                    log.info(
+                        "proxy connect failed (attempt %d/%d): %s — retrying",
+                        _attempt + 1, len(_backoffs), type(e).__name__,
+                    )
+                    continue
+                except httpx.TimeoutException as e:
+                    # Write timeouts aren't retried — the request may have
+                    # landed and we don't want to double-post.
+                    raise ProxyUnavailable(
+                        f"proxy request failed: {type(e).__name__}: {e}",
+                        details={"url": f"{DEJA_API_URL}/v1/generate", "model": model},
+                    ) from e
+            if resp is None:
                 raise ProxyUnavailable(
-                    f"proxy request failed: {type(e).__name__}: {e}",
-                    details={"url": f"{DEJA_API_URL}/v1/generate", "model": model},
-                ) from e
+                    f"proxy request failed after {len(_backoffs)} attempts: "
+                    f"{type(_last_exc).__name__}: {_last_exc}",
+                    details={
+                        "url": f"{DEJA_API_URL}/v1/generate",
+                        "model": model,
+                        "attempts": len(_backoffs),
+                    },
+                ) from _last_exc
 
             status = resp.status_code
             if status >= 400:

@@ -82,7 +82,12 @@ def report_error(err: DejaError, *, visible_to_user: bool = True) -> None:
 
     if visible_to_user and _is_proxy_error(err):
         _consecutive_proxy_fails += 1
-        if _consecutive_proxy_fails < 2:
+        # Require 3 consecutive failures before surfacing. Each
+        # failed proxy call in llm_client already retries 3 times
+        # internally with 2s/5s backoff, so a real outage visible
+        # at this level means ~21s of confirmed unreachability.
+        # Laptop wake and brief Wi-Fi dropouts never reach that bar.
+        if _consecutive_proxy_fails < 3:
             log.info(
                 "Suppressed transient ProxyUnavailable (count=%d) — "
                 "not escalating to user-visible toast yet.",
