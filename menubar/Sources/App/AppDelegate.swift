@@ -269,6 +269,22 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: Status item setup
 
     private func setupStatusItem(attempt: Int = 1) {
+        // Clear a stale persisted position that would place the icon
+        // left of the notch, where app menus cover it and the icon is
+        // silently invisible even though NSStatusBar reports the slot
+        // allocated. Positions are points from the right edge; anything
+        // past the screen midpoint is in the notch/app-menu danger zone.
+        // Only clear on the first attempt so the retry path doesn't keep
+        // re-clearing a freshly-chosen position.
+        if attempt == 1, let screenWidth = NSScreen.main?.frame.width {
+            let positionKey = "NSStatusItem Preferred Position Item-0"
+            let persisted = UserDefaults.standard.double(forKey: positionKey)
+            if persisted > screenWidth / 2 {
+                UserDefaults.standard.removeObject(forKey: positionKey)
+                NSLog("deja: cleared stale status item position %.0f (>%.0f)", persisted, screenWidth / 2)
+            }
+        }
+
         // Use a fixed length so macOS reserves the slot even when the
         // menu bar is crowded. variableLength is a hint that the system
         // can resolve to zero on constrained menu bars (e.g. MacBook Pro
@@ -306,19 +322,32 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         NSLog("deja: status item created on attempt %d", attempt)
 
+        // Try the bundled brand icon first (rendered as-is, since it has
+        // its own colors); fall back to an SF Symbol if the PNG doesn't
+        // load. The SF Symbol fallback is guaranteed to render on modern
+        // macOS, so the tray slot is never silently empty.
+        var iconLoaded = false
         if let resourcePath = Bundle.main.resourcePath {
             let iconURL = URL(fileURLWithPath: resourcePath).appendingPathComponent("tray-icon.png")
             if let img = NSImage(contentsOf: iconURL) {
                 img.isTemplate = false
                 img.size = NSSize(width: 22, height: 22)
                 button.image = img
+                iconLoaded = true
             } else {
                 NSLog("deja: ERROR — tray-icon.png not found at \(iconURL.path)")
-                button.title = "Déjà"
             }
         } else {
             NSLog("deja: ERROR — no resourcePath in bundle")
-            button.title = "Déjà"
+        }
+        if !iconLoaded {
+            if let sfImg = NSImage(systemSymbolName: "sparkles", accessibilityDescription: "Déjà") {
+                sfImg.isTemplate = true
+                button.image = sfImg
+                NSLog("deja: status item falling back to SF Symbol 'sparkles'")
+            } else {
+                button.title = "Déjà"
+            }
         }
         button.toolTip = "Déjà"
         button.target = self
