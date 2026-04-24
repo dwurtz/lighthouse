@@ -2054,6 +2054,18 @@ def _dispatch(name: str, args: dict) -> str:
             timeout_sec=args.get("timeout_sec", 180),
         )
 
+    if name == "draft_imessage":
+        return _draft_imessage(
+            handle=args.get("handle", ""),
+            text=args.get("text", ""),
+        )
+
+    if name == "send_imessage":
+        return _send_imessage(
+            handle=args.get("handle", ""),
+            text=args.get("text", ""),
+        )
+
     return f"(unknown tool: {name})"
 
 
