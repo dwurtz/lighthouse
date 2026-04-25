@@ -25,8 +25,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var monitor = MonitorState()
     var statusItem: NSStatusItem!
     var contextMenu: NSMenu!
-    var isRecording: Bool = false
-    var micStatusTimer: Timer?
     var updaterController: SPUStandardUpdaterController!
     var setupPanelWindow: SetupPanelWindow?
     var settingsPanelWindow: SettingsPanelWindow?
@@ -81,8 +79,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 NSLog("deja: mic TCC prompt result: granted=\(granted)")
             }
         }
-
-        startMicStatusPolling()
 
         // Sparkle auto-updater — checks for updates on launch and periodically
         updaterController = SPUStandardUpdaterController(
@@ -293,7 +289,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // below silently no-ops. Fixed length is more aggressive and
         // retries (below) give the menu bar a chance to free up space
         // during the first few seconds of login.
-        statusItem = NSStatusBar.system.statusItem(withLength: 22)
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         statusItem.isVisible = true
 
         guard let button = statusItem.button else {
@@ -513,51 +509,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         panel.makeKey()
         NSApp.activate(ignoringOtherApps: true)
         settingsPanelWindow = panel
-    }
-
-    // MARK: Mic control — polls the shared MonitorState so the popover
-    // button and the menu-bar icon both reflect the same recording state.
-
-    private func startMicStatusPolling() {
-        micStatusTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: true) { [weak self] _ in
-            self?.refreshMicStatus()
-        }
-        refreshMicStatus()
-    }
-
-    private func refreshMicStatus() {
-        let previous = isRecording
-        let now = monitor.meetingRecording
-        if now != previous {
-            applyMicState(recording: now)
-        }
-        // Re-assert the icon if macOS dropped it (can happen during capture).
-        if let button = statusItem?.button, button.image == nil {
-            if let resourcePath = Bundle.main.resourcePath {
-                let iconURL = URL(fileURLWithPath: resourcePath).appendingPathComponent("tray-icon.png")
-                if let img = NSImage(contentsOf: iconURL) {
-                    img.isTemplate = true
-                    img.size = NSSize(width: 18, height: 18)
-                    button.image = img
-                }
-            }
-        }
-    }
-
-    private func applyMicState(recording: Bool) {
-        self.isRecording = recording
-        // Icon stays the same — the pill shows recording state via
-        // its waveform animation. The tray item is a static escape
-        // hatch and no longer reflects live recording state.
-    }
-
-    @objc private func toggleMic() {
-        // The context-menu item routes through the same MonitorState call
-        // as the popover button so both surfaces stay in sync.
-        monitor.toggleMic()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-            self?.refreshMicStatus()
-        }
     }
 
     // MARK: Click handling
