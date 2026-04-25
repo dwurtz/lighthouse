@@ -41,6 +41,35 @@ log = logging.getLogger(__name__)
 
 GOALS_PATH = WIKI_DIR / "goals.md"
 
+# Skeleton written when goals.md does not exist yet. Both first-run paths
+# (Swift wizard via ``setup_api.set_identity`` and the headless ``deja
+# configure`` CLI) call ``ensure_goals_file()`` so a freshly-installed
+# wiki always has the section scaffold the agent expects.
+_GOALS_TEMPLATE = (
+    "# Goals\n\n"
+    "## Standing context\n\n\n"
+    "## Automations\n\n\n"
+    "## Tasks\n\n\n"
+    "## Waiting for\n\n\n"
+    "## Reminders\n\n\n"
+    "## Archive\n\n"
+)
+
+
+def ensure_goals_file() -> bool:
+    """Create ``goals.md`` with the standard section skeleton if missing.
+
+    Returns True if a file was created, False if it already existed. The
+    parent ``WIKI_DIR`` is created if needed so this can run before any
+    other wiki scaffolding. Idempotent — safe to call on every startup.
+    """
+    if GOALS_PATH.exists():
+        return False
+    WIKI_DIR.mkdir(parents=True, exist_ok=True)
+    GOALS_PATH.write_text(_GOALS_TEMPLATE)
+    return True
+
+
 _SECTION_ORDER = [
     "Standing context",
     "Automations",

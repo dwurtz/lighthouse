@@ -61,6 +61,7 @@ from typing import Any, Iterable
 import yaml
 
 from deja.config import DEJA_HOME, WIKI_DIR
+from deja.identity import load_user
 
 log = logging.getLogger(__name__)
 
@@ -260,10 +261,11 @@ def _append_turn_to_file(
         new_body = body_text.rstrip() + "\n\n" + new_section
         content = _serialize_frontmatter(meta) + "\n" + new_body.lstrip("\n")
     else:
+        user_slug = load_user().slug or "user"
         meta = {
             "thread_id": thread_id or "",
             "subject": subject or "",
-            "participants": ["david-wurtz", "deja-cos"],
+            "participants": [user_slug, "deja-cos"],
             "channel": "email",
             "started_at": now,
             "updated_at": now,
@@ -381,6 +383,8 @@ def migrate_dialogue_log() -> int:
     if not turns:
         return 0
 
+    user_slug = load_user().slug or "user"
+
     groups: dict[str, list[dict]] = {}
     for t in turns:
         key = t.get("thread_id") or f"__solo__:{t.get('message_id') or t.get('ts', '')}"
@@ -402,14 +406,14 @@ def migrate_dialogue_log() -> int:
         participants: list[str] = []
         for t in group:
             r = _role_label(t.get("role", ""))
-            who = "david-wurtz" if r == "user" else "deja-cos"
+            who = user_slug if r == "user" else "deja-cos"
             if who not in participants:
                 participants.append(who)
 
         meta = {
             "thread_id": thread_id,
             "subject": subject,
-            "participants": participants or ["david-wurtz", "deja-cos"],
+            "participants": participants or [user_slug, "deja-cos"],
             "channel": "email",
             "started_at": _parse_iso(first.get("ts", ""))
                 .astimezone(timezone.utc)

@@ -347,7 +347,7 @@ def _slug_for_wiki_target(target: str) -> tuple[str, str] | None:
     """Map an audit ``target`` string to a (vault_path, display_slug)
     pair suitable for building an ``obsidian://`` URL.
 
-    Audit targets look like ``people/david-wurtz``,
+    Audit targets look like ``people/<user-slug>``,
     ``projects/window-cleaning-vendor-search``, or
     ``events/2026-04-16/david-tours-mansion``. We strip off a trailing
     ``.md`` if present and return the path as-is for Obsidian. Returns
@@ -379,9 +379,9 @@ def get_wiki_updates(limit: int = 20) -> dict:
         {
           "timestamp": "YYYY-MM-DD HH:MM",
           "action": "wiki_write",
-          "target": "people/david-wurtz",   # raw
-          "slug":   "people/david-wurtz",   # vault-relative (no .md)
-          "display": "david-wurtz",         # leaf for rendering
+          "target": "people/<user-slug>",   # raw
+          "slug":   "people/<user-slug>",   # vault-relative (no .md)
+          "display": "<user-slug>",         # leaf for rendering
           "reason": "...",
           "linkable": true,
         }

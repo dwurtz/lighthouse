@@ -325,6 +325,16 @@ def _run_configure() -> None:
     (WIKI_DIR / "projects").mkdir(exist_ok=True)
     # Prompts are bundled inside the package — no wiki copy needed.
 
+    # Seed goals.md with the section skeleton so the agent has a
+    # well-formed file to write into on day one. Mirrors what the Swift
+    # setup wizard does via `setup_api.set_identity`.
+    try:
+        from deja.goals import ensure_goals_file
+        if ensure_goals_file():
+            print("  created goals.md")
+    except Exception as e:
+        print(f"  warning: goals.md seed failed ({e})")
+
     # Ensure the wiki is a git repo
     try:
         from deja.wiki_git import ensure_repo

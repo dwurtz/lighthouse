@@ -25,7 +25,7 @@ Start with:
 Configure in Hermes (``~/.hermes/config.yaml``):
     mcp_servers:
       deja:
-        command: /Users/wurtz/projects/deja/.venv/bin/python
+        command: /path/to/deja/.venv/bin/python
         args: ["-m", "deja", "mcp"]
 
 Configure in Claude Desktop:
@@ -1120,7 +1120,7 @@ def _mcp_audit_context() -> None:
 def _profile_headline(profile_md: str, max_sentences: int = 2) -> str:
     """Trim the user profile to its first ~2 sentences.
 
-    The david-wurtz.md body is an ever-accumulating single-paragraph
+    The user's self-page body is an ever-accumulating single-paragraph
     state summary — ~1.5K words of "who they are + everything they're
     currently doing." Dumping all of it on every briefing is wasteful:
     the agent needs the headline framing ("who is this person") and

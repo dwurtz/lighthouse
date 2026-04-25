@@ -143,11 +143,13 @@ def set_identity(body: dict) -> dict:
     for subdir in ["people", "projects", "events"]:
         (WIKI_DIR / subdir).mkdir(exist_ok=True)
 
-    # Create self-page
+    # Create self-page. Use the plural ``emails:`` list shape so this
+    # matches the format ``deja configure`` writes and the format
+    # ``identity._first_of`` prefers.
     self_page = WIKI_DIR / "people" / f"{slug}.md"
     if not self_page.exists():
         self_page.write_text(
-            f"---\nself: true\nemail: {email}\n"
+            f"---\nself: true\nemails:\n  - {email}\n"
             f"preferred_name: {preferred_name}\n---\n\n"
             f"# {name}\n\n"
             f"The user behind Deja.\n"
@@ -157,18 +159,9 @@ def set_identity(body: dict) -> dict:
     # ``deja.prompts.load()`` reads from ``default_assets/prompts/``
     # directly, so Sparkle updates deliver new prompts automatically.
 
-    # Create goals.md if not present
-    goals = WIKI_DIR / "goals.md"
-    if not goals.exists():
-        goals.write_text(
-            "# Goals\n\n"
-            "## Standing context\n\n\n"
-            "## Automations\n\n\n"
-            "## Tasks\n\n\n"
-            "## Waiting for\n\n\n"
-            "## Reminders\n\n\n"
-            "## Archive\n\n"
-        )
+    # Create goals.md if not present (shared with `deja configure`).
+    from deja.goals import ensure_goals_file
+    ensure_goals_file()
 
     # Initialize git repo
     try:
