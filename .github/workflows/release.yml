@@ -1,19 +1,14 @@
 name: Build & Release DMG
 
 on:
+  # Only build on tag pushes — that's the only run that actually
+  # ships an artifact (DMG upload, Sparkle sign, GitHub release).
+  # Main-branch builds were pure smoke tests on a macOS runner at
+  # 10x cost multiplier and produced no shipped output. Use
+  # `make release` locally or `workflow_dispatch` to validate.
   push:
-    branches: [main]
     tags: ['v*']
-    # Only trigger when files that actually affect the build change.
-    # Docs / appcast / .md churn shouldn't burn macOS-runner minutes
-    # (10x multiplier). Tag pushes ignore paths and always build.
-    paths:
-      - 'menubar/**'
-      - 'src/**'
-      - 'pyproject.toml'
-      - 'Deja*.plist'
-      - 'Deja.xcodeproj/**'
-      - '.github/workflows/release.yml'
+  workflow_dispatch: {}
 
 jobs:
   build:
