@@ -80,6 +80,48 @@ _NOISE_TEXT_PATTERNS = (
 )
 
 
+# Positive markers for real bookings the user cares about (haircuts,
+# doctors, restaurants, hotels, flights). When any of these appear in
+# the body we keep the signal even if a noise pattern also matched —
+# automation senders ship genuine appointment confirmations all day.
+_APPOINTMENT_PATTERNS = (
+    "appointment confirm",      # "appointment confirmation", "appointment confirmed"
+    "your appointment",
+    "appointment scheduled",
+    "appointment is scheduled",
+    "appointment with",
+    "booking confirm",
+    "your booking",
+    "booking is confirmed",
+    "reservation confirm",
+    "your reservation",
+    "reservation is confirmed",
+    "confirmation number",
+    "confirmation #",
+    "confirmation code",
+    "confirmed for",
+    "reserved for",
+    "you're booked",
+    "youre booked",
+    "we look forward to seeing you",
+)
+
+
+def _is_appointment_confirmation(obs: dict) -> bool:
+    """Return True if obs looks like a real booking/appointment confirmation.
+
+    Scans a wider window than _is_noise (1500 chars vs 400) because
+    confirmation details often sit below a marketing header.
+    """
+    text = (obs.get("text") or "").lower()[:1500]
+    if not text:
+        return False
+    for pat in _APPOINTMENT_PATTERNS:
+        if pat in text:
+            return True
+    return False
+
+
 def _is_noise(obs: dict) -> bool:
     """Return True if a Tier-3 observation looks like pure automation."""
     sender = (obs.get("sender") or "").lower()
@@ -159,7 +201,13 @@ def triage_signals(signal_items: list[dict]) -> list[dict]:
         if tier in (1, 2):
             kept.append(obs)
             continue
-        # Tier 3: drop automation / bulk noise, then gate on catalog.
+        # Tier 3: appointment confirmations beat both the noise filter
+        # and the catalog gate. A new haircut/doctor/restaurant booking
+        # is exactly the kind of fact the user wants on their calendar
+        # even when the sender is no-reply and the slug isn't on file yet.
+        if _is_appointment_confirmation(obs):
+            kept.append(obs)
+            continue
         if _is_noise(obs):
             log.info(
                 "triage dropped noise [%s] %s",
