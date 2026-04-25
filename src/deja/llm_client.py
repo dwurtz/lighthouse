@@ -1,8 +1,13 @@
-"""Gemini LLM client for Déjà.
+"""LLM client for Déjà.
 
-Routes all LLM calls through the Deja API server proxy. When the
-``GEMINI_API_KEY`` env var is set, falls back to direct google-genai
-SDK calls (developer / CI mode).
+The integrate path (every-cycle wiki updates) runs through Claude
+Opus via a ``claude -p`` subprocess — see ``integrate_claude_vision``.
+
+This module's ``GeminiClient`` handles the remaining Gemini-backed
+features: meeting transcription, screenshot OCR preprocess, chat /
+command routes, reflection, onboarding. Routes through the Deja API
+server proxy by default; with ``GEMINI_API_KEY`` set, falls back to
+direct google-genai SDK calls (developer / CI mode).
 
 The server proxy is at ``DEJA_API_URL`` (default ``https://api.trydeja.com``)
 and accepts ``POST /v1/generate`` with ``Authorization: Bearer <token>``.
@@ -24,7 +29,7 @@ import httpx
 from google.genai import types  # re-exported for reflection.py and prefilter.py
 
 from deja.auth import get_auth_token
-from deja.config import INTEGRATE_MODEL, REFLECT_MODEL, VISION_MODEL
+from deja.config import REFLECT_MODEL, VISION_MODEL
 
 DEJA_API_URL = os.environ.get("DEJA_API_URL", "https://deja-api.onrender.com")
 _USE_DIRECT = bool(os.environ.get("GEMINI_API_KEY"))
@@ -437,10 +442,14 @@ class GeminiClient:
         wiki_text: str,
         open_windows: str = "",
         *,
-        claude_signals_text_override: str | None = None,
         claude_signal_items: list[dict] | None = None,
     ) -> dict:
-        """Run one unified analysis cycle. Returns {reasoning, wiki_updates}."""
+        """Run one unified analysis cycle. Returns {reasoning, wiki_updates}.
+
+        Spawns ``claude -p`` with the integrate prompt and the cycle's
+        screenshot PNGs attached as multimodal image blocks. Pure pixels
+        in, JSON out — no OCR / preprocess-VLM layer.
+        """
         now = datetime.now()
         current_time = now.strftime("%Y-%m-%d %H:%M")
         day_of_week = now.strftime("%A")
@@ -476,6 +485,31 @@ class GeminiClient:
             pass
         goals_text = _truncate_goals_text(goals_text)
 
+        # Strip screenshot signal text from the prompt — the images are
+        # attached as multimodal blocks and are the authoritative visual
+        # context. Keep non-screenshot signals (messages, calendar, etc.)
+        # in the text body.
+        vision_signals_text = signals_text or "(no new signals)"
+        if claude_signal_items is not None:
+            from deja.signals.format import format_signals as _fmt
+            non_screenshot = [
+                s for s in claude_signal_items if s.get("source") != "screenshot"
+            ]
+            vision_signals_text = _fmt(non_screenshot) or "(no non-screenshot signals this cycle)"
+            screenshot_count = sum(
+                1 for s in claude_signal_items if s.get("source") == "screenshot"
+            )
+            vision_signals_text += (
+                f"\n\n[ATTACHED IMAGES] {screenshot_count} screenshot(s) from this "
+                "cycle are attached as images. They are the authoritative visual "
+                "context for the user's screen during this window. Use them to "
+                "distinguish active-reading from inbox-list preview; resolve "
+                "ambiguous pronouns against what's currently on screen; reject "
+                "text that appears only as a background list-preview snippet. Do "
+                "not create wiki events for each message visible in an inbox — "
+                "only for active threads / new commitments."
+            )
+
         prompt = load_prompt("integrate").format(
             current_time=current_time,
             day_of_week=day_of_week,
@@ -483,183 +517,13 @@ class GeminiClient:
             contacts_text=contacts_text,
             goals=goals_text or "(no goals.md)",
             wiki_text=wiki_text or "(empty)",
-            signals_text=signals_text or "(no new signals)",
+            signals_text=vision_signals_text,
             open_windows=open_windows or "(not available)",
             **user_fields,
         )
 
-        # Integrate shadow eval — when enabled, fires the same prompt
-        # through an alternate model in parallel with the production
-        # call. Only the production model's output drives the wiki;
-        # the shadow output is serialized to
-        # ``~/.deja/integrate_shadow/<ts>.json`` for offline comparison.
-        #
-        # The shadow model is the OTHER one — if production is Flash,
-        # shadow is Flash-Lite (watching for "did we miss anything?").
-        # If production is Flash-Lite, shadow is Flash (watching for
-        # "did Flash catch something FL hallucinated?"). Either way,
-        # we always have Flash-vs-Flash-Lite data.
-        try:
-            from deja.config import INTEGRATE_SHADOW_EVAL
-
-            shadow_on = bool(INTEGRATE_SHADOW_EVAL)
-        except Exception:
-            shadow_on = False
-
-        # Shadow set: the OTHER Flash variant (cheap A/B watchdog) plus
-        # Gemini 3.1 Pro (expensive, sees if a stronger model would make
-        # materially different calls). Order is preserved in the saved
-        # record as `shadows: [...]`.
-        shadow_models: list[str] = []
-        if shadow_on:
-            if INTEGRATE_MODEL == "gemini-2.5-flash":
-                shadow_models.append("gemini-2.5-flash-lite")
-            elif INTEGRATE_MODEL == "gemini-2.5-flash-lite":
-                shadow_models.append("gemini-2.5-flash")
-            shadow_models.append("gemini-3.1-pro-preview")
-
-        shadow_tasks: list[tuple[str, "asyncio.Task[str]"]] = []
-        for m in shadow_models:
-            t = asyncio.create_task(
-                self._generate(
-                    model=m,
-                    contents=prompt,
-                    config_dict={
-                        "response_mime_type": "application/json",
-                        "max_output_tokens": 16384,
-                        "temperature": 0.2,
-                    },
-                )
-            )
-            shadow_tasks.append((m, t))
-
-        # Claude vision integrator — used either as a shadow (default)
-        # or as the production driver (INTEGRATE_MODE="claude_vision").
-        # Spawns a `claude -p` subprocess with the integrate prompt
-        # AND the screenshot PNGs from the cycle attached as multimodal
-        # image blocks. Pure pixels in, JSON out — no OCR / preprocess-
-        # VLM layer in the Claude path at all.
-        claude_vision_task = None
-        try:
-            from deja.config import INTEGRATE_CLAUDE_SHADOW, INTEGRATE_MODE
-            vision_wanted = (
-                INTEGRATE_CLAUDE_SHADOW
-                or INTEGRATE_MODE == "claude_vision"
-            )
-            if vision_wanted:
-                # Build a vision-friendly prompt: same template, but
-                # swap the screenshot signal text for a marker so
-                # Claude understands the images are the authoritative
-                # visual context (not the preprocessed text).
-                vision_signals_text = (
-                    claude_signals_text_override or signals_text
-                )
-                # Strip screenshot signal text entirely — images carry it
-                from deja.signals.format import format_signals as _fmt
-                if claude_signal_items is not None:
-                    non_screenshot = [
-                        s for s in claude_signal_items if s.get("source") != "screenshot"
-                    ]
-                    vision_signals_text = _fmt(non_screenshot) or "(no non-screenshot signals this cycle)"
-                    vision_signals_text += (
-                        "\n\n[ATTACHED IMAGES] "
-                        f"{sum(1 for s in claude_signal_items if s.get('source')=='screenshot')} "
-                        "screenshot(s) from this cycle are attached as images. "
-                        "They are the authoritative visual context for the user's screen "
-                        "during this window. Use them to distinguish active-reading from "
-                        "inbox-list preview; resolve ambiguous pronouns against what's "
-                        "currently on screen; reject text that appears only as a background "
-                        "list-preview snippet. Do not create wiki events for each message "
-                        "visible in an inbox — only for active threads / new commitments."
-                    )
-                prompt_vision = load_prompt("integrate").format(
-                    current_time=current_time,
-                    day_of_week=day_of_week,
-                    time_of_day=time_of_day,
-                    contacts_text=contacts_text,
-                    goals=goals_text or "(no goals.md)",
-                    wiki_text=wiki_text or "(empty)",
-                    signals_text=vision_signals_text,
-                    open_windows=open_windows or "(not available)",
-                    **user_fields,
-                )
-                from deja.integrate_claude_vision import invoke_claude_vision_shadow
-                claude_vision_task = asyncio.create_task(
-                    invoke_claude_vision_shadow(
-                        prompt_vision,
-                        claude_signal_items or [],
-                    )
-                )
-                # When vision is shadow-only, register it as a shadow
-                # task so _save_integrate_shadow picks it up. When
-                # vision is production, it goes directly to the await
-                # below; Gemini becomes a shadow instead.
-                if INTEGRATE_MODE != "claude_vision":
-                    shadow_tasks.append((
-                        "claude-local-vision",
-                        claude_vision_task,
-                    ))
-        except Exception:
-            log.debug("claude vision task scheduling failed", exc_info=True)
-
-        # Production call. Default is Gemini Flash; INTEGRATE_MODE=
-        # "claude_vision" promotes the vision task to production and
-        # demotes Gemini to a parallel shadow. On vision failure we
-        # fall back to Gemini so a bad subprocess doesn't kill the
-        # cycle.
-        try:
-            from deja.config import INTEGRATE_MODE as _INT_MODE
-        except Exception:
-            _INT_MODE = "gemini"
-
-        prod_model_name = INTEGRATE_MODEL
-        t0 = time.time()
-        resp_text: str = ""
-
-        if _INT_MODE == "claude_vision" and claude_vision_task is not None:
-            # Fire Gemini as a parallel SHADOW so we still capture its
-            # output in the record and keep the A/B corpus growing.
-            gemini_shadow_task = asyncio.create_task(self._generate(
-                model=INTEGRATE_MODEL,
-                contents=prompt,
-                config_dict={
-                    "response_mime_type": "application/json",
-                    "max_output_tokens": 16384,
-                    "temperature": 0.2,
-                },
-            ))
-            shadow_tasks.append((INTEGRATE_MODEL + "-shadow", gemini_shadow_task))
-
-            try:
-                resp_text = await claude_vision_task
-                prod_model_name = "claude-local-vision"
-            except Exception as e:
-                log.warning(
-                    "claude vision production failed (%s) — falling back to Gemini",
-                    type(e).__name__,
-                )
-                resp_text = await self._generate(
-                    model=INTEGRATE_MODEL,
-                    contents=prompt,
-                    config_dict={
-                        "response_mime_type": "application/json",
-                        "max_output_tokens": 16384,
-                        "temperature": 0.2,
-                    },
-                )
-                prod_model_name = INTEGRATE_MODEL + "-fallback"
-        else:
-            resp_text = await self._generate(
-                model=INTEGRATE_MODEL,
-                contents=prompt,
-                config_dict={
-                    "response_mime_type": "application/json",
-                    "max_output_tokens": 16384,
-                    "temperature": 0.2,
-                },
-            )
-
-        prod_latency_ms = int((time.time() - t0) * 1000)
+        from deja.integrate_claude_vision import invoke_claude_vision
+        resp_text = await invoke_claude_vision(prompt, claude_signal_items or [])
 
         try:
             result = json.loads(resp_text, strict=False)
@@ -667,140 +531,25 @@ class GeminiClient:
             result = _parse_json(resp_text)
 
         if not isinstance(result, dict):
-            raise TypeError(f"integrate_observations expected dict, got {type(result).__name__}: {resp_text[:200]}")
+            raise TypeError(
+                f"integrate_observations expected dict, got "
+                f"{type(result).__name__}: {resp_text[:200]}"
+            )
 
         result.setdefault("reasoning", "")
         result.setdefault("wiki_updates", [])
         result.setdefault("observation_narrative", "")
 
-        # Normalize wiki_updates to the new body_markdown + event_metadata
-        # shape. Old bundled apps and onboarding still emit `content`;
-        # wiki.apply_updates also accepts that, but normalizing here makes
-        # downstream code (shadow-eval record, any new consumer) see a
-        # consistent schema. Passthrough when already normalized.
+        # Normalize wiki_updates to the body_markdown + event_metadata
+        # shape so downstream consumers see a consistent schema (the
+        # onboarding prompt still emits `content`; wiki.apply_updates
+        # accepts both, but normalizing here keeps debug artifacts clean).
         result["wiki_updates"] = [
             _normalize_wiki_update(u) for u in (result.get("wiki_updates") or [])
             if isinstance(u, dict)
         ]
 
-        # Save shadow comparison after the production call completes —
-        # never block the real cycle on the shadow. If the shadow task
-        # fails or times out we just skip serialization; the production
-        # path is unaffected.
-        if shadow_tasks:
-            try:
-                await self._save_integrate_shadow(
-                    prompt=prompt,
-                    signals_text=signals_text,
-                    prod_model=prod_model_name,
-                    prod_result=result,
-                    prod_latency_ms=prod_latency_ms,
-                    shadow_tasks=shadow_tasks,
-                )
-            except Exception:
-                log.debug("integrate shadow eval: save failed", exc_info=True)
-
         return result
-
-    async def _save_integrate_shadow(
-        self,
-        prompt: str,
-        signals_text: str,
-        prod_model: str,
-        prod_result: dict,
-        prod_latency_ms: int,
-        shadow_tasks: list,
-    ) -> None:
-        """Wait for all shadow calls and write a side-by-side JSON file.
-
-        Called after the production result is already returned to the
-        caller, so this runs in the tail of the cycle and never delays
-        the real work. Each shadow's failure/timeout is independent —
-        one slow model doesn't suppress the others.
-
-        Record shape:
-            production: {model, reasoning, wiki_updates, ...}
-            shadows: [{model, reasoning, ...}, ...]   # ordered
-        Legacy single-shadow readers can fall back to ``shadows[0]``.
-        """
-        async def _resolve(model: str, task) -> tuple[dict | None, int, str | None]:
-            start = time.time()
-            # Gemini variants complete in ~3-15s; claude-local takes 60-
-            # 120s end-to-end (full integrate prompt + reasoning +
-            # JSON). Wait long enough for Claude so the shadow actually
-            # lands; Gemini still finishes first and never feels the
-            # cap.
-            try:
-                text = await asyncio.wait_for(task, timeout=240.0)
-                latency = int((time.time() - start) * 1000)
-                try:
-                    parsed = json.loads(text, strict=False)
-                except Exception:
-                    parsed = _parse_json(text)
-                if not isinstance(parsed, dict):
-                    parsed = {"reasoning": "(non-dict response)", "raw": str(text)[:500]}
-                parsed.setdefault("reasoning", "")
-                parsed.setdefault("wiki_updates", [])
-                return parsed, latency, None
-            except asyncio.TimeoutError:
-                return None, int((time.time() - start) * 1000), "timeout"
-            except Exception as e:
-                return None, int((time.time() - start) * 1000), f"{type(e).__name__}: {e}"[:200]
-
-        results = await asyncio.gather(
-            *[_resolve(m, t) for (m, t) in shadow_tasks],
-            return_exceptions=False,
-        )
-
-        shadow_records = []
-        for (model, _task), (parsed, latency, err) in zip(shadow_tasks, results):
-            if parsed is None:
-                shadow_records.append({"model": model, "error": err, "latency_ms": latency})
-            else:
-                shadow_records.append({
-                    "model": model,
-                    "reasoning": parsed.get("reasoning", ""),
-                    "wiki_updates": parsed.get("wiki_updates", []),
-                    "goal_actions": parsed.get("goal_actions", []),
-                    "tasks_update": parsed.get("tasks_update", {}),
-                    "latency_ms": latency,
-                })
-
-        from deja.config import DEJA_HOME
-        shadow_dir = DEJA_HOME / "integrate_shadow"
-        shadow_dir.mkdir(parents=True, exist_ok=True)
-        ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-        out_path = shadow_dir / f"{ts}.json"
-
-        record = {
-            "timestamp": datetime.now().isoformat(),
-            "signals_text": signals_text[:20000],
-            "prompt_tokens_approx": len(prompt) // 4,
-            "production": {
-                "model": prod_model,
-                "reasoning": prod_result.get("reasoning", ""),
-                "wiki_updates": prod_result.get("wiki_updates", []),
-                "goal_actions": prod_result.get("goal_actions", []),
-                "tasks_update": prod_result.get("tasks_update", {}),
-                "latency_ms": prod_latency_ms,
-            },
-            "shadows": shadow_records,
-        }
-        try:
-            out_path.write_text(json.dumps(record, indent=2, default=str))
-            summary = ", ".join(
-                f"{s['model']}→{len(s.get('wiki_updates', [])) if 'error' not in s else 'err'}"
-                for s in shadow_records
-            )
-            log.info(
-                "integrate shadow: saved %s (prod=%s→%d updates; shadows: %s)",
-                out_path.name,
-                prod_model,
-                len(prod_result.get("wiki_updates", [])),
-                summary,
-            )
-        except Exception:
-            log.debug("integrate shadow: write failed", exc_info=True)
 
     # ------------------------------------------------------------------
     # Onboarding — cold-start wiki generation from historical mail
@@ -885,18 +634,6 @@ class GeminiClient:
             if isinstance(u, dict)
         ]
         return result
-
-    # Screenshot analysis removed — OCR'd locally via the ``deja-ocr``
-    # Swift binary (no LLM round-trip). The former cloud describe_screen
-    # method and its shadow-eval harness were retired 2026-04-13 once
-    # OCR proved sufficient for downstream integrate quality.
-    _removed_describe_screen = True  # type: ignore[unused-ignore]
-    async def _describe_screen_deleted(self, *a, **kw):  # pragma: no cover
-        raise NotImplementedError(
-            "describe_screen was removed; screenshots are OCR'd by deja-ocr"
-        )
-
-        return {"summary": resp_text.strip()[:1000], "app": "", "key_details": ""}
 
     # ------------------------------------------------------------------
     # Audio transcription

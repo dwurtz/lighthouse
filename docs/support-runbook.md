@@ -27,8 +27,7 @@ Ask for one of the following, in order of preference:
 ```
 
 Prints the full timeline correlated across `deja.log`, `audit.jsonl`,
-`errors.jsonl`, and any matching `integrate_shadow/*.json` cycle
-record. Useful flags:
+and `errors.jsonl`. Useful flags:
 
 - `--json` — copy-paste friendly, good for ticket attachments.
 - `--since 2026-04-10T12:00` — narrow a noisy window.

@@ -110,7 +110,7 @@ flowchart LR
     Cap --> PNG
     Cap --> OCR
     PNG --> Claude
-    OCR -.-> Debug[debugging / shadow eval<br/>not the primary path]
+    OCR -.-> Debug[local debugging<br/>OCR-only consumers]
 
     classDef source  fill:#1a365d,stroke:#2c5282,color:#f7fafc
     classDef wiki    fill:#22543d,stroke:#2f855a,color:#f7fafc
@@ -129,7 +129,7 @@ The old captor ran on a fixed 6-second timer and caught about **14,000 frames a 
 
 ### Pixels go to Claude, not text
 
-`INTEGRATE_MODE=claude_vision` is the production integrate path. For each screenshot in a cycle's batch, the raw PNG is base64-embedded as an `image` content block in a `claude -p --input-format stream-json` call. Claude Opus reads the pixels directly — focused-vs-inbox-preview distinction, calendar grid cells, bold/gray emphasis, layout — none of which survive an OCR intermediate. The PNGs are anchored with timestamp + display-label captions so Claude can reason about sequence ("frame 3 was 2s after frame 2" vs "4 minutes later").
+Claude Vision is the integrate path — hardcoded, no flag. For each screenshot in a cycle's batch, the raw PNG is base64-embedded as an `image` content block in a `claude -p --input-format stream-json` call. Claude Opus reads the pixels directly — focused-vs-inbox-preview distinction, calendar grid cells, bold/gray emphasis, layout — none of which survive an OCR intermediate. The PNGs are anchored with timestamp + display-label captions so Claude can reason about sequence ("frame 3 was 2s after frame 2" vs "4 minutes later").
 
 ### OCR still runs — but as a sidecar
 

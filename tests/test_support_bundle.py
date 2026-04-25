@@ -50,7 +50,7 @@ def _seed(home: Path) -> None:
         encoding="utf-8",
     )
     (home / "feature_flags.json").write_text(
-        '{"integrate_shadow_eval": true}\n', encoding="utf-8"
+        '{"some_flag": true}\n', encoding="utf-8"
     )
     # THIS FILE MUST NEVER END UP IN THE BUNDLE.
     (home / "observations.jsonl").write_text(

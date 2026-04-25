@@ -230,10 +230,7 @@ def _user_feature_flags(email: str | None) -> dict:
     Each flag env var is a comma-separated list of email addresses.
     Empty/unset = flag is off for everyone.
 
-    Currently empty — vision shadow eval was retired after the FastVLM
-    path was replaced with Apple Vision OCR, and integrate shadow eval
-    moved to a hardcoded-off client flag. Add new flags here when a
-    real A/B starts again.
+    Currently empty. Add new flags here when an A/B starts.
     """
     return {}
 

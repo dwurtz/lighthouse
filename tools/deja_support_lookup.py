@@ -9,9 +9,6 @@ Sources:
   * ``~/.deja/deja.log``           — log lines prefixed with ``[req_xxx]``
   * ``~/.deja/audit.jsonl``        — audit rows with ``request_id`` field
   * ``~/.deja/errors.jsonl``       — error rows with ``request_id`` field
-  * ``~/.deja/integrate_shadow/``  — per-cycle shadow eval records (best-
-                                     effort match: explicit ``request_id``
-                                     field, otherwise skipped)
 
 Usage:
 
@@ -128,29 +125,6 @@ def _collect_jsonl(path: Path, rid: str, source: str) -> list[Event]:
     return out
 
 
-def _collect_shadow(dirpath: Path, rid: str) -> list[Event]:
-    if not dirpath.exists() or not dirpath.is_dir():
-        return []
-    out: list[Event] = []
-    for p in sorted(dirpath.glob("*.json")):
-        try:
-            row = json.loads(p.read_text(encoding="utf-8"))
-        except Exception:
-            continue
-        # Only match on an explicit request_id field — we don't guess.
-        if row.get("request_id") != rid:
-            continue
-        ts = row.get("timestamp") or ""
-        out.append(Event(
-            ts=ts,
-            sort_key=_normalize_ts(ts),
-            source="SHADOW",
-            summary=f"shadow cycle file={p.name}",
-            raw=row,
-        ))
-    return out
-
-
 def _summarize_row(row: dict, source: str) -> str:
     if source == "AUDIT":
         action = row.get("action", "?")
@@ -238,7 +212,6 @@ def lookup(
     events.extend(_collect_log(base / "deja.log", request_id))
     events.extend(_collect_jsonl(base / "audit.jsonl", request_id, "AUDIT"))
     events.extend(_collect_jsonl(base / "errors.jsonl", request_id, "ERROR"))
-    events.extend(_collect_shadow(base / "integrate_shadow", request_id))
     events = _filter_since(events, since)
     events = _sort(events)
     if limit and limit > 0:

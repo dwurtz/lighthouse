@@ -1,24 +1,23 @@
-"""Claude vision shadow — send native screenshot PNGs instead of OCR text.
+"""Claude vision integrate — send native screenshot PNGs instead of OCR text.
 
-The third shadow variant in the integrate eval. Instead of passing
-Claude the OCR-then-preprocess intermediate representation of what's
-on screen, pass Claude the actual PNG via Anthropic's multimodal
-content-block input. Claude reads pixels directly.
+The integrate path (every-cycle wiki updates) runs Claude Opus 4.7
+against the raw screenshot PNGs via Anthropic's multimodal content-
+block input — Claude reads pixels directly, no OCR or preprocess-VLM
+intermediate.
 
 Why it matters
 --------------
 
-OCR + the preprocess VLM lose visual context that Claude can use:
+OCR + a preprocess VLM lose visual context that Claude can use:
 distinguishing a focused/active window from an inbox list preview,
 reading a calendar cell by its grid position rather than by
 misinterpreted text, noticing visual emphasis (bold, gray, underline)
-that indicates state. We saw concrete quality losses from the
-lossy pipeline — the Sorvillo 4:30pm / noon confusion, the Mike Wur2
-ghost page, the inbox-preview re-events.
+that indicates state. The lossy pipeline produced concrete quality
+losses — the Sorvillo 4:30pm / noon confusion, ghost-page entity
+collisions, inbox-preview re-events.
 
-Vision is more expensive (~1000 image tokens per screenshot,
-Opus 4.7 reasoning), but the hypothesis is that it closes a quality
-gap we can't close any other way.
+Vision costs ~1000 image tokens per screenshot plus Opus reasoning,
+but closes a quality gap the OCR+preprocess pipeline couldn't.
 
 Pipeline
 --------
@@ -308,28 +307,28 @@ def _run_claude_vision_sync(
         )
     except subprocess.TimeoutExpired:
         raise RuntimeError(
-            f"claude vision shadow timed out after {_SUBPROCESS_TIMEOUT_SEC}s "
+            f"claude vision timed out after {_SUBPROCESS_TIMEOUT_SEC}s "
             f"({len(images)} images)"
         )
 
     if proc.returncode != 0:
         raise RuntimeError(
-            f"claude vision shadow rc={proc.returncode}: {proc.stderr[:400]}"
+            f"claude vision rc={proc.returncode}: {proc.stderr[:400]}"
         )
     text = _extract_result_text(proc.stdout)
     if not text:
         raise RuntimeError(
-            f"claude vision shadow returned no result text ({len(proc.stdout)} "
+            f"claude vision returned no result text ({len(proc.stdout)} "
             f"bytes stdout, stderr={proc.stderr[:200]})"
         )
     log.info(
-        "claude vision shadow: %d image(s), %d result chars",
+        "claude vision: %d image(s), %d result chars",
         len(images), len(text),
     )
     return text
 
 
-async def invoke_claude_vision_shadow(
+async def invoke_claude_vision(
     prompt_text: str,
     signal_items: list[dict],
 ) -> str:
@@ -340,4 +339,4 @@ async def invoke_claude_vision_shadow(
     )
 
 
-__all__ = ["invoke_claude_vision_shadow"]
+__all__ = ["invoke_claude_vision"]

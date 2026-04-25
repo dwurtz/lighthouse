@@ -16,12 +16,18 @@ and drag Deja to Applications.
 
 On first launch, Deja runs a guided setup:
 
-1. Prompts for your Gemini API key (stored in macOS Keychain)
+1. Verifies the `claude` CLI (Claude Code) is installed — required for
+   the integrate cycle, which runs Claude Opus via `claude -p` subprocess
 2. Creates your identity self-page
 3. Copies default prompts into `~/Deja/prompts/`
 4. Auto-configures itself as an MCP server on Claude, Cursor, Windsurf,
    and any other detected AI clients
 5. Runs a health check
+
+Vision OCR preprocess, reflection, and chat run through Gemini via the
+Deja API server proxy by default — no user API key required. Developers
+running locally can set `GEMINI_API_KEY` to bypass the proxy and call
+Gemini directly.
 
 The app starts the monitor and web server as background processes.
 On first run it also kicks off onboarding — ingesting your recent email,
@@ -66,9 +72,12 @@ appends new entries to `observations.jsonl`. Sources:
 | Meeting recording | `meeting_transcribe.py` + `DejaRecorder` | user-initiated |
 
 No LLM calls happen at this tier except for screenshots: `VISION_MODEL`
-(default: `gemini-2.5-flash`) generates a wiki-grounded description of
-each frame. The description references `[[entity-slugs]]` from the current
-wiki index so downstream tiers can link observations to pages.
+(default: `gemini-2.5-flash`) generates a wiki-grounded OCR description
+of each frame for the OCR-only consumer paths. The description references
+`[[entity-slugs]]` from the current wiki index so downstream tiers can
+link observations to pages. The integrate path itself does not consume
+this preprocessed text — it reads raw screenshot pixels via Claude vision
+(see Integrate, below).
 
 Contact resolution runs at observe time: iMessage/WhatsApp phone numbers
 are matched against the macOS Contacts database to resolve display names.
@@ -81,7 +90,7 @@ observations, triages them, and runs one or two LLM calls to merge them
 into the wiki.
 
 **Triage.** Inbound message-type signals (iMessage, WhatsApp, email,
-browser) are filtered through a batched `INTEGRATE_MODEL` call
+browser) are filtered through a batched Gemini Flash-Lite prefilter call
 (`llm/prefilter.py`) that reads the wiki index and drops noise.
 Non-message signals and all outbound messages bypass triage.
 
@@ -99,7 +108,9 @@ asyncio lock that serializes with onboarding backfill writes.
 **Post-write.** After applying updates, the integrate cycle rebuilds
 `index.md`, refreshes QMD search indexes, and commits all changes to git.
 
-Model: `INTEGRATE_MODEL` (default: `gemini-2.5-flash-lite`).
+Model: `claude-opus-4-7` via the `claude -p` subprocess (`integrate_claude_vision.py`).
+Hardcoded — no config key. The subprocess receives raw screenshot PNGs
+as multimodal content blocks alongside the formatted signals.
 
 ### 3. Reflect (3x per day)
 
@@ -111,7 +122,7 @@ heartbeat past each slot boundary, runs at most once per slot.
 **Context budget.** Reflect feeds the full wiki, 7 days of event pages,
 up to 500KB of raw observations (~10,000 lines), the full `goals.md`,
 and macOS Contacts summaries into a single LLM call. The model
-(`REFLECT_MODEL`, default: `gemini-2.5-pro`) has a 1M-token context
+(`REFLECT_MODEL`, default: `gemini-3.1-pro-preview`) has a 1M-token context
 window, so Reflect can afford to be thorough.
 
 **Jobs:**
@@ -286,18 +297,19 @@ File: `~/Library/Application Support/Claude/claude_desktop_config.json`
 
 | Tier | Model (config key) | Default | Why |
 |---|---|---|---|
-| Observe/screen | `VISION_MODEL` | `gemini-2.5-flash` | Best wiki-link grounding in vision eval (15/15 vs Flash-Lite); 4x more entity refs than Flash-Lite at 1/4 Pro cost |
-| Prefilter | `INTEGRATE_MODEL` | `gemini-2.5-flash-lite` | Noise filter -- recall-biased, batched, cheap |
-| Integrate | `INTEGRATE_MODEL` | `gemini-2.5-flash-lite` | Precision for event creation + entity attribution, every 5 min |
-| Reflect | `REFLECT_MODEL` | `gemini-2.5-pro` | Deepest reasoning, full wiki context, 3 calls/day |
-| Onboard | `REFLECT_MODEL` | `gemini-2.5-pro` | One-time high-stakes bootstrap from historical data |
-| Chat | `REFLECT_MODEL` | `gemini-2.5-pro` | Tool use in conversational context |
+| Observe/screen | `VISION_MODEL` | `gemini-2.5-flash` | Wiki-grounded OCR description; consumed by OCR-only paths |
+| Prefilter | -- | none (deterministic) | Rule-based triage; see `deja.signals.triage` |
+| Integrate | (hardcoded) | `claude-opus-4-7` (via `claude -p` subprocess) | Reads raw screenshot pixels directly; precision for event creation + entity attribution |
+| Reflect | `REFLECT_MODEL` | `gemini-3.1-pro-preview` | Deepest reasoning, full wiki context, 3 calls/day |
+| Onboard | `REFLECT_MODEL` | `gemini-3.1-pro-preview` | One-time high-stakes bootstrap from historical data |
+| Chat | `CHAT_MODEL` | `gemini-3.1-pro-preview` | Tool use in conversational context |
 | MCP | -- | none | Pure retrieval, no LLM |
 
-All models are Gemini. The API key is resolved via `secrets.py`:
-`GEMINI_API_KEY` env var > `GOOGLE_API_KEY` env var > macOS Keychain
-(service: `deja`, account: `gemini-api-key`). Falls back to legacy
-keychain service names for migration.
+The integrate cycle requires the `claude` CLI on `PATH` (Claude Code).
+Gemini-backed tiers (vision OCR preprocess, prefilter, reflect, onboard,
+chat) route through the Deja API server proxy by default — no user API
+key required. Developers can set `GEMINI_API_KEY` (or `GOOGLE_API_KEY`)
+to bypass the proxy and call Gemini directly via the SDK.
 
 
 ## CLI
@@ -323,7 +335,7 @@ Source: `__main__.py`. The menu-bar app (`Deja.app`) spawns
 |---|---|
 | `~/.deja/` | Runtime state: `observations.jsonl`, `integrations.jsonl`, `config.yaml`, `deja.log`, `conversation.json`, `last_reflection_run`, PID files |
 | `~/Deja/` | The wiki (git repo). Override via `DEJA_WIKI` env var. |
-| macOS Keychain | Gemini API key (service: `deja`, account: `gemini-api-key`) |
+| macOS Keychain | Optional Gemini API key (service: `deja`, account: `gemini-api-key`) — only used in developer mode bypassing the server proxy |
 
 
 ## Configuration
@@ -332,9 +344,11 @@ Source: `__main__.py`. The menu-bar app (`Deja.app`) spawns
 
 ```yaml
 # LLM routing
-integrate_model: gemini-2.5-flash-lite   # prefilter + integrate
-vision_model:    gemini-2.5-flash         # screen descriptions
-reflect_model:   gemini-2.5-pro           # reflect + chat + onboard
+# Integrate is hardcoded to claude-opus-4-7 via the `claude` CLI subprocess.
+# Prefilter is deterministic (rule-based; see deja.signals.triage).
+vision_model:    gemini-2.5-flash             # screen OCR descriptions
+reflect_model:   gemini-3.1-pro-preview       # reflect + onboard
+chat_model:      gemini-3.1-pro-preview       # chat / command
 
 # Reflection schedule (local hours, 0-23)
 reflect_slot_hours: [2, 11, 18]
@@ -373,14 +387,18 @@ Grant each in **System Settings > Privacy & Security**. Run
 Deja runs on your Mac. Your wiki, observations, and configuration are
 local files. Network traffic consists of:
 
-- **Gemini API calls** — observation context and wiki pages are sent to
-  Google's Gemini models for analysis, integration, and reflection.
+- **Claude API calls** — the integrate cycle runs Claude Opus via a
+  local `claude -p` subprocess (Claude Code). Screenshots, signals, and
+  retrieved wiki pages are sent to Anthropic on every cycle.
+- **Gemini API calls** — vision OCR preprocess, prefilter, reflection,
+  and chat go to Google's Gemini models via the Deja API server proxy
+  (or directly with `GEMINI_API_KEY` set in developer mode).
 - **Google Workspace API calls** — Gmail, Calendar, Drive, and Tasks
   are accessed via the `gws` CLI authenticated as your Google account.
 
-No telemetry, no analytics, no third-party services beyond Google.
-The wiki is a local git repo — every change is versioned and reversible.
-The API key lives only in your macOS Keychain.
+No telemetry, no analytics, no third-party services beyond Anthropic
+and Google. The wiki is a local git repo — every change is versioned
+and reversible.
 
 
 ## Tests

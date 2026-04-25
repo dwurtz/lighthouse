@@ -76,15 +76,9 @@ OBSERVE_INTERVAL = _raw.get("observe_interval", 3)
 INTEGRATE_INTERVAL = _raw.get("integrate_interval", 300)
 SCREENSHOT_HASH_THRESHOLD = _raw.get("screenshot_hash_threshold", 12)
 
-# LLM models — two, used for different cadences
-INTEGRATE_MODEL = _raw.get(
-    "integrate_model", "gemini-2.5-flash"
-)  # integrate cycle — upgraded from Flash-Lite 2026-04-12 after shadow
-# eval showed Flash-Lite was hallucinating "ambient" reminders from
-# unrelated signals (verification-code / Mercury / Chime patterns).
-# Flash caught none of these; correctly closed an existing reminder
-# instead of creating a new one. ~4.2× more expensive per cycle but
-# meaningfully more disciplined. See docs/integrate-model-eval-plan.md.
+# LLM models — Gemini variants used for non-integrate features (vision
+# preprocess, reflection, chat). The integrate cycle itself runs Claude
+# Opus via the `claude -p` subprocess; see integrate_claude_vision.py.
 VISION_MODEL = _raw.get(
     "vision_model", "gemini-2.5-flash"
 )  # screen description — tuned independently from integrate because the
@@ -125,29 +119,6 @@ USER_SLUG = _raw.get("user_slug", "")
 # Off by default because screenshots accumulate fast and carry PII.
 VISION_RETENTION = bool(_raw.get("vision_retention", False))
 VISION_RETENTION_DIR = DEJA_HOME / "vision_retention"
-
-# Integrate shadow eval (Flash vs Flash-Lite vs Pro 3.1 A/B). OFF.
-# 303 recorded cycles were enough to confirm Flash is the right
-# production model — Flash-Lite under-disciplined, Pro 3.1 under-
-# attentive. The scaffolding in llm_client.py is kept for the next
-# model comparison; re-enable by flipping this flag to True.
-INTEGRATE_SHADOW_EVAL = False
-
-# Integrate Claude shadow — when True, fires a parallel `claude -p`
-# subprocess with the exact same integrate prompt on every cycle, lands
-# in ~/.deja/integrate_shadow/<ts>.json alongside the Gemini production
-# result for offline diffing. Does NOT affect production: Gemini still
-# drives wiki writes. Toggle this after a day or so of shadow data to
-# decide whether Claude should become the production integrator.
-INTEGRATE_CLAUDE_SHADOW = bool(_raw.get("integrate_claude_shadow", False))
-
-# Which integrator drives wiki writes.
-#   "gemini"        — default; Gemini Flash is production, optional Claude shadow
-#   "claude_vision" — Claude Opus 4.7 with native PNG input is production;
-#                     Gemini Flash becomes the parallel shadow
-# On claude_vision, a Gemini fallback kicks in if the Claude subprocess
-# fails / times out so a bad shadow doesn't take the cycle down.
-INTEGRATE_MODE = str(_raw.get("integrate_mode", "gemini"))
 
 # Kill switch for the screenshot collector. Set to false in config.yaml
 # if macOS Screen Recording permission is unstable or if you want to

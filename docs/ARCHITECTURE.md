@@ -224,14 +224,13 @@ Rows older than 7 days are trimmed during each reflect pass.
 | `last_integration_offset` | Byte offset into `observations.jsonl` — resumption mark. |
 | `last_reflection_run` | ISO timestamp — most recent successful reflect pass. |
 | `integrate_trigger.json` | Cross-process trigger: write this to fire integrate immediately. |
-| `raw_ocr/<YYYY-MM-DD>/<id_key>.txt` | Apple Vision OCR text from screenshots (preserved for vision shadow + debug). |
-| `raw_images/<YYYY-MM-DD>/<id_key>.png` | Raw screenshot PNGs (preserved for Claude Vision path). |
+| `raw_ocr/<YYYY-MM-DD>/<id_key>.txt` | Apple Vision OCR text from screenshots (consumed by OCR-only paths and debugging). |
+| `raw_images/<YYYY-MM-DD>/<id_key>.png` | Raw screenshot PNGs (consumed by the integrate Claude Vision path). |
 | `imessage_buffer.json` | Latest iMessage snapshot (dedupe). |
 | `contacts_buffer.json` | Google Contacts snapshot. |
 | `gmail_history_cursor.txt` | Gmail incremental-sync cursor. |
 | `calendar_sync_tokens.json` | Calendar incremental-sync tokens. |
 | `chief_of_staff/` | Cos config + state (detailed in §7). |
-| `integrate_shadow/` | Parallel shadow integrations (A/B eval output). |
 | `integrations.jsonl` | Integrate cycle outputs before wiki writes. |
 | `conversation.json` | Voice history shown in the notch panel. |
 | `typed_content.jsonl` | Snapshots of focused text fields (post typing-pause). |
@@ -299,9 +298,9 @@ The Observer orchestrator (`collector.py:31-206`) dedupes by `id_key`, then appe
 Screenshots are the only source with serious post-processing:
 
 1. **Capture** (Swift `ScreenCaptureScheduler`). Event-driven: app focus change, typing pause ≥2s, AX window-change, 60s passive floor. The old 6s fixed timer captured ~14k/day; the new scheme captures ~1k/day — fewer redundant frames, each marking a state transition.
-2. **Local OCR**. Apple Vision (~1.5s on-device). Text is saved to `~/.deja/raw_ocr/<date>/<id_key>.txt` before any further processing — a belt-and-suspenders for the Claude Vision shadow and for debugging.
-3. **Raw image sidecar**. The PNG is saved to `~/.deja/raw_images/<date>/<id_key>.png` so the Claude Vision path (which reads pixels, not OCR text) has the original.
-4. **Preprocess** (only if OCR ≥400 chars). `screenshot_preprocess.py` calls Gemini Flash-Lite to condense: strip chrome, structure as TYPE/WHAT/SALIENT_FACTS, or return None to SKIP entirely. Skipped screenshots are dropped.
+2. **Local OCR**. Apple Vision (~1.5s on-device). Text is saved to `~/.deja/raw_ocr/<date>/<id_key>.txt` before any further processing — preserved for OCR-only consumers and debugging.
+3. **Raw image sidecar**. The PNG is saved to `~/.deja/raw_images/<date>/<id_key>.png`. The integrate Claude Vision path reads these pixels directly — it does not consume the preprocess summary.
+4. **Preprocess** (only if OCR ≥400 chars). `screenshot_preprocess.py` calls Gemini Flash-Lite to condense the OCR text: strip chrome, structure as TYPE/WHAT/SALIENT_FACTS, or return None to SKIP entirely. Skipped screenshots are dropped. The condensed text is consumed by the OCR-only paths (e.g. command-mode `recent_screens` snapshot, debugging); the integrate cycle bypasses it and feeds Claude the raw PNG.
 5. **Persist** to `observations.jsonl` only after all of the above.
 
 ### 5.3 Thread context injection
@@ -337,12 +336,9 @@ Fires every 300 seconds (default; `INTEGRATE_INTERVAL` in `config.py`), or immed
 
 ### 6.2 Which LLM?
 
-Two production paths, controlled by `INTEGRATE_MODE` in `config.yaml`:
+Integrate is hardcoded to Claude Opus 4.7 via the local `claude` CLI subprocess (since 2026-04-17). `claude -p --input-format stream-json` receives raw screenshot PNGs as multimodal content blocks alongside the formatted signals — Claude reads the pixels directly, so layout, focus indicators, calendar grids, and bold/gray emphasis are all available without an OCR intermediate. There is no `INTEGRATE_MODE` flag and no Gemini fallback for integrate; the prior shadow A/B eval was concluded and removed.
 
-- **`gemini`** (legacy default) — Gemini Flash via the proxy. Fast, cheap, text-only.
-- **`claude_vision`** (current production, since 2026-04-17) — Claude Opus 4.7 via the local `claude` CLI with `--input-format stream-json`, receiving raw screenshot PNGs as multimodal content blocks. The demoted Gemini path runs as a parallel shadow for A/B eval; shadow outputs land in `~/.deja/integrate_shadow/`.
-
-See `src/deja/integrate_claude_vision.py` and `src/deja/llm_client.py:integrate_observations`.
+See `src/deja/integrate_claude_vision.py`.
 
 The prompt itself is `src/deja/default_assets/prompts/integrate.md` — 200+ lines. Load-bearing rules (numbered 1-9) include: only write what signals say, deletion requires explicit user retraction, person pages require structured grounding (email/phone/chat_label/existing ref), update-without-new-fact is banned, durable facts get promoted to entity pages.
 
@@ -754,7 +750,6 @@ deja trail                # recent audit entries
 ### 14.3 Disabling components
 
 - `deja cos disable` — stops cos from firing.
-- Edit `~/.deja/config.yaml` → set `integrate_mode: gemini` to revert from Claude Vision to Gemini.
 - Delete `~/.deja/chief_of_staff/enabled` — same as `cos disable`.
 
 ## 15. Development workflow

@@ -392,7 +392,7 @@ def _run_configure() -> None:
 def _run_health(indent: str = "") -> None:
     """Print current config + all startup checks, then exit."""
     from deja.health_check import run_health_checks
-    from deja.config import DEJA_HOME, WIKI_DIR, INTEGRATE_MODEL, VISION_MODEL, REFLECT_MODEL
+    from deja.config import DEJA_HOME, WIKI_DIR, VISION_MODEL, REFLECT_MODEL
     from deja.llm_client import DEJA_API_URL
 
     if not indent:
@@ -401,7 +401,7 @@ def _run_health(indent: str = "") -> None:
         print()
         print(f"  DEJA_HOME        = {DEJA_HOME}")
         print(f"  WIKI_DIR         = {WIKI_DIR}")
-        print(f"  INTEGRATE_MODEL  = {INTEGRATE_MODEL}")
+        print(f"  INTEGRATE_MODEL  = claude-opus-4-7 (claude -p subprocess)")
         print(f"  VISION_MODEL     = {VISION_MODEL}")
         print(f"  REFLECT_MODEL    = {REFLECT_MODEL}")
         print(f"  DEJA_API_URL     = {DEJA_API_URL}")
