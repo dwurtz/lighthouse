@@ -4,6 +4,16 @@ on:
   push:
     branches: [main]
     tags: ['v*']
+    # Only trigger when files that actually affect the build change.
+    # Docs / appcast / .md churn shouldn't burn macOS-runner minutes
+    # (10x multiplier). Tag pushes ignore paths and always build.
+    paths:
+      - 'menubar/**'
+      - 'src/**'
+      - 'pyproject.toml'
+      - 'Deja*.plist'
+      - 'Deja.xcodeproj/**'
+      - '.github/workflows/release.yml'
 
 jobs:
   build:
