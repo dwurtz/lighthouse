@@ -61,11 +61,13 @@ jobs:
             -ov -format UDZO \
             Deja.dmg
 
-      - name: Upload DMG as artifact (every push)
+      - name: Upload DMG as artifact (tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
         uses: actions/upload-artifact@v4
         with:
           name: Deja.dmg
           path: Deja.dmg
+          retention-days: 30
 
       - name: Sign DMG for Sparkle and update appcast
         if: startsWith(github.ref, 'refs/tags/v') && env.SPARKLE_KEY != ''
