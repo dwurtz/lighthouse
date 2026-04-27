@@ -4,7 +4,8 @@ Called by the Swift setup wizard to configure Deja without
 any terminal usage. The wizard walks through:
   1. Google Workspace OAuth (browser-based)
   2. User identity (name, email → self-page)
-  3. Wiki initialization (dirs, prompts, git)
+  3. Wiki initialization (dirs, git). Prompt templates load from the
+     bundled ``default_assets/prompts/`` at runtime; no per-user copy.
 
 All endpoints are idempotent — safe to call multiple times.
 """

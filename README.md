@@ -19,10 +19,13 @@ On first launch, Deja runs a guided setup:
 1. Verifies the `claude` CLI (Claude Code) is installed — required for
    the integrate cycle, which runs Claude Opus via `claude -p` subprocess
 2. Creates your identity self-page
-3. Copies default prompts into `~/Deja/prompts/`
-4. Auto-configures itself as an MCP server on Claude, Cursor, Windsurf,
+3. Auto-configures itself as an MCP server on Claude, Cursor, Windsurf,
    and any other detected AI clients
-5. Runs a health check
+4. Runs a health check
+
+Prompt templates ship inside the app bundle (`default_assets/prompts/`)
+and update automatically with each Sparkle release — no per-user copy
+in the wiki.
 
 Vision OCR preprocess, reflection, and chat run through Gemini via the
 Deja API server proxy by default — no user API key required. Developers
