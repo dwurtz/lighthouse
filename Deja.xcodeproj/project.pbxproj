@@ -59,7 +59,6 @@
 		D04A2CA44B55BAF02C462405 /* VoicePillWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 288F28AA7634EFC49D2A4FBB /* VoicePillWindow.swift */; };
 		D7010FC9AB7B7615FF6A22DD /* libsqlite3.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = 0F1C502F9FCA44E27F8C29E8 /* libsqlite3.tbd */; };
 		D733A004A5C7859EDF9CEB9A /* AVFoundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 0FDFEE7E2F0C96284BD047D2 /* AVFoundation.framework */; };
-		DB908483384C0A65398DF3CA /* client_secret.json in Resources */ = {isa = PBXBuildFile; fileRef = 92314037C78AB4CCDD214FC1 /* client_secret.json */; };
 		DF4C925C08946DBA9AB33171 /* tray-icon.png in Resources */ = {isa = PBXBuildFile; fileRef = C28EE339AA283B98EF4D7949 /* tray-icon.png */; };
 		E30B302F8BC897491D9B78F0 /* ServiceManagement.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A2EB423F071542766FE3CFF1 /* ServiceManagement.framework */; };
 		ECD9847C91199C7871F64AFF /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4706308135587855A7DE9E3 /* Models.swift */; };
@@ -131,7 +130,6 @@
 		89B3878E43A775210760356A /* ErrorPollingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ErrorPollingService.swift; sourceTree = "<group>"; };
 		8ACEA8F312916A3DB10B6583 /* BackendProcessManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackendProcessManager.swift; sourceTree = "<group>"; };
 		90144AB8D3E968559A8A162C /* ExpandedNotchPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExpandedNotchPanel.swift; sourceTree = "<group>"; };
-		92314037C78AB4CCDD214FC1 /* client_secret.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = client_secret.json; sourceTree = "<group>"; };
 		932FEC9780873CEA3EF0CCDA /* KeystrokeMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeystrokeMonitor.swift; sourceTree = "<group>"; };
 		944177DAA03864CD41A829C7 /* HotkeyManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HotkeyManager.swift; sourceTree = "<group>"; };
 		97830C6B7FBFBA33392DCD32 /* SignalHealthPanelWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignalHealthPanelWindow.swift; sourceTree = "<group>"; };
@@ -338,7 +336,6 @@
 			isa = PBXGroup;
 			children = (
 				F16A3FDFD508206B3D67DFE3 /* AppIcon.icns */,
-				92314037C78AB4CCDD214FC1 /* client_secret.json */,
 				C28EE339AA283B98EF4D7949 /* tray-icon.png */,
 			);
 			path = Resources;
@@ -466,7 +463,6 @@
 			buildActionMask = 2147483647;
 			files = (
 				721E485344FC645BA7C04B43 /* AppIcon.icns in Resources */,
-				DB908483384C0A65398DF3CA /* client_secret.json in Resources */,
 				DF4C925C08946DBA9AB33171 /* tray-icon.png in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
